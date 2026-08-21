@@ -12,6 +12,7 @@ import type {
   AvailabilityRow,
   BuildingVariantRow,
   BuildingsChainColumn,
+  BuildingsForeignSlotTypeOption,
   BuildingsOption,
   BuildingsRegionQuery,
   BuildingsRegionView,
@@ -254,41 +255,45 @@ const tierRowOf = (level: { level: number; primarySlotLevelRequirement: number }
   return Number.isFinite(requirement) ? Math.max(0, requirement - 1) : 0;
 };
 
-interface RegionChainContext {
-  cultureOfSubculture: (subculture: string) => string | undefined;
-  cultureOfFaction: (faction: string) => string | undefined;
-  slotTemplates: RegionSlot[];
-  availableChains: string[];
+/**
+ * Every slot template one `slot_sets_tables.type` offers, shaped like a region slot.
+ *
+ * A foreign slot belongs to a slot set, not to a region, so there is no region to name: the campaign
+ * is carried through because availability rows still filter on it, and the region is left empty.
+ */
+export const foreignSlotTemplatesForType = (
+  data: BuiltBuildingsData,
+  foreignSlotType: string,
+  campaign = "",
+): RegionSlot[] =>
+  (data.foreignSlotTemplatesByType?.[foreignSlotType] ?? []).map((entry) => ({
+    campaign,
+    region: "",
+    slotTemplate: entry.slotTemplate,
+    slotType: entry.slotType,
+    id: entry.id,
+    isForeignSlot: true,
+    slotSet: entry.slotSet,
+  }));
+
+interface SlotTemplateChains {
+  candidateChains: Set<string>;
   sourcesByChain: Map<string, string[]>;
+  /** Which slot types offered each chain, which is what marks its level 0 as a ruin. */
   slotTypesByChain: Map<string, Set<string>>;
   foreignSlotChains: Set<string>;
-  cultureChains: string[];
-  settlementTypeOptions: BuildingsOption[];
-  settlementTypeDisabled: boolean;
 }
 
 /**
- * Resolves the inexpensive part of a region's building board: its slot templates, candidate
- * chains, availability, and settlement types. The map tab uses this without constructing every
- * building tile for every region on the campaign map.
+ * Every chain a set of slot templates permits, before availability is considered.
+ *
+ * Shared by the region board and by the foreign slot type summary, so both read the same
+ * `slot_template_permitted_building_chains` rules - chain, chain set, super chain and the superchain
+ * junction table - rather than one of them growing its own approximation.
  */
-const resolveRegionChainContext = (data: BuiltBuildingsData, query: BuildingsRegionQuery): RegionChainContext => {
-  const cultureBySubculture = new Map(data.subcultures.map((entry) => [entry.key, entry.culture]));
-  const cultureByFaction = new Map(data.factions.map((entry) => [entry.key, entry.culture]));
-  const cultureOfSubculture = (subculture: string) => cultureBySubculture.get(subculture);
-  const cultureOfFaction = (faction: string) => cultureByFaction.get(faction);
-
-  // --- 1. region -> slot templates ------------------------------------------
-  const regionSlotTemplates = data.regionSlotTemplates[`${query.campaign}|${query.region}`] ?? [];
-  const foreignSlotTemplates = query.faction
-    ? (data.foreignRegionSlotTemplates[`${query.campaign}|${query.region}|${query.faction}`] ?? [])
-    : [];
-  const slotTemplates = [...regionSlotTemplates, ...foreignSlotTemplates];
-
-  // --- 2. slot templates -> candidate chains --------------------------------
+const collectChainsForSlotTemplates = (data: BuiltBuildingsData, slotTemplates: RegionSlot[]): SlotTemplateChains => {
   const candidateChains = new Set<string>();
   const sourcesByChain = new Map<string, string[]>();
-  /** Which slot types offered each chain, which is what marks its level 0 as a ruin. */
   const slotTypesByChain = new Map<string, Set<string>>();
   const foreignSlotChains = new Set<string>();
   const addChain = (chain: string, source: string, slotType: string, isForeignSlot: boolean) => {
@@ -348,6 +353,53 @@ const resolveRegionChainContext = (data: BuiltBuildingsData, query: BuildingsReg
   // the game may instead evaluate strictly in table order.
   for (const removal of removals) for (const chain of removal.chains) removeChain(chain);
 
+  return { candidateChains, sourcesByChain, slotTypesByChain, foreignSlotChains };
+};
+
+interface RegionChainContext {
+  cultureOfSubculture: (subculture: string) => string | undefined;
+  cultureOfFaction: (faction: string) => string | undefined;
+  slotTemplates: RegionSlot[];
+  availableChains: string[];
+  sourcesByChain: Map<string, string[]>;
+  slotTypesByChain: Map<string, Set<string>>;
+  foreignSlotChains: Set<string>;
+  cultureChains: string[];
+  settlementTypeOptions: BuildingsOption[];
+  settlementTypeDisabled: boolean;
+}
+
+/**
+ * Resolves the inexpensive part of a region's building board: its slot templates, candidate
+ * chains, availability, and settlement types. The map tab uses this without constructing every
+ * building tile for every region on the campaign map.
+ */
+const resolveRegionChainContext = (data: BuiltBuildingsData, query: BuildingsRegionQuery): RegionChainContext => {
+  const cultureBySubculture = new Map(data.subcultures.map((entry) => [entry.key, entry.culture]));
+  const cultureByFaction = new Map(data.factions.map((entry) => [entry.key, entry.culture]));
+  const cultureOfSubculture = (subculture: string) => cultureBySubculture.get(subculture);
+  const cultureOfFaction = (faction: string) => cultureByFaction.get(faction);
+
+  // --- 1. region -> slot templates ------------------------------------------
+  // Browsing a foreign slot type replaces the region entirely: its slots are granted by a slot set
+  // and can turn up under any region, so mixing them with one region's own slots would be a view of
+  // something the game never shows together.
+  const regionSlotTemplates = query.foreignSlotType
+    ? []
+    : (data.regionSlotTemplates[`${query.campaign}|${query.region}`] ?? []);
+  const foreignSlotTemplates = query.foreignSlotType
+    ? foreignSlotTemplatesForType(data, query.foreignSlotType, query.campaign)
+    : query.faction
+      ? (data.foreignRegionSlotTemplates[`${query.campaign}|${query.region}|${query.faction}`] ?? [])
+      : [];
+  const slotTemplates = [...regionSlotTemplates, ...foreignSlotTemplates];
+
+  // --- 2. slot templates -> candidate chains --------------------------------
+  const { candidateChains, sourcesByChain, slotTypesByChain, foreignSlotChains } = collectChainsForSlotTemplates(
+    data,
+    slotTemplates,
+  );
+
   // --- 3. availability -------------------------------------------------------
   const availableChains: string[] = [];
   for (const chain of candidateChains) {
@@ -365,11 +417,19 @@ const resolveRegionChainContext = (data: BuiltBuildingsData, query: BuildingsReg
   }
 
   // --- 4. settlement type ----------------------------------------------------
+  // A settlement type describes the settlement a slot belongs to. A foreign slot has no settlement
+  // of its own - it is granted inside whatever settlement the host region has - so browsing a type
+  // leaves the dropdown empty and section 5 skips the filter rather than hiding the ~50 of vanilla's
+  // 53 foreign chains that also name one of the Chaos Dwarf, daemon or Norsca settlement types.
   const settlementTypeKeys = new Set<string>();
-  for (const chain of availableChains) {
-    for (const binding of data.settlementTypeBindings[chain] ?? []) settlementTypeKeys.add(binding.settlementType);
+  if (!query.foreignSlotType) {
+    for (const chain of availableChains) {
+      for (const binding of data.settlementTypeBindings[chain] ?? []) settlementTypeKeys.add(binding.settlementType);
+    }
   }
-  const regionSettlements = data.startPosSettlements[`${query.campaign}|${query.region}`] ?? [];
+  const regionSettlements = query.foreignSlotType
+    ? []
+    : (data.startPosSettlements[`${query.campaign}|${query.region}`] ?? []);
   for (const settlement of regionSettlements) {
     if (settlement.settlementType) settlementTypeKeys.add(settlement.settlementType);
   }
@@ -379,7 +439,8 @@ const resolveRegionChainContext = (data: BuiltBuildingsData, query: BuildingsReg
     .sort((first, second) => first.key.localeCompare(second.key));
 
   const cultureChains = availableChains.filter((chain) => !isChainForAnotherCulture(data, chain, query.culture));
-  const settlementTypeDisabled = !cultureChains.some((chain) => (data.settlementTypeBindings[chain] ?? []).length > 0);
+  const settlementTypeDisabled =
+    !!query.foreignSlotType || !cultureChains.some((chain) => (data.settlementTypeBindings[chain] ?? []).length > 0);
 
   return {
     cultureOfSubculture,
@@ -394,6 +455,50 @@ const resolveRegionChainContext = (data: BuiltBuildingsData, query: BuildingsReg
     settlementTypeDisabled,
   };
 };
+
+/**
+ * The foreign slot types the panel can browse, each with the filter values its buildings name.
+ *
+ * The culture, subculture and faction dropdowns are narrowed to these while a type is selected: only
+ * values some chain of the type actually mentions - through a culture variant or through an
+ * availability row - can change what the board shows, and listing the game's ~900 factions when nine
+ * of them matter buries the ones that do.
+ */
+export const resolveForeignSlotTypes = (data: BuiltBuildingsData): BuildingsForeignSlotTypeOption[] =>
+  Object.keys(data.foreignSlotTemplatesByType ?? {})
+    .sort((first, second) => first.localeCompare(second))
+    .map((type) => {
+      const slots = foreignSlotTemplatesForType(data, type);
+      const { candidateChains } = collectChainsForSlotTemplates(data, slots);
+      const cultures = new Set<string>();
+      const subcultures = new Set<string>();
+      const factions = new Set<string>();
+      for (const chain of candidateChains) {
+        for (const levelKey of data.levelKeysByChain[chain] ?? []) {
+          for (const variant of data.variantsByLevel[levelKey] ?? []) {
+            if (variant.culture) cultures.add(variant.culture);
+            if (variant.subculture) subcultures.add(variant.subculture);
+            if (variant.faction) factions.add(variant.faction);
+          }
+        }
+        for (const setId of data.availabilitySetsByChain[chain] ?? []) {
+          for (const row of data.availabilitiesBySetId[setId] ?? []) {
+            if (row.culture) cultures.add(row.culture);
+            if (row.subCulture) subcultures.add(row.subCulture);
+            if (row.faction) factions.add(row.faction);
+          }
+        }
+      }
+      return {
+        key: type,
+        // `slot_sets_tables.type` points at `slot_set_types`, which carries no localised name.
+        localizedName: type,
+        slotTemplates: [...new Set(slots.map((slot) => slot.slotTemplate))].sort(),
+        cultures: [...cultures].sort(),
+        subcultures: [...subcultures].sort(),
+        factions: [...factions].sort(),
+      };
+    });
 
 export const resolveRegionSettlementTypes = (data: BuiltBuildingsData, query: BuildingsRegionQuery): string[] => {
   const { cultureChains } = resolveRegionChainContext(data, query);
@@ -424,10 +529,15 @@ export const resolveRegionBuildings = (data: BuiltBuildingsData, query: Building
     settlementTypeDisabled,
   } = resolveRegionChainContext(data, query);
 
-  const regionSettlements = data.startPosSettlements[`${query.campaign}|${query.region}`] ?? [];
-  const selectedSettlementType = query.settlementType;
+  // Nothing about a foreign slot is regional: no start pos settlement places its buildings, so no
+  // tile can be "already built in this region" either.
+  const regionSettlements = query.foreignSlotType
+    ? []
+    : (data.startPosSettlements[`${query.campaign}|${query.region}`] ?? []);
+  const selectedSettlementType = query.foreignSlotType ? undefined : query.settlementType;
   const visibleChains = availableChains
     .filter((chain) => {
+      if (query.foreignSlotType) return true;
       const bindings = data.settlementTypeBindings[chain];
       if (!selectedSettlementType) return !bindings || bindings.length === 0;
       if (!bindings || bindings.length === 0) return false;
@@ -451,8 +561,11 @@ export const resolveRegionBuildings = (data: BuiltBuildingsData, query: Building
     // level 0 is the razed state - the game's browser starts such a chain at level 1. Ordinary
     // buildings come from secondary slots and legitimately start at level 0
     // (wh_main_emp_barracks_1, wh_main_emp_resource_pottery_1), so this must not apply to them.
+    // Foreign slots are ordinary in exactly the same way: every vanilla foreign chain starts at
+    // level 0 and none of them is a settlement, so a `foreign` slot type must not make one look razed.
     const slotTypes = slotTypesByChain.get(chainKey);
-    const isSettlementOrPortChain = !!slotTypes && slotTypes.size > 0 && !slotTypes.has("secondary");
+    const isSettlementOrPortChain =
+      !!slotTypes && slotTypes.size > 0 && !slotTypes.has("secondary") && !slotTypes.has("foreign");
     // `building_units_allowed` often repeats an unlock on every higher level that retains it. The
     // panel describes what each level newly adds, so remember units already introduced lower down
     // this chain. This is deliberately reset per chain: the same unit can be a new unlock elsewhere.
@@ -590,13 +703,25 @@ export const resolveRegionBuildings = (data: BuiltBuildingsData, query: Building
     explicitPairs.add(pair);
     edges.push({ fromLevelKey: lower, toLevelKey: higher, raw: upgrade, isImplicit: false });
   }
+  // An implicit edge fills in a chain the upgrade junction says nothing about, by assuming each
+  // level upgrades into the next one listed. A branching chain breaks that assumption twice over, so
+  // the guess stands down wherever the junction table has already spoken for either end:
+  // `wh3_main_underdeep_dwf_grudges` lists `_2` and `_2_a` as two alternatives on one tier - joining
+  // them would draw a sideways arrow between siblings - and `_2_a` is a dead end whose successor
+  // `_3` is already reached explicitly from `_2`.
+  const explicitSources = new Set(edges.map((edge) => edge.fromLevelKey));
+  const explicitTargets = new Set(edges.map((edge) => edge.toLevelKey));
   for (const chainKey of visibleChains) {
     const levelKeys = (data.levelKeysByChain[chainKey] ?? []).filter((levelKey) => visibleLevelKeys.has(levelKey));
     for (let index = 0; index + 1 < levelKeys.length; index++) {
-      const pair = `${levelKeys[index]}->${levelKeys[index + 1]}`;
+      const [from, to] = [levelKeys[index], levelKeys[index + 1]];
+      const pair = `${from}->${to}`;
       if (explicitPairs.has(pair)) continue;
+      // Two levels the DB gives the same level number are alternatives, not a sequence.
+      if ((data.levelsByKey[from]?.level ?? 0) === (data.levelsByKey[to]?.level ?? 0)) continue;
+      if (explicitSources.has(from) || explicitTargets.has(to)) continue;
       explicitPairs.add(pair);
-      edges.push({ fromLevelKey: levelKeys[index], toLevelKey: levelKeys[index + 1], isImplicit: true });
+      edges.push({ fromLevelKey: from, toLevelKey: to, isImplicit: true });
     }
   }
 

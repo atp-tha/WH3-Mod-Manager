@@ -39,6 +39,7 @@ const catalog: BuildingsCatalog = {
   subcultures: [],
   factions: [],
   settlementTypes: [],
+  foreignSlotTypes: [],
   units: [
     { key: "unit_a", localizedName: "Unit A" },
     { key: "unit_b", localizedName: "Unit B" },

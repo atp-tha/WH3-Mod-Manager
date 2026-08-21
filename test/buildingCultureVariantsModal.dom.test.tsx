@@ -58,6 +58,7 @@ const catalog: BuildingsCatalog = {
     },
   ],
   settlementTypes: [],
+  foreignSlotTypes: [],
   units: [],
   unitGroups: [],
   unitGroupsByUnit: {},

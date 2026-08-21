@@ -117,6 +117,12 @@ describe("computeBoardLayout", () => {
     expect(settlement.cells[0].gridRow).toBe(barracks.cells[0].gridRow);
   });
 
+  it("gives an ordinary chain one column", () => {
+    const layout = computeBoardLayout(view([band("set", [{ chainKey: "a", tiles: [tile("a1", 0), tile("a2", 1)] }])]));
+    expect(layout.bands[0].columns[0].width).toBe(1);
+    expect(layout.bands[0].columnCount).toBe(1);
+  });
+
   it("numbers columns from one within each band", () => {
     const layout = computeBoardLayout(
       view([
@@ -129,6 +135,54 @@ describe("computeBoardLayout", () => {
     );
     expect(layout.bands[0].columns.map((column) => column.gridColumn)).toEqual([1, 2]);
     expect(layout.bands[1].columns.map((column) => column.gridColumn)).toEqual([1]);
+  });
+
+  it("puts two levels of one tier side by side rather than in the same cell", () => {
+    // A branching chain: `a2` and `a2_a` are alternatives on tier 1, as vanilla's underdeep grudges
+    // chain is. Stacking them in one grid cell hid one behind the other.
+    const layout = computeBoardLayout(
+      view([band("set", [{ chainKey: "a", tiles: [tile("a1", 0), tile("a2", 1), tile("a2_a", 1), tile("a3", 2)] }])]),
+    );
+    const column = layout.bands[0].columns[0];
+    expect(column.width).toBe(2);
+    expect(column.cells.map((cell) => [cell.tile.levelKey, cell.gridRow, cell.gridColumn])).toEqual([
+      ["a1", 3, 1],
+      ["a2", 2, 1],
+      ["a2_a", 2, 2],
+      ["a3", 1, 1],
+    ]);
+    expect(layout.bands[0].columnCount).toBe(2);
+  });
+
+  it("centres a narrower tier under the widest one", () => {
+    const layout = computeBoardLayout(
+      view([
+        band("set", [{ chainKey: "a", tiles: [tile("a1", 0), tile("a2_a", 1), tile("a2_b", 1), tile("a2_c", 1)] }]),
+      ]),
+    );
+    const columns = Object.fromEntries(
+      layout.bands[0].columns[0].cells.map((cell) => [cell.tile.levelKey, cell.gridColumn]),
+    );
+    // The trunk sits between its three branches instead of hugging the left edge.
+    expect(columns).toEqual({ a1: 2, a2_a: 1, a2_b: 2, a2_c: 3 });
+  });
+
+  it("shifts the chains after a branching one across the columns it claimed", () => {
+    const layout = computeBoardLayout(
+      view([
+        band("set", [
+          { chainKey: "a", tiles: [tile("a1", 0)] },
+          { chainKey: "wide", tiles: [tile("w1", 0), tile("w1_a", 0), tile("w1_b", 0)] },
+          { chainKey: "b", tiles: [tile("b1", 0)] },
+        ]),
+      ]),
+    );
+    expect(layout.bands[0].columns.map((column) => [column.chainKey, column.gridColumn, column.width])).toEqual([
+      ["a", 1, 1],
+      ["wide", 2, 3],
+      ["b", 5, 1],
+    ]);
+    expect(layout.bands[0].columnCount).toBe(5);
   });
 
   it("exposes the band colour as an rgb triple for the CSS variable", () => {

@@ -6,6 +6,7 @@ import selectStyle from "../../styles/selectStyle";
 import type {
   BuildingsCatalog,
   BuildingsFactionOption,
+  BuildingsForeignSlotTypeOption,
   BuildingsOption,
   BuildingsRegionQuery,
 } from "../../buildingsData/types";
@@ -126,6 +127,29 @@ const filterSelectStyle = {
 /** Above this many options the menu is virtualised; regions and factions are well past it. */
 const WINDOW_THRESHOLD = 60;
 
+/**
+ * The query change that switching foreign slot type implies.
+ *
+ * A type's dropdowns only offer the culture, subculture and faction its own buildings name, so a
+ * selection the new type never mentions has to go rather than silently filter the board down to
+ * nothing. Clearing the culture clears what hangs off it, the same way the culture dropdown does.
+ */
+export const foreignSlotTypeQueryPatch = (
+  option: BuildingsForeignSlotTypeOption | undefined,
+  query: BuildingsRegionQuery,
+): Partial<BuildingsRegionQuery> => {
+  const keep = (value: string | undefined, allowed: string[]) =>
+    value && (!option || allowed.includes(value)) ? value : undefined;
+  const culture = keep(query.culture, option?.cultures ?? []);
+  return {
+    foreignSlotType: option?.key,
+    settlementType: undefined,
+    culture,
+    subculture: culture ? keep(query.subculture, option?.subcultures ?? []) : undefined,
+    faction: culture ? keep(query.faction, option?.factions ?? []) : undefined,
+  };
+};
+
 export const firstRegionForCampaign = (catalog: BuildingsCatalog, campaign: string) =>
   catalog.regions.find((region) => region.campaigns.includes(campaign))?.key ??
   catalog.regions.find((region) => region.campaigns.length === 0)?.key ??
@@ -147,6 +171,9 @@ const FilterSelect = ({
   <label className={`${labelClass}${disabled ? " cursor-not-allowed opacity-60" : ""}`} style={selectWidth}>
     {label}
     <WindowedSelect
+      // The visible label is the wrapping `<label>`'s own text, which a screen reader reads together
+      // with everything react-select renders inside it. Naming the control directly keeps it short.
+      aria-label={label}
       windowThreshold={WINDOW_THRESHOLD}
       styles={filterSelectStyle}
       options={options}
@@ -197,6 +224,18 @@ const BuildingsFilters = memo(
     );
     const campaignOptions = useMemo(() => toOptions(catalog.campaigns), [catalog.campaigns]);
 
+    // The selected type, when one is: while it is set the board is showing foreign slot buildings
+    // instead of a region's, and the culture/subculture/faction dropdowns narrow to what it names.
+    const foreignSlotType = useMemo(
+      () => catalog.foreignSlotTypes.find((entry) => entry.key === query.foreignSlotType),
+      [catalog.foreignSlotTypes, query.foreignSlotType],
+    );
+    const foreignSlotTypeOptions = useMemo(
+      () => [noneOption, ...toOptions(catalog.foreignSlotTypes)],
+      [catalog.foreignSlotTypes, noneOption],
+    );
+    const isForeignSlotMode = !!foreignSlotType;
+
     // Only regions the selected campaign actually places slot templates in are pickable; a region
     // with no campaigns recorded stays listed rather than vanishing.
     const regionOptions = useMemo(
@@ -210,19 +249,29 @@ const BuildingsFilters = memo(
     );
 
     const cultureOptions = useMemo(
-      () => [noneOption, ...toOptions(catalog.cultures, true)],
-      [catalog.cultures, noneOption],
+      () => [
+        noneOption,
+        ...toOptions(
+          catalog.cultures.filter((entry) => !foreignSlotType || foreignSlotType.cultures.includes(entry.key)),
+          true,
+        ),
+      ],
+      [catalog.cultures, foreignSlotType, noneOption],
     );
 
     const subcultureOptions = useMemo(
       () => [
         noneOption,
         ...toOptions(
-          catalog.subcultures.filter((entry) => !query.culture || entry.culture === query.culture),
+          catalog.subcultures.filter(
+            (entry) =>
+              (!query.culture || entry.culture === query.culture) &&
+              (!foreignSlotType || foreignSlotType.subcultures.includes(entry.key)),
+          ),
           true,
         ),
       ],
-      [catalog.subcultures, noneOption, query.culture],
+      [catalog.subcultures, foreignSlotType, noneOption, query.culture],
     );
 
     const factionOptions = useMemo(
@@ -232,11 +281,12 @@ const BuildingsFilters = memo(
           catalog.factions.filter(
             (entry) =>
               (!query.subculture || entry.subculture === query.subculture) &&
-              (!query.culture || entry.culture === query.culture),
+              (!query.culture || entry.culture === query.culture) &&
+              (!foreignSlotType || foreignSlotType.factions.includes(entry.key)),
           ),
         ),
       ],
-      [catalog.factions, noneOption, query.culture, query.subculture],
+      [catalog.factions, foreignSlotType, noneOption, query.culture, query.subculture],
     );
 
     const settlementOptions = useMemo(
@@ -280,18 +330,36 @@ const BuildingsFilters = memo(
           label={localized.buildingsRegion || "Region"}
           options={regionOptions}
           value={query.region}
+          disabled={isForeignSlotMode}
           onSelect={(region) => onQueryChange({ region, settlementType: undefined })}
         />
 
         <button
           type="button"
           onClick={() => onOpenMap(query.campaign, query.region)}
-          className="mb-0.5 flex h-9 w-9 items-center justify-center rounded border border-gray-700 bg-gray-900 text-gray-300 hover:border-blue-500 hover:bg-gray-800 hover:text-white"
+          disabled={isForeignSlotMode}
+          className="mb-0.5 flex h-9 w-9 items-center justify-center rounded border border-gray-700 bg-gray-900 text-gray-300 hover:border-blue-500 hover:bg-gray-800 hover:text-white disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:border-gray-700 disabled:hover:bg-gray-900 disabled:hover:text-gray-300"
           title={localized.buildingsChooseRegionOnMap || "Choose region on map"}
           aria-label={localized.buildingsChooseRegionOnMap || "Choose region on map"}
         >
           <FaMapMarkedAlt size="1rem" />
         </button>
+
+        {foreignSlotTypeOptions.length > 1 && (
+          <FilterSelect
+            label={localized.buildingsForeignSlotType || "Foreign slot type"}
+            options={foreignSlotTypeOptions}
+            value={query.foreignSlotType}
+            onSelect={(type) =>
+              onQueryChange(
+                foreignSlotTypeQueryPatch(
+                  catalog.foreignSlotTypes.find((entry) => entry.key === type),
+                  query,
+                ),
+              )
+            }
+          />
+        )}
 
         {settlementOptions.length > 0 && (
           <FilterSelect
@@ -422,6 +490,15 @@ const BuildingsFilters = memo(
             </div>
           )}
         </div>
+
+        {foreignSlotType && (
+          <p className="basis-full text-xs text-amber-300">
+            {(
+              localized.buildingsForeignSlotNotRegional ||
+              "{{type}} slots are granted by a slot set, not by a region: these buildings can appear in any region, so the region is ignored."
+            ).replace("{{type}}", foreignSlotType.key)}
+          </p>
+        )}
       </div>
     );
   },

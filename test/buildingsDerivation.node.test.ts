@@ -4,6 +4,7 @@ import { buildBuildingsData } from "../src/buildingsData/data";
 import {
   expandChainSet,
   NO_SET_KEY,
+  resolveForeignSlotTypes,
   resolveRegionBuildings,
   resolveRegionSettlementTypes,
   toRoman,
@@ -799,6 +800,80 @@ describe("resolveRegionBuildings: upgrade edges", () => {
     const edges = resolveRegionBuildings(data, query()).edges.filter((edge) => !edge.isImplicit);
     expect(edges).toEqual([]);
   });
+
+  describe("a branching chain", () => {
+    /**
+     * `a_2` and `a_2_alt` are two alternatives on level 1, both reached from `a_1`, and only `a_2`
+     * carries on to `a_3` - the shape of vanilla's `wh3_main_underdeep_dwf_grudges`.
+     */
+    const branching = () =>
+      build({
+        building_levels_tables: [
+          { level_name: "a_1", chain: "chain_a", level: "0", visible_in_ui: "true" },
+          { level_name: "a_2", chain: "chain_a", level: "1", visible_in_ui: "true" },
+          { level_name: "a_2_alt", chain: "chain_a", level: "1", visible_in_ui: "true" },
+          { level_name: "a_3", chain: "chain_a", level: "2", visible_in_ui: "true" },
+        ],
+        building_culture_variants_tables: [
+          { building: "a_1", culture: "emp", subculture: "", faction: "", disables: "false" },
+          { building: "a_2", culture: "emp", subculture: "", faction: "", disables: "false" },
+          { building: "a_2_alt", culture: "emp", subculture: "", faction: "", disables: "false" },
+          { building: "a_3", culture: "emp", subculture: "", faction: "", disables: "false" },
+        ],
+        building_upgrades_junction_tables: [
+          { from: "a_1", to: "a_2" },
+          { from: "a_1", to: "a_2_alt" },
+          { from: "a_2", to: "a_3" },
+        ],
+      });
+
+    const chainEdges = (view: ReturnType<typeof resolveRegionBuildings>) =>
+      view.edges
+        .filter((edge) => edge.fromLevelKey.startsWith("a_"))
+        .map((edge) => `${edge.fromLevelKey}->${edge.toLevelKey}${edge.isImplicit ? " (implicit)" : ""}`)
+        .sort();
+
+    it("draws the fork the junction table describes and invents nothing else", () => {
+      // Without this the level list `a_1, a_2, a_2_alt, a_3` also produced a sideways arrow between
+      // the two siblings and a second route into `a_3` from the dead-end branch.
+      expect(chainEdges(resolveRegionBuildings(branching(), query()))).toEqual([
+        "a_1->a_2",
+        "a_1->a_2_alt",
+        "a_2->a_3",
+      ]);
+    });
+
+    it("never joins two levels the DB gives the same level number", () => {
+      const data = build({
+        building_levels_tables: [
+          { level_name: "a_1", chain: "chain_a", level: "0", visible_in_ui: "true" },
+          { level_name: "a_2", chain: "chain_a", level: "0", visible_in_ui: "true" },
+        ],
+        building_culture_variants_tables: [
+          { building: "a_1", culture: "emp", subculture: "", faction: "", disables: "false" },
+          { building: "a_2", culture: "emp", subculture: "", faction: "", disables: "false" },
+        ],
+      });
+      expect(chainEdges(resolveRegionBuildings(data, query()))).toEqual([]);
+    });
+
+    it("still fills in a step the junction table leaves out", () => {
+      const data = build({
+        building_levels_tables: [
+          { level_name: "a_1", chain: "chain_a", level: "0", visible_in_ui: "true" },
+          { level_name: "a_2", chain: "chain_a", level: "1", visible_in_ui: "true" },
+          { level_name: "a_3", chain: "chain_a", level: "2", visible_in_ui: "true" },
+        ],
+        building_culture_variants_tables: [
+          { building: "a_1", culture: "emp", subculture: "", faction: "", disables: "false" },
+          { building: "a_2", culture: "emp", subculture: "", faction: "", disables: "false" },
+          { building: "a_3", culture: "emp", subculture: "", faction: "", disables: "false" },
+        ],
+        building_upgrades_junction_tables: [{ from: "a_1", to: "a_2" }],
+      });
+      expect(chainEdges(resolveRegionBuildings(data, query()))).toEqual(["a_1->a_2", "a_2->a_3 (implicit)"]);
+    });
+  });
 });
 
 describe("resolveRegionBuildings: existing buildings", () => {
@@ -899,5 +974,157 @@ describe("resolveRegionBuildings: hidden levels", () => {
     });
     expect(levelKeysIn(resolveRegionBuildings(data, query()))).not.toContain("a_1");
     expect(levelKeysIn(resolveRegionBuildings(data, query({ includeHiddenInUi: true })))).toContain("a_1");
+  });
+});
+
+describe("foreign slot types", () => {
+  /**
+   * Two slot sets of one type, plus a legacy set typed only by its key. `chain_b` is reachable only
+   * through the type's own templates, `chain_a` only through the region's.
+   */
+  const foreignTables = () => ({
+    slot_sets_tables: [
+      { key: "set_a", type: "CULT" },
+      { key: "set_b", type: "CULT" },
+      { key: "set_allied", type: "ALLIED" },
+    ],
+    slot_set_items_tables: [
+      { id: "1", slot_set: "set_a", slot_template: "tmpl_cult", slot_type: "foreign" },
+      { id: "2", slot_set: "set_b", slot_template: "tmpl_cult", slot_type: "foreign" },
+      { id: "3", slot_set: "set_b", slot_template: "tmpl_cult_magus", slot_type: "foreign" },
+      { id: "4", slot_set: "set_allied", slot_template: "tmpl_allied", slot_type: "foreign" },
+    ],
+    slot_template_permitted_building_chains_tables: [
+      { slot_template: "tmpl_main", chain: "chain_a", chain_set: "", super_chain: "", remove: "false" },
+      { slot_template: "tmpl_cult", chain: "chain_b", chain_set: "", super_chain: "", remove: "false" },
+      { slot_template: "tmpl_cult_magus", chain: "chain_c", chain_set: "", super_chain: "", remove: "false" },
+    ],
+  });
+
+  describe("resolveForeignSlotTypes", () => {
+    it("combines the templates of every set of one type", () => {
+      const types = resolveForeignSlotTypes(build(foreignTables()));
+      expect(types.map((type) => type.key)).toEqual(["ALLIED", "CULT"]);
+      expect(types.find((type) => type.key === "CULT")?.slotTemplates).toEqual(["tmpl_cult", "tmpl_cult_magus"]);
+    });
+
+    it("offers only the culture, subculture and faction its own buildings name", () => {
+      const types = resolveForeignSlotTypes(
+        build({
+          ...foreignTables(),
+          building_culture_variants_tables: [
+            { building: "a_1", culture: "emp", subculture: "", faction: "", disables: "false" },
+            { building: "a_2", culture: "emp", subculture: "", faction: "", disables: "false" },
+            { building: "b_1", culture: "emp", subculture: "", faction: "", disables: "false" },
+            { building: "c_1", culture: "dwf", subculture: "dwf_sub", faction: "", disables: "false" },
+          ],
+          building_chain_availability_sets_tables: [{ building_chain: "chain_b", id: "set_b_avail" }],
+          building_chain_availabilities_tables: [
+            { id: "1", set_id: "set_b_avail", culture: "", sub_culture: "", faction: "emp_faction", campaign: "" },
+          ],
+        }),
+      );
+
+      const cult = types.find((type) => type.key === "CULT");
+      // `emp` and `emp_faction` come from chain_b's variant and availability rows, `dwf`/`dwf_sub`
+      // from chain_c's variant. chain_a is the region's, and never contributes.
+      expect(cult).toMatchObject({
+        cultures: ["dwf", "emp"],
+        subcultures: ["dwf_sub"],
+        factions: ["emp_faction"],
+      });
+      expect(types.find((type) => type.key === "ALLIED")).toMatchObject({
+        cultures: [],
+        subcultures: [],
+        factions: [],
+      });
+    });
+  });
+
+  describe("resolveRegionBuildings", () => {
+    const foreignQuery = (overrides: Partial<BuildingsRegionQuery> = {}) =>
+      query({ foreignSlotType: "CULT", culture: undefined, ...overrides });
+
+    it("shows the type's chains instead of the region's", () => {
+      const view = resolveRegionBuildings(build(foreignTables()), foreignQuery());
+      expect(chainKeysIn(view)).toEqual(["chain_b", "chain_c"]);
+      expect(view.slotTemplates.map((slot) => slot.slotTemplate)).toEqual(["tmpl_cult", "tmpl_cult_magus"]);
+      expect(view.slotTemplates.every((slot) => slot.isForeignSlot && slot.region === "")).toBe(true);
+      expect(
+        view.bands
+          .flatMap((band) => band.columns.flatMap((column) => column.tiles))
+          .every((tile) => tile.isForeignSlot),
+      ).toBe(true);
+    });
+
+    it("keeps level 0, which a foreign slot's chains start at", () => {
+      const view = resolveRegionBuildings(build(foreignTables()), foreignQuery());
+      const tile = view.bands
+        .flatMap((band) => band.columns.flatMap((column) => column.tiles))
+        .find((entry) => entry.levelKey === "b_1");
+      expect(tile).toMatchObject({ romanNumeral: "I", isSettlementOrPort: false, isRuin: false });
+    });
+
+    it("still applies availability and the culture filter", () => {
+      const data = build({
+        ...foreignTables(),
+        building_culture_variants_tables: [
+          { building: "a_1", culture: "emp", subculture: "", faction: "", disables: "false" },
+          { building: "a_2", culture: "emp", subculture: "", faction: "", disables: "false" },
+          { building: "b_1", culture: "dwf", subculture: "", faction: "", disables: "false" },
+          { building: "c_1", culture: "emp", subculture: "", faction: "", disables: "false" },
+        ],
+        building_chain_availability_sets_tables: [{ building_chain: "chain_b", id: "set_b_avail" }],
+        building_chain_availabilities_tables: [
+          { id: "1", set_id: "set_b_avail", culture: "dwf", sub_culture: "", faction: "", campaign: "" },
+        ],
+      });
+
+      // chain_c's only level names Empire, so it is somebody else's chain under a Dwarf filter.
+      expect(chainKeysIn(resolveRegionBuildings(data, foreignQuery({ culture: "dwf" })))).toEqual(["chain_b"]);
+      // chain_b is Dwarf-only by availability.
+      expect(chainKeysIn(resolveRegionBuildings(data, foreignQuery({ culture: "emp" })))).toEqual(["chain_c"]);
+      expect(chainKeysIn(resolveRegionBuildings(data, foreignQuery()))).toEqual(["chain_b", "chain_c"]);
+    });
+
+    it("ignores settlement types, which belong to the settlement a foreign slot is granted in", () => {
+      const data = build({
+        ...foreignTables(),
+        settlement_type_to_building_chains_junctions_tables: [
+          { building_chain: "chain_b", settlement_type: "capital", exclude: "false" },
+        ],
+      });
+
+      // In a region, a chain bound to a settlement type is drawn only once that type is selected.
+      expect(chainKeysIn(resolveRegionBuildings(data, query()))).not.toContain("chain_b");
+
+      const view = resolveRegionBuildings(data, foreignQuery());
+      expect(chainKeysIn(view)).toContain("chain_b");
+      expect(view.settlementTypeOptions).toEqual([]);
+      expect(view.settlementTypeDisabled).toBe(true);
+    });
+
+    it("marks nothing as already built, since no region places a foreign building", () => {
+      const data = build({
+        ...foreignTables(),
+        start_pos_regions_tables: [{ id: "1", region: REGION, campaign: CAMPAIGN }],
+        start_pos_settlements_tables: [{ settlement_id: "s", region: "1", building1: "b_1" }],
+      });
+
+      expect(resolveRegionBuildings(data, query()).existingBuildings).toEqual(["b_1"]);
+      const view = resolveRegionBuildings(data, foreignQuery());
+      expect(view.existingBuildings).toEqual([]);
+      expect(
+        view.bands
+          .flatMap((band) => band.columns.flatMap((column) => column.tiles))
+          .every((tile) => !tile.isExistingInRegion),
+      ).toBe(true);
+    });
+
+    it("shows nothing for a type no slot set defines", () => {
+      const view = resolveRegionBuildings(build(foreignTables()), foreignQuery({ foreignSlotType: "GONE" }));
+      expect(view.bands).toEqual([]);
+      expect(view.slotTemplates).toEqual([]);
+    });
   });
 });

@@ -250,6 +250,50 @@ describe("buildBuildingsData", () => {
   });
 });
 
+describe("foreign slot sets", () => {
+  it("combines every slot set of one type and drops the templates they repeat", () => {
+    const data = buildBuildingsData(
+      {
+        slot_sets_tables: [
+          { key: "set_a", type: "CULT" },
+          { key: "set_b", type: "CULT" },
+          { key: "set_c", type: "ALLIED" },
+        ],
+        slot_set_items_tables: [
+          { id: "1", slot_set: "set_a", slot_template: "tmpl_cult", slot_type: "foreign" },
+          { id: "2", slot_set: "set_b", slot_template: "tmpl_cult", slot_type: "foreign" },
+          { id: "3", slot_set: "set_b", slot_template: "tmpl_cult_magus", slot_type: "foreign" },
+          { id: "4", slot_set: "set_c", slot_template: "tmpl_allied", slot_type: "foreign" },
+        ],
+      },
+      noLoc,
+    );
+
+    expect(Object.keys(data.foreignSlotTemplatesByType).sort()).toEqual(["ALLIED", "CULT"]);
+    expect(data.foreignSlotTemplatesByType.CULT.map((entry) => entry.slotTemplate)).toEqual([
+      "tmpl_cult",
+      "tmpl_cult_magus",
+    ]);
+    expect(data.foreignSlotTemplatesByType.ALLIED).toEqual([
+      { type: "ALLIED", slotSet: "set_c", slotTemplate: "tmpl_allied", slotType: "foreign", id: "4" },
+    ]);
+  });
+
+  it("files a set from a schema version without a type column under its own key", () => {
+    const data = buildBuildingsData(
+      {
+        slot_sets_tables: [{ key: "set_legacy", use_discoverability_feature: "true" }],
+        slot_set_items_tables: [
+          { id: "1", slot_set: "set_legacy", slot_template: "tmpl_legacy", slot_type: "foreign" },
+        ],
+      },
+      noLoc,
+    );
+
+    expect(data.foreignSlotTemplatesByType.set_legacy.map((entry) => entry.slotTemplate)).toEqual(["tmpl_legacy"]);
+  });
+});
+
 describe("ESF-derived startpos slot templates", () => {
   it("accepts rows without the ESF instance/index column", () => {
     const data = buildBuildingsData(

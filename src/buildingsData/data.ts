@@ -28,6 +28,7 @@ import type {
   BuildingsTableRows,
   BuiltBuildingsData,
   ChainSetItem,
+  ForeignSlotTemplate,
   PermittedChainRow,
   RegionSlot,
   SettlementTypeBinding,
@@ -446,6 +447,31 @@ export const buildBuildingsData = (tables: BuildingsTableRows, getLoc: Buildings
       slotType: str(row, "slot_type"),
     });
   }
+  // The same slot sets, grouped by their `type` rather than by the region that grants them: every
+  // set of one type offers the same kind of foreign building (an under-empire, a cult, an outpost),
+  // so combining them is what makes a type browsable without picking a region at all. Vanilla's
+  // MINOR_CULT is 41 sets over one template; ALLIED is one set.
+  const slotSetTypes: Record<string, string> = {};
+  for (const row of rowsOf("slot_sets_tables")) {
+    const key = str(row, "key");
+    // Older schema versions of the table have no `type` column at all. Such a set is its own type,
+    // which keeps it reachable rather than collapsing every one of them into a single blank entry.
+    if (key) slotSetTypes[key] = str(row, "type") || key;
+  }
+  const foreignSlotTemplatesByType: Record<string, ForeignSlotTemplate[]> = {};
+  for (const [slotSet, items] of Object.entries(slotItemsBySet)) {
+    const type = slotSetTypes[slotSet] || slotSet;
+    const bucket = (foreignSlotTemplatesByType[type] ||= []);
+    for (const item of items) {
+      // Sets of one type routinely repeat a template - they differ only in the building each starts
+      // with - and the board would otherwise walk the same permitted chains once per set.
+      if (bucket.some((entry) => entry.slotTemplate === item.slotTemplate && entry.slotType === item.slotType)) {
+        continue;
+      }
+      bucket.push({ type, slotSet, slotTemplate: item.slotTemplate, slotType: item.slotType, id: item.id });
+    }
+  }
+
   const foreignRegionSlotTemplates: Record<string, RegionSlot[]> = {};
   for (const row of rowsOf("start_pos_region_foreign_slots_tables")) {
     const campaign = str(row, "campaign");
@@ -462,6 +488,7 @@ export const buildBuildingsData = (tables: BuildingsTableRows, getLoc: Buildings
         slotType: item.slotType,
         id: item.id,
         isForeignSlot: true,
+        slotSet,
       });
     }
   }
@@ -828,6 +855,7 @@ export const buildBuildingsData = (tables: BuildingsTableRows, getLoc: Buildings
     superChainsByTemplate,
     regionSlotTemplates,
     foreignRegionSlotTemplates,
+    foreignSlotTemplatesByType,
     startPosSettlements,
     availabilitySetsByChain,
     availabilitiesBySetId,

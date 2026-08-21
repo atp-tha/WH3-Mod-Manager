@@ -416,7 +416,14 @@ const BuildingsTab = memo(({ isActive = true }: BuildingsTabProps) => {
           const region = regionsForCampaign.some((option) => option.key === previous.region)
             ? previous.region
             : (regionsForCampaign[0]?.key ?? previous.region);
-          return { ...previous, campaign, region };
+          // A foreign slot type comes from a slot set a mod may have just been switched off with.
+          // Leaving it selected would show an empty board with no way to tell why.
+          const foreignSlotType = response.catalog!.foreignSlotTypes.some(
+            (option) => option.key === previous.foreignSlotType,
+          )
+            ? previous.foreignSlotType
+            : undefined;
+          return { ...previous, campaign, region, foreignSlotType };
         });
       })
       .catch((reason) => {
@@ -447,6 +454,9 @@ const BuildingsTab = memo(({ isActive = true }: BuildingsTabProps) => {
         ...previous,
         campaign: mapSelectedRegion.campaign,
         region: mapSelectedRegion.region,
+        // Picking a region on the map is a request for that region's board, which foreign slot
+        // buildings - granted by a slot set rather than by any region - would otherwise replace.
+        foreignSlotType: undefined,
         settlementType: undefined,
       };
     });

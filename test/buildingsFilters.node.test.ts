@@ -3,9 +3,15 @@ import { describe, expect, it } from "vitest";
 import {
   buildFactionOptions,
   firstRegionForCampaign,
+  foreignSlotTypeQueryPatch,
   sortLocalizedOptions,
 } from "../src/components/buildings/BuildingsFilters";
-import type { BuildingsCatalog, BuildingsFactionOption } from "../src/buildingsData/types";
+import type {
+  BuildingsCatalog,
+  BuildingsFactionOption,
+  BuildingsForeignSlotTypeOption,
+  BuildingsRegionQuery,
+} from "../src/buildingsData/types";
 
 const catalog = {
   regions: [
@@ -98,5 +104,60 @@ describe("sortLocalizedOptions", () => {
         { key: "localized_a", localizedName: "Alpha" },
       ]).map((option) => option.key),
     ).toEqual(["localized_a", "localized_b", "missing_a", "missing_z"]);
+  });
+});
+
+describe("foreignSlotTypeQueryPatch", () => {
+  const cult: BuildingsForeignSlotTypeOption = {
+    key: "CULT",
+    localizedName: "CULT",
+    slotTemplates: ["tmpl_cult"],
+    cultures: ["kho"],
+    subcultures: ["kho_sub"],
+    factions: ["kho_faction"],
+  };
+  const query: BuildingsRegionQuery = {
+    campaign: "camp",
+    region: "region",
+    settlementType: "capital",
+    culture: "kho",
+    subculture: "kho_sub",
+    faction: "kho_faction",
+  };
+
+  it("keeps filters the type's own buildings name", () => {
+    expect(foreignSlotTypeQueryPatch(cult, query)).toEqual({
+      foreignSlotType: "CULT",
+      settlementType: undefined,
+      culture: "kho",
+      subculture: "kho_sub",
+      faction: "kho_faction",
+    });
+  });
+
+  it("drops a subculture and faction the type never mentions", () => {
+    expect(foreignSlotTypeQueryPatch(cult, { ...query, subculture: "emp_sub", faction: "emp_faction" })).toMatchObject({
+      culture: "kho",
+      subculture: undefined,
+      faction: undefined,
+    });
+  });
+
+  it("clears everything hanging off a culture the type never mentions", () => {
+    expect(foreignSlotTypeQueryPatch(cult, { ...query, culture: "emp" })).toMatchObject({
+      culture: undefined,
+      subculture: undefined,
+      faction: undefined,
+    });
+  });
+
+  it("keeps the filters when the type is cleared", () => {
+    expect(foreignSlotTypeQueryPatch(undefined, query)).toEqual({
+      foreignSlotType: undefined,
+      settlementType: undefined,
+      culture: "kho",
+      subculture: "kho_sub",
+      faction: "kho_faction",
+    });
   });
 });

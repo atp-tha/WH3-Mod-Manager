@@ -42,7 +42,7 @@ import {
   BUILDINGS_TABLES,
   variantLocKey,
 } from "./buildingsData/data";
-import { resolveRegionBuildings } from "./buildingsData/derive";
+import { resolveForeignSlotTypes, resolveRegionBuildings } from "./buildingsData/derive";
 import { validateNewRows } from "./buildingsData/validate";
 import { applyNewRowsToBuildingsData, LOC_TABLE, newRowsByTable, type BuildingsEditState } from "./buildingsData/edits";
 import {
@@ -4162,6 +4162,7 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
       subcultures: built.data.subcultures,
       factions: built.data.factions,
       settlementTypes: built.data.settlementTypes,
+      foreignSlotTypes: resolveForeignSlotTypes(built.data),
       units: built.data.units,
       unitGroups: built.data.unitGroups,
       unitGroupsByUnit,

@@ -29,6 +29,7 @@ const catalog: BuildingsCatalog = {
   subcultures: [],
   factions: [],
   settlementTypes: [],
+  foreignSlotTypes: [],
   units: [],
   unitGroups: [],
   unitGroupsByUnit: {},

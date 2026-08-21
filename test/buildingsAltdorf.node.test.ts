@@ -3,7 +3,8 @@ import * as nodePath from "path";
 import { describe, expect, it } from "vitest";
 
 import { BUILDINGS_TABLES, buildBuildingsData } from "../src/buildingsData/data";
-import { resolveRegionBuildings } from "../src/buildingsData/derive";
+import { resolveForeignSlotTypes, resolveRegionBuildings } from "../src/buildingsData/derive";
+import { computeBoardLayout } from "../src/components/buildings/buildingsLayout";
 import type { BuildingsRegionView, BuildingsTableRows } from "../src/buildingsData/types";
 import {
   extractCampaignTableIdentity,
@@ -35,6 +36,8 @@ const STARTPOS_FILE =
   process.env.WHMM_BUILDINGS_STARTPOS ?? "/mnt/k/projects/wh3dump/campaigns/wh3_main_combi/startpos.esf";
 
 const haveDumps = fs.existsSync(DB_DUMP) && fs.existsSync(UI_DUMP) && fs.existsSync(STARTPOS_FILE);
+/** Foreign slots are region-agnostic, so their checks need only the DB dump. */
+const haveDbDump = fs.existsSync(DB_DUMP);
 
 const CAMPAIGN = "wh3_main_combi";
 const REGION = "wh3_main_combi_region_altdorf";
@@ -280,5 +283,151 @@ describe.skipIf(!haveDumps)("buildings derivation against the in-game Altdorf pa
     // The bundled schema still describes colour_r/g/b; the game ships colour_hex.
     const landmark = data.sets["wh2_main_set_landmark"];
     expect([landmark.colourR, landmark.colourG, landmark.colourB]).toEqual([0x64, 0x14, 0x3c]);
+  });
+});
+
+/**
+ * The foreign slot types against the shipped tables.
+ *
+ * Nothing here needs a region or the UI dump: a slot set grants its slots inside whatever settlement
+ * the granting region has, which is the whole point of browsing a type on its own. The numbers are
+ * asserted exactly so a vanilla change - or a rule here quietly widening - fails rather than drifting.
+ */
+describe.skipIf(!haveDbDump)("foreign slot types against the shipped tables", () => {
+  const tables: BuildingsTableRows = {};
+  for (const tableName of BUILDINGS_TABLES) tables[tableName] = readTsvTable(tableName);
+  const data = buildBuildingsData(tables, () => undefined);
+  const types = resolveForeignSlotTypes(data);
+  const typeByKey = new Map(types.map((type) => [type.key, type]));
+
+  it("offers every slot set type the game's own sets name", () => {
+    // COB_LURE is declared in slot_set_types but no slot set uses it, so it grants no slot and would
+    // only ever draw an empty board.
+    expect(types.map((type) => type.key)).toEqual([
+      "ALLIED",
+      "BLACK_TOWER",
+      "CULT",
+      "HIDDEN_CULT",
+      "MINOR_CULT",
+      "NOR_TRAP",
+      "PIRATE_COVE",
+      "SEA_PATROL_OUTPOST",
+      "SILENT_SANCTUM",
+      "TYRANTS_DEMANDS",
+      "UNDERDEEP",
+      "UNDEREMPIRE",
+    ]);
+  });
+
+  it("combines the 41 minor cult slot sets into the one template they share", () => {
+    expect(tables.slot_sets_tables.filter((row) => row.type === "MINOR_CULT")).toHaveLength(41);
+    expect(typeByKey.get("MINOR_CULT")?.slotTemplates).toEqual(["wh3_main_minor_cults"]);
+  });
+
+  it("narrows the filters to the cultures a type's own buildings name", () => {
+    // The four Chaos gods, and nobody else, build cults.
+    expect(typeByKey.get("CULT")?.cultures).toEqual([
+      "wh3_main_kho_khorne",
+      "wh3_main_nur_nurgle",
+      "wh3_main_sla_slaanesh",
+      "wh3_main_tze_tzeentch",
+    ]);
+    // Allied outposts are the broad case: most of the game's cultures, nine named factions.
+    expect(typeByKey.get("ALLIED")?.cultures).toHaveLength(25);
+    expect(typeByKey.get("ALLIED")?.factions).toHaveLength(9);
+    expect(data.factions.length).toBeGreaterThan(500);
+  });
+
+  it("draws the buildings the type's slot templates permit, level 0 included", () => {
+    const view = resolveRegionBuildings(data, {
+      campaign: CAMPAIGN,
+      region: "",
+      foreignSlotType: "UNDEREMPIRE",
+      culture: "wh2_main_skv_skaven",
+    });
+    const tiles = view.bands.flatMap((band) => band.columns.flatMap((column) => column.tiles));
+
+    expect(view.slotTemplates.map((slot) => slot.slotTemplate).sort()).toEqual([
+      "wh2_dlc12_underempire",
+      "wh2_dlc12_underempire_laboratory",
+    ]);
+    expect(tiles.every((tile) => tile.isForeignSlot && !tile.isExistingInRegion)).toBe(true);
+    // The under-empire's own settlement chain, whose five levels the game draws from tier I.
+    const warren = view.bands
+      .flatMap((band) => band.columns)
+      .find((column) => column.chainKey === "wh2_dlc12_under_empire_settlement_warren");
+    expect(warren?.tiles.map((tile) => tile.romanNumeral)).toEqual(["I", "II", "III", "IV", "V"]);
+    expect(warren?.tiles.every((tile) => !tile.isRuin && !tile.isSettlementOrPort)).toBe(true);
+  });
+
+  it("never puts two of a branching chain's buildings in one board cell", () => {
+    // Vanilla branches a lot of foreign chains: the underdeep pairs each tier-2 building with a
+    // "switch it off" alternative, the sea patrol garrison offers five tier-3 choices, and
+    // wh3_main_minor_cult_the_cabal puts nine buildings on one tier. Sharing a CSS grid cell hid
+    // all but the last of them behind each other.
+    const shared: string[] = [];
+    for (const type of types) {
+      const view = resolveRegionBuildings(data, { campaign: CAMPAIGN, region: "", foreignSlotType: type.key });
+      for (const band of computeBoardLayout(view).bands) {
+        for (const column of band.columns) {
+          const byCell = new Map<string, string[]>();
+          for (const cell of column.cells) {
+            const key = `${cell.gridRow}|${cell.gridColumn}`;
+            byCell.set(key, [...(byCell.get(key) ?? []), cell.tile.levelKey]);
+          }
+          for (const [, levelKeys] of byCell) {
+            if (levelKeys.length > 1) shared.push(`${type.key} ${column.chainKey}: ${levelKeys.join(" + ")}`);
+          }
+        }
+      }
+    }
+    expect(shared).toEqual([]);
+  });
+
+  it("draws a fork's arrows without inventing one between the siblings", () => {
+    const view = resolveRegionBuildings(data, {
+      campaign: CAMPAIGN,
+      region: "",
+      foreignSlotType: "UNDERDEEP",
+      culture: "wh_main_dwf_dwarfs",
+    });
+    const chain = "wh3_main_underdeep_dwf_grudges";
+    const column = computeBoardLayout(view)
+      .bands.flatMap((band) => band.columns)
+      .find((entry) => entry.chainKey === chain);
+
+    // `_2` is the upgrade, `_2_a` the "book of grudges off" dead end; both are level 1.
+    expect(column?.width).toBe(2);
+    expect(column?.cells.map((cell) => `${cell.tile.levelKey}@${cell.gridRow},${cell.gridColumn}`)).toEqual([
+      `${chain}_1@4,${column?.gridColumn}`,
+      `${chain}_2@3,${column?.gridColumn}`,
+      `${chain}_2_a@3,${(column?.gridColumn ?? 0) + 1}`,
+      `${chain}_3@2,${column?.gridColumn}`,
+    ]);
+    expect(
+      view.edges
+        .filter((edge) => edge.fromLevelKey.startsWith(chain))
+        .map((edge) => `${edge.fromLevelKey}->${edge.toLevelKey}${edge.isImplicit ? " (implicit)" : ""}`)
+        .sort(),
+    ).toEqual([`${chain}_1->${chain}_2`, `${chain}_1->${chain}_2_a`, `${chain}_2->${chain}_3`]);
+  });
+
+  it("keeps the chains a settlement type binding would hide in a region", () => {
+    // A settlement type binding means "also allowed in that special settlement", and 50 of the 53
+    // chains a pirate cove permits carry one - the Chaos Dwarf, daemon and Norsca types. A region
+    // board draws such a chain only once that type is picked; a foreign slot has no settlement of
+    // its own, so the filter is skipped and they stay.
+    const boundChain = "wh2_dlc12_under_empire_money_thieves";
+    expect(data.settlementTypeBindings[boundChain]?.length).toBeGreaterThan(0);
+
+    const view = resolveRegionBuildings(data, { campaign: CAMPAIGN, region: "", foreignSlotType: "PIRATE_COVE" });
+    const chains = new Set(view.bands.flatMap((band) => band.columns.map((column) => column.chainKey)));
+    expect(chains.has(boundChain)).toBe(true);
+    // 52 of the 53 the chain set expands to. `wh3_dlc25_gom_chamber_of_the_dark_lady` has a single
+    // culture variant pinned to one faction, so it needs a culture or faction filter to appear -
+    // the same rule that hides any faction-specific building under an unfiltered query.
+    expect(chains.size).toBe(52);
+    expect(view.settlementTypeOptions).toEqual([]);
+    expect(view.settlementTypeDisabled).toBe(true);
   });
 });

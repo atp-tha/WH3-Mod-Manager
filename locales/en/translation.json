@@ -1426,6 +1426,8 @@
   "buildingsCampaign": "Campaign",
   "buildingsRegion": "Region",
   "buildingsChooseRegionOnMap": "Choose region on map",
+  "buildingsForeignSlotType": "Foreign slot type",
+  "buildingsForeignSlotNotRegional": "{{type}} slots are granted by a slot set, not by a region: these buildings can appear in any region, so the region is ignored.",
   "buildingsSettlementType": "Settlement type",
   "buildingsCulture": "Culture",
   "buildingsSubculture": "Subculture",

@@ -106,7 +106,7 @@ const BuildingsBoard = memo(
             edges={layout.edges}
             tileElements={tileElements}
             containerRef={boardRef}
-            layoutToken={`${view.query.region}|${view.query.culture}|${zoom}|${layout.bands.length}`}
+            layoutToken={`${view.query.region}|${view.query.foreignSlotType ?? ""}|${view.query.culture}|${zoom}|${layout.bands.length}`}
           />
         </div>
       </div>

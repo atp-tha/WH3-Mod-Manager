@@ -140,6 +140,24 @@ export interface RegionSlot {
   id: string;
   /** True when this slot came from the selected faction's foreign/allied slot set. */
   isForeignSlot?: boolean;
+  /** The `slot_sets` row this slot came from, for a foreign slot. */
+  slotSet?: string;
+}
+
+/**
+ * One slot template a foreign slot set offers.
+ *
+ * Foreign slots are not placed by region: `start_pos_region_foreign_slots` names a slot set per
+ * faction and region, but the set itself - and everything it permits - is region-agnostic, so the
+ * Buildings panel can browse a whole `slot_sets_tables.type` at once.
+ */
+export interface ForeignSlotTemplate {
+  /** `slot_sets_tables.type`, falling back to the set key on a schema version without that column. */
+  type: string;
+  slotSet: string;
+  slotTemplate: string;
+  slotType: string;
+  id: string;
 }
 
 export interface StartPosSettlement {
@@ -218,6 +236,8 @@ export interface BuiltBuildingsData {
   regionSlotTemplates: Record<string, RegionSlot[]>;
   /** Keyed `campaign|region|faction`, after joining foreign slots through their slot sets. */
   foreignRegionSlotTemplates: Record<string, RegionSlot[]>;
+  /** Every slot template a `slot_sets_tables.type` offers, combined across that type's slot sets. */
+  foreignSlotTemplatesByType: Record<string, ForeignSlotTemplate[]>;
   /** Keyed `campaign|region`. */
   startPosSettlements: Record<string, StartPosSettlement[]>;
   availabilitySetsByChain: Record<string, string[]>;
@@ -274,6 +294,21 @@ export interface BuildingsRegionOption extends BuildingsOption {
   campaigns: string[];
 }
 
+/**
+ * One `slot_sets_tables.type`, with the filter values its buildings actually name.
+ *
+ * A foreign slot type is browsed on its own, without a region, so the culture/subculture/faction
+ * dropdowns are narrowed to what its chains mention - through a culture variant or an availability
+ * row - rather than listing every faction in the game.
+ */
+export interface BuildingsForeignSlotTypeOption extends BuildingsOption {
+  /** Every distinct slot template the type's sets offer, combined. */
+  slotTemplates: string[];
+  cultures: string[];
+  subcultures: string[];
+  factions: string[];
+}
+
 export interface BuildingsFactionOption extends BuildingsOption {
   subculture: string;
   culture: string;
@@ -304,6 +339,13 @@ export interface BuildingsEffectOption extends BuildingsOption {
 export interface BuildingsRegionQuery {
   campaign: string;
   region: string;
+  /**
+   * Browse one `slot_sets_tables.type` instead of a region.
+   *
+   * Foreign slots belong to a slot set rather than to a region, so when this is set the region is
+   * ignored: the board shows every chain the type's slot templates permit, in any region.
+   */
+  foreignSlotType?: string;
   settlementType?: string;
   culture?: string;
   subculture?: string;
@@ -433,6 +475,8 @@ export interface BuildingsCatalog {
   subcultures: Array<BuildingsOption & { culture: string }>;
   factions: BuildingsFactionOption[];
   settlementTypes: BuildingsOption[];
+  /** Every foreign slot type, with the filter values its buildings name. */
+  foreignSlotTypes: BuildingsForeignSlotTypeOption[];
   /** Options for the recruitment and garrison editors. */
   units: BuildingsOption[];
   unitGroups: BuildingsOption[];

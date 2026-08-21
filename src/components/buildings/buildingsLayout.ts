@@ -28,7 +28,16 @@ export interface BoardCell {
 export interface BoardColumn {
   chainKey: string;
   localizedName: string;
+  /** 1-based CSS grid column the chain starts at, within its band. */
   gridColumn: number;
+  /**
+   * How many grid columns the chain occupies: the most tiles any one of its tiers holds.
+   *
+   * Normally 1. A chain that branches has two or more alternatives on the same tier - vanilla's
+   * `wh3_main_underdeep_dwf_grudges` upgrades into either `_2` or the "grudges off" `_2_a`, and
+   * `wh3_main_minor_cult_the_cabal` offers nine - and they cannot share one cell.
+   */
+  width: number;
   cells: BoardCell[];
   sources: string[];
 }
@@ -63,21 +72,38 @@ export const computeBoardLayout = (view: BuildingsRegionView): BoardLayout => {
 
   const cellByLevelKey: BoardLayout["cellByLevelKey"] = {};
   const bands: BoardBand[] = view.bands.map((band) => {
-    const columns: BoardColumn[] = band.columns.map((column, columnIndex) => {
-      const gridColumn = columnIndex + 1;
+    // A chain is normally one grid column, so this usually counts up by one per chain. A branching
+    // chain claims as many as its widest tier needs, and the ones after it shift right.
+    let nextGridColumn = 1;
+    const columns: BoardColumn[] = band.columns.map((column) => {
+      const tilesByTier = new Map<number, BuildingsTile[]>();
+      for (const tile of column.tiles) {
+        const tier = tilesByTier.get(tile.tierRow) ?? [];
+        tier.push(tile);
+        tilesByTier.set(tile.tierRow, tier);
+      }
+      const width = Math.max(1, ...[...tilesByTier.values()].map((tier) => tier.length));
+      const gridColumn = nextGridColumn;
+      nextGridColumn += width;
+
       const cells = column.tiles.map((tile) => {
         // Tier rows are 0-based from the bottom; CSS rows are 1-based and grow downwards, so tier 0
         // lands on rowCount.
         const gridRow = rowCount - tile.tierRow;
+        const tier = tilesByTier.get(tile.tierRow) ?? [tile];
+        // A narrower tier is centred under the widest one, so the trunk of a branching chain sits
+        // between its branches rather than hugging the left edge.
+        const cellColumn = gridColumn + Math.floor((width - tier.length) / 2) + tier.indexOf(tile);
         if (!cellByLevelKey[tile.levelKey]) {
-          cellByLevelKey[tile.levelKey] = { setKey: band.setKey, gridRow, gridColumn };
+          cellByLevelKey[tile.levelKey] = { setKey: band.setKey, gridRow, gridColumn: cellColumn };
         }
-        return { tile, gridRow, gridColumn };
+        return { tile, gridRow, gridColumn: cellColumn };
       });
       return {
         chainKey: column.chainKey,
         localizedName: column.localizedName,
         gridColumn,
+        width,
         cells,
         sources: column.sources,
       };
@@ -87,7 +113,7 @@ export const computeBoardLayout = (view: BuildingsRegionView): BoardLayout => {
       localizedName: band.localizedName,
       colour: bandColour(band),
       columns,
-      columnCount: Math.max(columns.length, 1),
+      columnCount: Math.max(nextGridColumn - 1, 1),
     };
   });
 
