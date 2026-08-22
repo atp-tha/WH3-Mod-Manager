@@ -58,6 +58,12 @@ type ViewerTab = {
 type ViewerTabCandidate = Omit<ViewerTab, "id">;
 
 type PackTab = { packPath: string; openTabs: ViewerTab[]; activeTabId: string | null };
+type CopyOverwriteRequest = {
+  source: CopyIntoSource;
+  targetPackPath: string;
+  openAfterCopy: boolean;
+  filePath: string;
+};
 const EMPTY_TABS: ViewerTab[] = [];
 /** Below this the two modder buttons cannot show their labels inside the sidebar's width. */
 const TOOLBAR_ICON_ONLY_SIDEBAR_WIDTH = 300;
@@ -97,6 +103,8 @@ const ModsViewer = memo(() => {
   const [newPackName, setNewPackName] = React.useState("");
   const [isNewPackProcessing, setIsNewPackProcessing] = React.useState(false);
   const [packCloseConfirmPath, setPackCloseConfirmPath] = useState<string | null>(null);
+  const [copyOverwriteRequest, setCopyOverwriteRequest] = useState<CopyOverwriteRequest | null>(null);
+  const [isCopyProcessing, setIsCopyProcessing] = useState(false);
   const [packTabs, setPackTabs] = useState<PackTab[]>([]);
   const [activePackPath, setActivePackPath] = useState<string | null>(null);
   // Written synchronously so a handler can create a pack tab and open a file tab in it in one tick,
@@ -437,9 +445,29 @@ const ModsViewer = memo(() => {
   );
 
   const handleCopyInto = useCallback(
-    async (source: CopyIntoSource, targetPackPath: string, openAfterCopy: boolean) => {
+    async (
+      source: CopyIntoSource,
+      targetPackPath: string,
+      openAfterCopy: boolean,
+      overwriteExisting = false,
+    ) => {
+      setIsCopyProcessing(true);
       try {
-        const result = await window.api?.copyPackedFileToPack(source.packPath, source.filePath, targetPackPath);
+        const result = await window.api?.copyPackedFileToPack(
+          source.packPath,
+          source.filePath,
+          targetPackPath,
+          overwriteExisting,
+        );
+        if (result?.overwriteRequired && !overwriteExisting) {
+          setCopyOverwriteRequest({
+            source,
+            targetPackPath,
+            openAfterCopy,
+            filePath: result.filePath || source.filePath,
+          });
+          return;
+        }
         if (!result?.success) {
           showDialog(`Failed to copy ${source.filePath}: ${result?.error || "Unknown error"}`, {
             title: "Copy Failed",
@@ -447,6 +475,7 @@ const ModsViewer = memo(() => {
           return;
         }
 
+        setCopyOverwriteRequest(null);
         if (!openAfterCopy) return;
 
         const copiedPackPath = result.targetPackPath || targetPackPath;
@@ -474,6 +503,8 @@ const ModsViewer = memo(() => {
         showDialog(`Failed to copy ${source.filePath}: ${error instanceof Error ? error.message : "Unknown error"}`, {
           title: "Copy Failed",
         });
+      } finally {
+        setIsCopyProcessing(false);
       }
     },
     [
@@ -485,6 +516,16 @@ const ModsViewer = memo(() => {
       showDialog,
     ],
   );
+
+  const handleConfirmCopyOverwrite = useCallback(() => {
+    if (!copyOverwriteRequest || isCopyProcessing) return;
+    void handleCopyInto(
+      copyOverwriteRequest.source,
+      copyOverwriteRequest.targetPackPath,
+      copyOverwriteRequest.openAfterCopy,
+      true,
+    );
+  }, [copyOverwriteRequest, handleCopyInto, isCopyProcessing]);
 
   const getOtherOpenPacks = useCallback(
     (sourcePackPath: string): ViewerPackTarget[] =>
@@ -1093,6 +1134,42 @@ const ModsViewer = memo(() => {
             className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isSaveAsProcessing ? "Saving..." : "Save"}
+          </button>
+        </Modal.Footer>
+      </Modal>
+
+      {/* Destination-file overwrite confirmation */}
+      <Modal
+        onClose={() => {
+          if (!isCopyProcessing) setCopyOverwriteRequest(null);
+        }}
+        show={!!copyOverwriteRequest}
+        size="md"
+        position="center"
+      >
+        <Modal.Header>File Already Exists</Modal.Header>
+        <Modal.Body>
+          <div className="text-sm text-gray-200">
+            The destination pack already contains:
+            <div className="mt-2 break-all text-gray-400">{copyOverwriteRequest?.filePath}</div>
+            <div className="mt-2 break-all text-gray-400">{copyOverwriteRequest?.targetPackPath}</div>
+            <div className="mt-3">Overwrite it with the copied file?</div>
+          </div>
+        </Modal.Body>
+        <Modal.Footer>
+          <button
+            onClick={() => setCopyOverwriteRequest(null)}
+            disabled={isCopyProcessing}
+            className="px-4 py-2 bg-gray-600 hover:bg-gray-500 text-white font-medium rounded-lg transition-colors duration-200 disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleConfirmCopyOverwrite}
+            disabled={isCopyProcessing}
+            className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-medium rounded-lg transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {isCopyProcessing ? "Overwriting..." : "Overwrite"}
           </button>
         </Modal.Footer>
       </Modal>

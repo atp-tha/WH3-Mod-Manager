@@ -157,6 +157,13 @@ describe("pack table tree interactions", () => {
             isEnabled: false,
             isInData: false,
           },
+          {
+            path: "K:\\mods\\enabled.pack",
+            name: "enabled.pack",
+            humanName: "Enabled",
+            isEnabled: true,
+            isInData: false,
+          },
         ],
       }),
     } as unknown as NonNullable<Window["api"]>;
@@ -191,13 +198,26 @@ describe("pack table tree interactions", () => {
       true,
     );
 
-    // The picker is loaded lazily, but it still lists every mod returned by the manager catalog.
+    // The picker is loaded lazily and splits enabled mods from the complete mod-manager catalog.
     fireEvent.contextMenu(tableLabel);
     fireEvent.click(screen.getByRole("button", { name: "Copy into", exact: true }));
     fireEvent.click(screen.getByRole("button", { name: "Select Pack...", exact: true }));
-    const picker = await waitFor(() => screen.getByRole("combobox", { name: "Select pack" }));
-    expect(picker).toHaveTextContent("Catalog (catalog.pack)");
-    fireEvent.change(picker, { target: { value: "K:\\mods\\catalog.pack" } });
+    const enabledPicker = await waitFor(() => screen.getByRole("combobox", { name: "Enabled mods" }));
+    const allModsPicker = screen.getByRole("combobox", { name: "All mods" });
+    expect(enabledPicker).toHaveTextContent("Enabled (enabled.pack)");
+    expect(allModsPicker).toHaveTextContent("Catalog (catalog.pack)");
+    expect(screen.getByRole("option", { name: "Catalog (catalog.pack)" })).toHaveAttribute(
+      "title",
+      "K:\\mods\\catalog.pack",
+    );
+    fireEvent.change(enabledPicker, { target: { value: "K:\\mods\\enabled.pack" } });
+    expect(copyInto).toHaveBeenLastCalledWith(expect.anything(), "K:\\mods\\enabled.pack", true);
+
+    fireEvent.contextMenu(tableLabel);
+    fireEvent.click(screen.getByRole("button", { name: "Copy into", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Select Pack...", exact: true }));
+    const reopenedAllModsPicker = await waitFor(() => screen.getByRole("combobox", { name: "All mods" }));
+    fireEvent.change(reopenedAllModsPicker, { target: { value: "K:\\mods\\catalog.pack" } });
     expect(copyInto).toHaveBeenLastCalledWith(expect.anything(), "K:\\mods\\catalog.pack", true);
 
     expect(tree).toBeInTheDocument();

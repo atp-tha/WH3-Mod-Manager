@@ -29,6 +29,25 @@ vi.mock("../src/components/viewer/PackTablesTreeView", () => {
         >
           Open table {props.packPath}
         </button>
+        {props.onCopyInto && props.otherOpenPacks?.[0] && (
+          <button
+            type="button"
+            data-testid={`copy-file-${props.packPath}`}
+            onClick={() =>
+              props.onCopyInto(
+                {
+                  packPath: props.packPath,
+                  filePath: "scripts\\same.lua",
+                  kind: "file",
+                },
+                props.otherOpenPacks[0].packPath,
+                true,
+              )
+            }
+          >
+            Copy file {props.packPath}
+          </button>
+        )}
       </div>
     );
   });
@@ -228,5 +247,59 @@ describe("multiple pack viewer tabs", () => {
 
     await user.click(screen.getByRole("button", { name: "Close SaveGate" }));
     await waitFor(() => expect(screen.queryByRole("button", { name: "Save As" })).not.toBeInTheDocument());
+  });
+
+  it("asks before overwriting an existing destination file during copy", async () => {
+    const user = userEvent.setup();
+    const packA = "A:\\mods\\copy-source.pack";
+    const packB = "B:\\mods\\copy-target.pack";
+    const copyPackedFileToPack = vi
+      .fn()
+      .mockResolvedValueOnce({
+        success: false,
+        overwriteRequired: true,
+        targetPackPath: packB,
+        filePath: "scripts\\same.lua",
+      })
+      .mockResolvedValueOnce({ success: true, targetPackPath: packB, filePath: "scripts\\same.lua" });
+    window.api = {
+      copyPackedFileToPack,
+      setViewerActivePack: vi.fn(),
+    } as unknown as NonNullable<Window["api"]>;
+
+    const store = configureStore({
+      reducer: { app: appReducer },
+      preloadedState: {
+        app: {
+          ...initialState,
+          packsData: { [packA]: pack(packA, "Copy Source"), [packB]: pack(packB, "Copy Target") },
+        },
+      },
+    });
+
+    render(
+      <Provider store={store}>
+        <LocalizationContext.Provider value={{ filter: "Filter" }}>
+          <ModsViewer />
+        </LocalizationContext.Provider>
+      </Provider>,
+    );
+
+    store.dispatch(requestOpenPackTab(packA));
+    store.dispatch(requestOpenPackTab(packB));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Copy Source", exact: true })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Copy Target", exact: true })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "Copy Source", exact: true }));
+    await user.click(screen.getByTestId(`copy-file-${packA}`));
+
+    await waitFor(() => expect(screen.getByText("File Already Exists")).toBeInTheDocument());
+    expect(screen.getByText("scripts\\same.lua")).toBeInTheDocument();
+    expect(copyPackedFileToPack).toHaveBeenCalledWith(packA, "scripts\\same.lua", packB, false);
+
+    await user.click(screen.getByRole("button", { name: "Overwrite", exact: true }));
+    await waitFor(() => expect(copyPackedFileToPack).toHaveBeenCalledWith(packA, "scripts\\same.lua", packB, true));
+    expect(screen.queryByText("File Already Exists")).not.toBeInTheDocument();
   });
 });

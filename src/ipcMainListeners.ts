@@ -6899,7 +6899,13 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
   );
   ipcMain.handle(
     "copyPackedFileToPack",
-    async (_event, sourcePackPath: string, filePath: string, targetPackPath: string) => {
+    async (
+      _event,
+      sourcePackPath: string,
+      filePath: string,
+      targetPackPath: string,
+      overwriteExisting = false,
+    ) => {
       try {
         if (!sourcePackPath || !filePath || !targetPackPath) {
           return { success: false, error: "A source pack, file, and target pack are required" };
@@ -6912,6 +6918,27 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
         }
 
         const normalizedFilePath = normalizePackFilePath(filePath);
+        const targetUnsavedFiles = appData.unsavedPacksData[targetPackPath] || [];
+        let targetPackedFile = findPackedFileInList(targetUnsavedFiles, normalizedFilePath);
+        const targetPack = appData.packsData.find(
+          (pack) => pack.path === targetPackPath || packPathKey(pack.path) === packPathKey(targetPackPath),
+        );
+        if (!targetPackedFile && targetPack) {
+          targetPackedFile = findPackedFileInList(targetPack.packedFiles, normalizedFilePath);
+        }
+        if (!targetPackedFile && !targetPackPath.startsWith("memory://")) {
+          const targetRead = await readPack(targetPackPath, { skipParsingTables: true });
+          targetPackedFile = findPackedFileInList(targetRead.packedFiles, normalizedFilePath);
+        }
+        if (targetPackedFile && !overwriteExisting) {
+          return {
+            success: false,
+            overwriteRequired: true,
+            targetPackPath,
+            filePath: normalizedFilePath,
+          };
+        }
+
         const isDBFile = parseDBTablePath(normalizedFilePath) != undefined;
         const sourceUnsavedFiles = appData.unsavedPacksData[sourcePackPath] || [];
         let sourcePackedFile = findPackedFileInList(sourceUnsavedFiles, normalizedFilePath);
@@ -6972,7 +6999,6 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
           copiedFile.text = decodePackedFileText(copiedFile);
         }
 
-        const targetUnsavedFiles = appData.unsavedPacksData[targetPackPath] || [];
         const existingTargetIndex = targetUnsavedFiles.findIndex(
           (targetFile) => normalizePackFilePathKey(targetFile.name) === normalizePackFilePathKey(copiedFileName),
         );

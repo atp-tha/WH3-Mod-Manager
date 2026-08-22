@@ -1173,6 +1173,7 @@ const PackTablesTreeView = React.memo(
           (pack) => packPathKey(pack.path) !== packPathKey(contextMenu.target!.packPath),
         )
       : [];
+    const enabledPackCatalog = selectablePackCatalog.filter((pack) => pack.isEnabled);
 
     return (
       <div
@@ -1277,22 +1278,46 @@ const PackTablesTreeView = React.memo(
                         {isLoadingPackCatalog ? (
                           <div className="text-xs text-gray-400 px-1 pt-1">Loading all mods...</div>
                         ) : selectablePackCatalog.length > 0 ? (
-                          <select
-                            aria-label="Select pack"
-                            defaultValue=""
-                            onChange={(event) => handleCopyIntoPack(event.target.value)}
-                            className="mt-1 w-full rounded border border-gray-600 bg-gray-700 px-2 py-1 text-sm text-white"
-                          >
-                            <option value="" disabled>
-                              Choose a pack...
-                            </option>
-                            {selectablePackCatalog.map((pack) => (
-                              <option key={pack.path} value={pack.path}>
-                                {pack.humanName?.trim() || pack.name}
-                                {pack.humanName?.trim() && pack.name ? ` (${pack.name})` : ""}
-                              </option>
-                            ))}
-                          </select>
+                          <div className="space-y-2">
+                            <label className="block text-xs text-gray-300">
+                              <span className="mb-1 block">Enabled mods</span>
+                              <select
+                                aria-label="Enabled mods"
+                                defaultValue=""
+                                onChange={(event) => handleCopyIntoPack(event.target.value)}
+                                className="w-full rounded border border-gray-600 bg-gray-700 px-2 py-1 text-sm text-white"
+                              >
+                                <option value="" disabled>
+                                  {enabledPackCatalog.length > 0 ? "Choose an enabled mod..." : "No other enabled mods"}
+                                </option>
+                                {enabledPackCatalog.map((pack) => (
+                                  <option key={pack.path} value={pack.path} title={pack.path}>
+                                    {pack.humanName?.trim() || pack.name}
+                                    {pack.humanName?.trim() && pack.name ? ` (${pack.name})` : ""}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                            <label className="block text-xs text-gray-300">
+                              <span className="mb-1 block">All mods</span>
+                              <select
+                                aria-label="All mods"
+                                defaultValue=""
+                                onChange={(event) => handleCopyIntoPack(event.target.value)}
+                                className="w-full rounded border border-gray-600 bg-gray-700 px-2 py-1 text-sm text-white"
+                              >
+                                <option value="" disabled>
+                                  Choose a pack...
+                                </option>
+                                {selectablePackCatalog.map((pack) => (
+                                  <option key={pack.path} value={pack.path} title={pack.path}>
+                                    {pack.humanName?.trim() || pack.name}
+                                    {pack.humanName?.trim() && pack.name ? ` (${pack.name})` : ""}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                          </div>
                         ) : (
                           <div className="text-xs text-gray-400 px-1 pt-1">No other mods found.</div>
                         )}
