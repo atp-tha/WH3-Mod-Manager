@@ -41,6 +41,7 @@ import { clearPackDataStoreForPack } from "./packDataStore";
 import { clearPreparedTableForPack } from "./tablePrepCache";
 import { getDefaultSaveAsPackName, getPackFileInventory, getPreferredTreeTab, hasLoadedDBTable } from "./viewerHelpers";
 import GlobalSearchPanel from "./GlobalSearchPanel";
+import { useKeepMountedOnceActive } from "../useKeepMountedOnceActive";
 import type { GlobalSearchDbResult, GlobalSearchResult } from "@/src/globalSearch/types";
 
 type ViewerTabKind = "db" | "flow" | "file";
@@ -253,6 +254,9 @@ const ModsViewer = memo(() => {
   const fileMenuButtonRef = useRef<HTMLButtonElement>(null);
   const [isSidebarNarrow, setIsSidebarNarrow] = useState(false);
   const [isGlobalSearchOpen, setIsGlobalSearchOpen] = useState(false);
+  // Hidden rather than unmounted once it has been opened, so closing and reopening keeps the query,
+  // the options and the results that are already in. Nothing is paid for until the first open.
+  const isGlobalSearchMounted = useKeepMountedOnceActive(isGlobalSearchOpen);
   /**
    * A result whose pack the viewer has not loaded yet, held until it arrives.
    *
@@ -586,10 +590,11 @@ const ModsViewer = memo(() => {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      // Ctrl/Cmd+Shift+F, the search-across-files chord every editor uses.
+      // Ctrl/Cmd+Shift+F, the search-across-files chord every editor uses. It toggles: the same
+      // keystroke puts the dock away, and the panel keeps its state while hidden.
       if (!(event.ctrlKey || event.metaKey) || !event.shiftKey || event.key.toLowerCase() !== "f") return;
       event.preventDefault();
-      setIsGlobalSearchOpen(true);
+      setIsGlobalSearchOpen((isPanelOpen) => !isPanelOpen);
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
@@ -2006,15 +2011,16 @@ const ModsViewer = memo(() => {
               </div>
             </div>
 
-            {isGlobalSearchOpen && (
+            {isGlobalSearchMounted && (
               <Resizable
-                defaultSize={{ width: "100%", height: 280 }}
-                minHeight={140}
+                defaultSize={{ width: "100%", height: 364 }}
+                minHeight={180}
                 maxHeight="70%"
                 enable={{ top: true }}
-                className="shrink-0"
+                className={"shrink-0" + (isGlobalSearchOpen ? "" : " hidden")}
               >
                 <GlobalSearchPanel
+                  isOpen={isGlobalSearchOpen}
                   openPacks={globalSearchOpenPacks}
                   onOpenDbResult={handleOpenGlobalSearchDbResult}
                   onOpenFileResult={handleOpenGlobalSearchFileResult}

@@ -92,16 +92,19 @@ const renderPanel = (overrides: Partial<React.ComponentProps<typeof GlobalSearch
   const onOpenDbResult = vi.fn();
   const onOpenFileResult = vi.fn();
   const onClose = vi.fn();
-  render(
-    <GlobalSearchPanel
-      openPacks={[{ packPath: "C:\\mods\\mymod.pack", label: "mymod.pack" }]}
-      onOpenDbResult={onOpenDbResult}
-      onOpenFileResult={onOpenFileResult}
-      onClose={onClose}
-      {...overrides}
-    />,
-  );
-  return { onOpenDbResult, onOpenFileResult, onClose };
+  const props: React.ComponentProps<typeof GlobalSearchPanel> = {
+    isOpen: true,
+    openPacks: [{ packPath: "C:\\mods\\mymod.pack", label: "mymod.pack" }],
+    onOpenDbResult,
+    onOpenFileResult,
+    onClose,
+    ...overrides,
+  };
+  const { rerender } = render(<GlobalSearchPanel {...props} />);
+  /** The dock hides the panel rather than unmounting it, so closing it is a prop change. */
+  const rerenderPanel = (next: Partial<React.ComponentProps<typeof GlobalSearchPanel>> = {}) =>
+    rerender(<GlobalSearchPanel {...props} {...next} />);
+  return { onOpenDbResult, onOpenFileResult, onClose, rerenderPanel };
 };
 
 const searchButton = () => screen.getByRole("button", { name: "Search" });
@@ -119,6 +122,34 @@ describe("GlobalSearchPanel", () => {
     expect(screen.getByRole("checkbox", { name: /Text files/ })).toBeChecked();
     expect(screen.getByRole("checkbox", { name: /Rigid models/ })).not.toBeChecked();
     expect(screen.getByRole("checkbox", { name: /Vanilla packs/ })).toBeChecked();
+  });
+
+  it("keeps its query and results when it is closed and reopened", async () => {
+    setupApi(async (request) => emptyResponse(request.searchId, [dbResult]));
+    const { rerenderPanel } = renderPanel();
+
+    await userEvent.type(screen.getByLabelText("Global search"), "chaos");
+    await userEvent.click(searchButton());
+    await waitFor(() => expect(screen.getByText(/row 4021/)).toBeInTheDocument());
+
+    rerenderPanel({ isOpen: false });
+    rerenderPanel({ isOpen: true });
+
+    expect(screen.getByLabelText("Global search")).toHaveValue("chaos");
+    expect(screen.getByText(/row 4021/)).toBeInTheDocument();
+  });
+
+  it("puts the caret back in the box every time it is opened", () => {
+    const { rerenderPanel } = renderPanel();
+    const input = screen.getByLabelText("Global search");
+    expect(input).toHaveFocus();
+
+    (document.activeElement as HTMLElement).blur();
+    expect(input).not.toHaveFocus();
+
+    rerenderPanel({ isOpen: false });
+    rerenderPanel({ isOpen: true });
+    expect(input).toHaveFocus();
   });
 
   it("puts the controls in a sidebar beside the results rather than stacked above them", () => {
@@ -262,6 +293,19 @@ describe("GlobalSearchPanel", () => {
     expect(screen.getByTitle("db\\land_units_tables\\data__")).toBeInTheDocument();
     expect(screen.getByTitle("C:\\mods\\mymod.pack")).toBeInTheDocument();
     expect(screen.getByTitle("script\\campaign\\units.lua")).toBeInTheDocument();
+  });
+
+  it("names a DB result group by its table, not by its data__ file", async () => {
+    setupApi(async (request) => emptyResponse(request.searchId, [dbResult]));
+    renderPanel({ openPacks: [] });
+
+    await userEvent.type(screen.getByLabelText("Global search"), "chaos");
+    await userEvent.click(searchButton());
+
+    const fileRow = await screen.findByTitle("db\\land_units_tables\\data__");
+    // The table is what identifies the group; every DB file in a pack is called data__.
+    expect(fileRow).toHaveTextContent("land_units_tables");
+    expect(fileRow).toHaveTextContent("data__");
   });
 
   it("explains itself when the main-process handler is not registered", async () => {
