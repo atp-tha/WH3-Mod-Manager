@@ -123,6 +123,8 @@ import { addSettlementTypeDataToEsfMap } from "./esfMap/settlementTypes";
 import type { EsfMapResponse } from "./esfMap/types";
 import { getVanillaLocalisationPackPaths as getVanillaLocalisationPackPathsFor } from "./vanillaLocCache/packs";
 import { openOrBuildVanillaLocCache } from "./vanillaLocCache/store";
+import { runGlobalSearch, type GlobalSearchRunDeps } from "./globalSearch/run";
+import type { GlobalSearchRequest, GlobalSearchResponse } from "./globalSearch/types";
 import {
   clearVisualsMemoryCache,
   createEmptyVisualsDataCache,
@@ -153,6 +155,7 @@ import {
   closeVanillaDbCacheReaders,
   fillPackedFileFromVanillaCache,
   fillVanillaTablesFromCache,
+  searchVanillaDb,
 } from "./vanillaDbCache/store";
 import { setVanillaDbCacheBuildProgressReporter } from "./vanillaDbCache/progress";
 import bs from "binary-search";
@@ -225,6 +228,7 @@ import {
   preparePackedFileForViewer,
   mergeMods,
   readFromExistingPack,
+  forEachPackedFileBuffer,
   readPack,
   resolveKeyValue,
   serializePackFileDataToBuffer,
@@ -646,6 +650,10 @@ const getVisualsLocContribution = (pack: Pack): Array<[string, string]> => {
   return trie ? Object.entries(trie.getEntries()) : [];
 };
 const dbDuplicationCancelStateByWebContentsId = new Map<number, { canceled: boolean }>();
+const globalSearchCancelStateByWebContentsId = new Map<
+  number,
+  { canceled: boolean; done?: Promise<GlobalSearchResponse> }
+>();
 const dbIndirectReferenceCacheByWebContentsId = new Map<number, DBIndirectReferenceCacheContext>();
 const createDBIndirectReferenceCacheContext = (): DBIndirectReferenceCacheContext => ({
   packByPath: new Map<string, Pack>(),
@@ -1015,7 +1023,10 @@ const appendPacksData = (newPack: Pack, mod?: Mod, emitToMainWindow = true) => {
  * The same walk `getLocsTrie` does, without building the trie: feeding a cache builder through a
  * trie would pay ~97 MB of node overhead to produce something it immediately flattens again.
  */
-export const forEachPackLocEntry = (pack: Pack, visit: (key: string, value: string) => void) => {
+export const forEachPackLocEntry = (
+  pack: Pack,
+  visit: (key: string, value: string, locFileName: string) => boolean | void,
+) => {
   const locPackedFiles = Object.values(pack.packedFiles).filter((packedFile) => packedFile.name.endsWith(".loc"));
   const packViewData = getPackViewData(pack, undefined, true);
   if (!packViewData) return;
@@ -1025,7 +1036,7 @@ export const forEachPackLocEntry = (pack: Pack, visit: (key: string, value: stri
     for (const rows of Object.values(data)) {
       for (const row of rows) {
         const locKey = row[0] as string;
-        if (locKey) visit(locKey, row[1] as string);
+        if (locKey && visit(locKey, row[1] as string, packedFile.name) === false) return;
       }
     }
   }
@@ -1167,9 +1178,11 @@ export const getVanillaLocLookup = async (vanillaPackPaths: string[]): Promise<R
     game: appData.currentGame,
     packPaths: vanillaPackPaths,
     readEntries: async () => {
-      const entries: Array<readonly [string, string]> = [];
+      const entries: Array<readonly [string, string, string]> = [];
       for (const pack of await readVanillaLocPacks()) {
-        forEachPackLocEntry(pack, (key, value) => entries.push([key, value]));
+        forEachPackLocEntry(pack, (key, value, locFileName) => {
+          entries.push([key, value, `${pack.path}\0${locFileName}`]);
+        });
       }
       return entries;
     },
@@ -1276,7 +1289,8 @@ export const getDefaultTableVersions = async () => {
 export const packReads = createPackReadRegistry();
 
 /** A pack read that is registered for its whole duration, released even when the read throws. */
-const readPackWhileRegistered = async (packPath: string, packReadingOptions: PackReadingOptions) => {
+export const readPackRegistered = async (packPath: string, packReadingOptions: PackReadingOptions) => {
+  await packReads.waitUntilFree(packPath);
   const releaseRead = packReads.begin(packPath);
   try {
     return await readPack(packPath, packReadingOptions);
@@ -1311,7 +1325,7 @@ export const readModsByPath = async (
     if (emitToMainWindow) {
       windows.mainWindow?.webContents.send("setCurrentlyReadingMod", modPath);
     }
-    const newPack = await readPackWhileRegistered(modPath, packReadingOptions);
+    const newPack = await readPackRegistered(modPath, packReadingOptions);
     if (emitToMainWindow) {
       windows.mainWindow?.webContents.send("setLastModThatWasRead", modPath);
     }
@@ -5152,7 +5166,7 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
               packedFileNames = cacheEntry.packedFileNames;
             } else {
               console.log("READING DATA PACK");
-              const dataPackData = await readPackWhileRegistered(dataMod.path, {
+              const dataPackData = await readPackRegistered(dataMod.path, {
                 skipParsingTables: true,
               });
               if (dataPackData) {
@@ -5786,7 +5800,7 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
   const readPackForCompat = async (packPath: string, packReadingOptions: PackReadingOptions, displayName: string) => {
     mainWindow?.webContents.send("setCurrentlyReadingMod", displayName);
     try {
-      return await readPackWhileRegistered(packPath, packReadingOptions);
+      return await readPackRegistered(packPath, packReadingOptions);
     } finally {
       mainWindow?.webContents.send("setLastModThatWasRead", displayName);
     }
@@ -7369,6 +7383,151 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
         success: false,
         error: error instanceof Error ? error.message : "Failed to load mod packs",
       };
+    }
+  });
+  ipcMain.on("cancelGlobalSearch", (event) => {
+    const state = globalSearchCancelStateByWebContentsId.get(event.sender.id);
+    if (state) state.canceled = true;
+  });
+  ipcMain.handle("runGlobalSearch", async (event, request: GlobalSearchRequest): Promise<GlobalSearchResponse> => {
+    const webContentsId = event.sender.id;
+    const previous = globalSearchCancelStateByWebContentsId.get(webContentsId);
+    if (previous) {
+      previous.canceled = true;
+      if (previous.done) await previous.done;
+    }
+
+    const cancelState: { canceled: boolean; done?: Promise<GlobalSearchResponse> } = { canceled: false };
+    globalSearchCancelStateByWebContentsId.set(webContentsId, cancelState);
+    let resolveDone!: (response: GlobalSearchResponse) => void;
+    cancelState.done = new Promise<GlobalSearchResponse>((resolve) => {
+      resolveDone = resolve;
+    });
+    const sendProgress = (progress: Parameters<GlobalSearchRunDeps["report"]>[0]) => {
+      if (event.sender.isDestroyed()) return;
+      try {
+        event.sender.send("setGlobalSearchProgress", progress);
+      } catch {
+        // The viewer may close between the destroyed check and send.
+      }
+    };
+    const sendResults = (batch: Parameters<GlobalSearchRunDeps["emit"]>[0]) => {
+      if (event.sender.isDestroyed()) return;
+      try {
+        event.sender.send("setGlobalSearchResults", batch);
+      } catch {
+        // The in-flight run can finish quietly after a window closes.
+      }
+    };
+
+    try {
+      const mods =
+        appData.allMods.length > 0
+          ? appData.allMods
+          : await getMods((message) => mainWindow?.webContents.send("handleLog", message));
+      const unsavedPackPaths = new Set(
+        Object.entries(appData.unsavedPacksData)
+          .filter(([, files]) => files.length > 0)
+          .map(([path]) => nodePath.resolve(path).toLowerCase()),
+      );
+      const hasUnsavedChanges = (path: string) => unsavedPackPaths.has(nodePath.resolve(path).toLowerCase());
+      const catalog = {
+        openPacks: appData.openViewerPackPaths.map((path) => ({
+          path,
+          name: nodePath.basename(path),
+          hasUnsavedChanges: hasUnsavedChanges(path),
+        })),
+        enabledMods: appData.enabledMods
+          .filter((mod) => !mod.isDeleted && !!mod.path)
+          .map((mod) => ({
+            path: mod.path,
+            name: mod.name,
+            humanName: mod.humanName,
+            hasUnsavedChanges: hasUnsavedChanges(mod.path),
+          })),
+        allMods: mods
+          .filter((mod) => !!mod.path)
+          .map((mod) => ({
+            path: mod.path,
+            name: mod.name,
+            humanName: mod.humanName,
+            isDeleted: mod.isDeleted,
+            hasUnsavedChanges: hasUnsavedChanges(mod.path),
+          })),
+      };
+      const getVanillaLocReader = async () => {
+        const dataFolder = appData.gamesToGameFolderPaths[appData.currentGame]?.dataFolder;
+        if (!dataFolder) return undefined;
+        const packPaths = getVanillaLocalisationPackPaths(dataFolder);
+        return openOrBuildVanillaLocCache({
+          userDataPath: app.getPath("userData"),
+          game: appData.currentGame,
+          packPaths,
+          readEntries: async () => {
+            const entries: Array<readonly [string, string, string]> = [];
+            for (const packPath of packPaths) {
+              if (cancelState.canceled) break;
+              const pack = await readPackRegistered(packPath, { skipParsingTables: true, readLocs: true });
+              forEachPackLocEntry(pack, (key, value, locFileName) => {
+                entries.push([key, value, `${pack.path}\0${locFileName}`]);
+              });
+            }
+            return entries;
+          },
+        });
+      };
+      const forEachPackedFileBufferRegistered: GlobalSearchRunDeps["forEachPackedFileBuffer"] = async (
+        packPath,
+        wanted,
+        visit,
+        options,
+      ) => {
+        await packReads.waitUntilFree(packPath);
+        const releaseRead = packReads.begin(packPath);
+        try {
+          await forEachPackedFileBuffer(packPath, wanted, visit, options);
+        } finally {
+          releaseRead();
+        }
+      };
+      const deps: GlobalSearchRunDeps = {
+        getVanillaPackIndex,
+        getVanillaPackPathsInLoadOrder,
+        searchVanillaDb,
+        getVanillaLocReader,
+        forEachPackedFileBuffer: forEachPackedFileBufferRegistered,
+        readPackRegistered,
+        forEachPackLocEntry,
+        isCanceled: () => cancelState.canceled,
+        report: sendProgress,
+        emit: sendResults,
+        yieldToEventLoop: () => new Promise<void>((resolve) => setImmediate(resolve)),
+      };
+      const work = runGlobalSearch(request, catalog, deps);
+      const response = await work;
+      resolveDone(response);
+      return response;
+    } catch (error) {
+      const response: GlobalSearchResponse = {
+        success: false,
+        searchId: request.searchId,
+        canceled: cancelState.canceled,
+        truncated: false,
+        results: [],
+        counts: { db: 0, loc: 0, text: 0, rigidModel: 0 },
+        targetsSearched: 0,
+        filesScanned: 0,
+        skippedFiles: [],
+        warnings: [],
+        elapsedMs: 0,
+        error: error instanceof Error ? error.message : String(error),
+      };
+      resolveDone(response);
+      return response;
+    } finally {
+      if (globalSearchCancelStateByWebContentsId.get(webContentsId) === cancelState) {
+        globalSearchCancelStateByWebContentsId.delete(webContentsId);
+      }
     }
   });
   ipcMain.handle("getFlowPackCatalog", async () => {
@@ -9931,6 +10090,9 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
     viewerWindow.on("closed", () => {
       dbIndirectReferenceCacheByWebContentsId.delete(viewerWebContentsId);
       dbDuplicationCancelStateByWebContentsId.delete(viewerWebContentsId);
+      const globalSearchState = globalSearchCancelStateByWebContentsId.get(viewerWebContentsId);
+      if (globalSearchState) globalSearchState.canceled = true;
+      globalSearchCancelStateByWebContentsId.delete(viewerWebContentsId);
       if (windows.viewerWindow === viewerWindow) {
         windows.viewerWindow = undefined;
       }
@@ -10325,7 +10487,7 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
       if (appData.packsData.every((pack) => pack.path != mod.path)) {
         console.log("READING " + mod.name);
         if (!skipParsingTables && emitToMainWindow) mainWindow?.webContents.send("setCurrentlyReadingMod", mod.name);
-        const newPack = await readPackWhileRegistered(mod.path, {
+        const newPack = await readPackRegistered(mod.path, {
           skipParsingTables,
           readScripts,
           tablesToRead,

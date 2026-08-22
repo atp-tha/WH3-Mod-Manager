@@ -360,7 +360,14 @@ const discardCorruptReader = async (reader: VanillaDbCacheReader, error: unknown
  */
 export const searchVanillaDb = async (options: VanillaSearchOptions): Promise<VanillaSearchResult | undefined> => {
   if (options.query === "") {
-    return { matches: [], truncated: false, columnsConsidered: 0, columnsScanned: 0 };
+    return {
+      matches: [],
+      truncated: false,
+      columnsConsidered: 0,
+      columnsScanned: 0,
+      canceled: false,
+      dbPackPath: "",
+    };
   }
   const reader = await getVanillaDbCacheReader();
   if (!reader) return undefined;

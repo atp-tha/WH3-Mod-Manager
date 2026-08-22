@@ -1,4 +1,6 @@
 import * as fs from "fs";
+import { containsBytesInWindow } from "../globalSearch/byteScan";
+import { createSearchMatcher } from "../globalSearch/matcher";
 
 /** Bytes pulled from disk per read. Bounds peak memory regardless of how large a pack is. */
 const DEFAULT_CHUNK_BYTES = 4 * 1024 * 1024;
@@ -9,57 +11,6 @@ const DEFAULT_CHUNK_BYTES = 4 * 1024 * 1024;
  */
 const DEFAULT_OVERLAP_BYTES = 64 * 1024;
 
-const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
-const makeSearchPattern = (searchTerm: string): RegExp => {
-  try {
-    return new RegExp(searchTerm, "i");
-  } catch {
-    // Match the literal text when the user entered an invalid regular expression.
-    return new RegExp(escapeRegExp(searchTerm), "i");
-  }
-};
-
-/**
- * A streamed window is not the whole file, so its start/end must not satisfy ^ or $. Replacing only
- * unescaped anchors outside character classes preserves alternatives such as ^header|ordinaryText.
- */
-const constrainWholeFileAnchors = (pattern: RegExp, allowStart: boolean, allowEnd: boolean): RegExp => {
-  if (allowStart && allowEnd) return pattern;
-
-  let source = "";
-  let inCharacterClass = false;
-  for (let index = 0; index < pattern.source.length; index++) {
-    const character = pattern.source[index];
-    if (character === "\\") {
-      source += character;
-      if (index + 1 < pattern.source.length) source += pattern.source[++index];
-      continue;
-    }
-    if (character === "[") inCharacterClass = true;
-    if (character === "]" && inCharacterClass) inCharacterClass = false;
-
-    const disabledStart = character === "^" && !inCharacterClass && !allowStart;
-    const disabledEnd = character === "$" && !inCharacterClass && !allowEnd;
-    source += disabledStart || disabledEnd ? "(?!)" : character;
-  }
-  return new RegExp(source, pattern.flags);
-};
-
-// Pack text appears as either UTF-8 or UTF-16LE, and a pack places its text at whatever offset the
-// binary layout happens to produce. Decoding UTF-16LE from one alignment would miss every string
-// starting on the other, so both are checked. keepFromWindow holds the window on an even offset so
-// that the two views stay continuous from one window to the next.
-const windowContains = (window: Buffer, pattern: RegExp) =>
-  pattern.test(window.toString("utf8")) ||
-  pattern.test(window.toString("utf16le")) ||
-  pattern.test(window.subarray(1).toString("utf16le"));
-
-/**
- * Number of trailing bytes to carry into the next window. Chosen so the next window also starts on
- * an even offset, and so a partial multi-byte character at the end of this window is re-decoded
- * there rather than being dropped.
- */
 const keepFromWindow = (windowLength: number, overlapBytes: number) => {
   const kept = Math.min(overlapBytes, windowLength);
   return (windowLength - kept) % 2 === 0 ? kept : kept - 1;
@@ -80,7 +31,13 @@ export const packFileContains = async (
   searchTerm: string,
   { chunkBytes = DEFAULT_CHUNK_BYTES, overlapBytes = DEFAULT_OVERLAP_BYTES }: PackSearchOptions = {},
 ): Promise<boolean> => {
-  const pattern = makeSearchPattern(searchTerm);
+  // The legacy pack-wide search predates the global-search UI and intentionally keeps its old
+  // invalid-regex-as-literal behaviour. The new panel uses the matcher directly and rejects such a
+  // query instead.
+  const regexMatcher = createSearchMatcher(searchTerm, { regex: true, caseSensitive: false });
+  const matcher = regexMatcher.isValidRegex
+    ? regexMatcher
+    : createSearchMatcher(searchTerm, { regex: false, caseSensitive: false });
   const stream = fs.createReadStream(filePath, { highWaterMark: chunkBytes });
   let tail: Buffer = Buffer.alloc(0);
   let pendingChunk: Buffer | undefined;
@@ -88,8 +45,7 @@ export const packFileContains = async (
 
   const searchChunk = (chunk: Buffer, isLastWindow: boolean) => {
     const window = tail.length === 0 ? chunk : Buffer.concat([tail, chunk]);
-    const windowPattern = constrainWholeFileAnchors(pattern, isFirstWindow, isLastWindow);
-    const found = windowContains(window, windowPattern);
+    const found = containsBytesInWindow(window, matcher, isFirstWindow, isLastWindow);
     tail = window.subarray(window.length - keepFromWindow(window.length, overlapBytes));
     isFirstWindow = false;
     return found;
@@ -107,5 +63,5 @@ export const packFileContains = async (
   }
 
   // An empty file yields no chunks, so match the whole-file behaviour against the empty string.
-  return pendingChunk === undefined && pattern.test("");
+  return pendingChunk === undefined && matcher.toRegExp().test("");
 };

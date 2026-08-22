@@ -3369,6 +3369,56 @@ export const readPack = async (
     dependencyPacks,
   } as Pack;
 };
+
+/**
+ * Visits accepted packed-file payloads without retaining them on a Pack object.
+ *
+ * The index is parsed once, then each payload is read and released before the next one. This is
+ * intentionally separate from `readModsByPath`: that path appends the returned Pack to appData and
+ * would pin every file encountered by an all-mods search.
+ */
+export const forEachPackedFileBuffer = async (
+  modPath: string,
+  wanted: (name: string) => boolean,
+  visit: (packedFile: PackedFile, buffer: Buffer) => Promise<void | false> | void | false,
+  options: {
+    maxFileBytes?: number;
+    onSkipped?: (packedFile: PackedFile, reason: "tooLarge" | "unreadable") => void;
+  } = {},
+): Promise<void> => {
+  const indexedPack = await readPack(modPath, { skipParsingTables: true, skipSorting: true });
+  const fileId = fs.openSync(modPath, "r");
+  try {
+    for (const packedFile of indexedPack.packedFiles) {
+      if (!wanted(packedFile.name)) continue;
+      if (options.maxFileBytes !== undefined && packedFile.file_size > options.maxFileBytes) {
+        options.onSkipped?.(packedFile, "tooLarge");
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        continue;
+      }
+
+      let buffer: Buffer;
+      try {
+        buffer = Buffer.allocUnsafe(packedFile.file_size);
+        fs.readSync(fileId, buffer, 0, buffer.length, packedFile.start_pos);
+        if (packedFile.is_compressed) {
+          buffer = Buffer.from(await decompressPackedPayload(buffer, packedFile.name));
+        }
+      } catch {
+        options.onSkipped?.(packedFile, "unreadable");
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        continue;
+      }
+      const shouldStop = await visit(packedFile, buffer);
+      if (shouldStop === false) return;
+      // `readPack` uses synchronous reads. Give cancelGlobalSearch and progress sends a macrotask
+      // between files instead of letting a large pack monopolise the main process.
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+  } finally {
+    fs.closeSync(fileId);
+  }
+};
 // Helper function to extract the base filename from a packed file path
 const getBaseFilename = (filePath: string): string => {
   const parts = filePath.split("\\");

@@ -1,4 +1,4 @@
-import { findFrontCodedRank, type FrontCodedBlock } from "../vanillaDbCache/frontCodedBlock";
+import { findFrontCodedRank, readFrontCodedEntry, type FrontCodedBlock } from "../vanillaDbCache/frontCodedBlock";
 import { createFileSource, createMemorySource, type VanillaDbCacheSource } from "../vanillaDbCache/read";
 import { getVanillaLocCacheSections, readVanillaLocCacheHeader, VANILLA_LOC_CACHE_HEADER_BYTES } from "./format";
 
@@ -10,6 +10,11 @@ const textDecoder = new TextDecoder();
 export interface VanillaLocCacheReader {
   /** The value for a key, or undefined if this cache does not hold it. */
   get(key: string): string | undefined;
+  /** Visits every entry in key order. The optional fourth argument is its source label. */
+  forEachEntry(
+    visit: (key: string, value: string, rank: number, sourceLabel?: string) => boolean | void,
+    options?: { batchBytes?: number },
+  ): void;
   readonly count: number;
   /** Bytes held resident: the key block, its checkpoints and the value offsets. */
   readonly residentBytes: number;
@@ -42,6 +47,9 @@ export const openVanillaLocCache = (source: VanillaLocCacheSource): VanillaLocCa
   const keyBytes = source.read(sections.keyBytesOffset, meta.keyBytesLength);
   const checkpointBytes = source.read(sections.checkpointsOffset, meta.checkpointCount * 4);
   const offsetBytes = source.read(sections.valueOffsetsOffset, (meta.count + 1) * 4);
+  const sourceBytes = source.read(sections.sourceBytesOffset, meta.sourceBytesLength);
+  const sourceCheckpointBytes = source.read(sections.sourceCheckpointsOffset, meta.sourceCheckpointCount * 4);
+  const sourceIdBytes = source.read(sections.sourceIdsOffset, meta.count * 2);
 
   // Copied into aligned arrays rather than viewed in place: a source is free to hand back a slice at
   // any byte offset, and a Uint32Array cannot be laid over one that is not 4-byte aligned.
@@ -58,18 +66,67 @@ export const openVanillaLocCache = (source: VanillaLocCacheSource): VanillaLocCa
   }
 
   const keyBlock: FrontCodedBlock = { bytes: keyBytes, checkpoints, count: meta.count };
+  const sourceCheckpoints = new Uint32Array(meta.sourceCheckpointCount);
+  const sourceCheckpointView = new DataView(
+    sourceCheckpointBytes.buffer,
+    sourceCheckpointBytes.byteOffset,
+    sourceCheckpointBytes.byteLength,
+  );
+  for (let index = 0; index < meta.sourceCheckpointCount; index++) {
+    sourceCheckpoints[index] = sourceCheckpointView.getUint32(index * 4, true);
+  }
+  const sourceIds = new Uint16Array(meta.count);
+  const sourceIdView = new DataView(sourceIdBytes.buffer, sourceIdBytes.byteOffset, sourceIdBytes.byteLength);
+  for (let index = 0; index < meta.count; index++) sourceIds[index] = sourceIdView.getUint16(index * 2, true);
+  const sourceBlock: FrontCodedBlock = {
+    bytes: sourceBytes,
+    checkpoints: sourceCheckpoints,
+    count: meta.sourceCount,
+  };
+  const sourceById = (sourceId: number): string | undefined =>
+    sourceId === 0xffff ? undefined : readFrontCodedEntry(sourceBlock, sourceId);
+
+  const decodeValueAt = (rank: number): string => {
+    const start = valueOffsets[rank];
+    const length = valueOffsets[rank + 1] - start;
+    return length === 0 ? "" : textDecoder.decode(source.read(sections.valueBlobOffset + start, length));
+  };
 
   return {
     get(key) {
       const rank = findFrontCodedRank(keyBlock, key);
       if (rank < 0) return undefined;
-      const start = valueOffsets[rank];
-      const length = valueOffsets[rank + 1] - start;
-      if (length === 0) return "";
-      return textDecoder.decode(source.read(sections.valueBlobOffset + start, length));
+      return decodeValueAt(rank);
+    },
+    forEachEntry(visit, { batchBytes = 1024 * 1024 } = {}) {
+      if (meta.count === 0) return;
+      const safeBatchBytes = Math.max(1, batchBytes);
+      let batchStart = 0;
+      while (batchStart < meta.count) {
+        let batchEnd = batchStart + 1;
+        while (batchEnd < meta.count && valueOffsets[batchEnd + 1] - valueOffsets[batchStart] <= safeBatchBytes) {
+          batchEnd++;
+        }
+        const batchLength = valueOffsets[batchEnd] - valueOffsets[batchStart];
+        const batch = source.read(sections.valueBlobOffset + valueOffsets[batchStart], batchLength);
+        for (let rank = batchStart; rank < batchEnd; rank++) {
+          const start = valueOffsets[rank] - valueOffsets[batchStart];
+          const end = valueOffsets[rank + 1] - valueOffsets[batchStart];
+          const value = textDecoder.decode(batch.subarray(start, end));
+          const sourceLabel = sourceById(sourceIds[rank]);
+          if (visit(readFrontCodedEntry(keyBlock, rank)!, value, rank, sourceLabel) === false) return;
+        }
+        batchStart = batchEnd;
+      }
     },
     count: meta.count,
-    residentBytes: keyBytes.length + checkpoints.byteLength + valueOffsets.byteLength,
+    residentBytes:
+      keyBytes.length +
+      checkpoints.byteLength +
+      valueOffsets.byteLength +
+      sourceBytes.length +
+      sourceCheckpoints.byteLength +
+      sourceIds.byteLength,
     close: source.close,
   };
 };

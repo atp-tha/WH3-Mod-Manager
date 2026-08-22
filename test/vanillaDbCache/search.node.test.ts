@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { buildVanillaDbCache } from "../../src/vanillaDbCache/build";
 import { createMemorySource, openVanillaDbCache } from "../../src/vanillaDbCache/read";
@@ -162,5 +162,27 @@ describe("vanilla db cache search", () => {
 
     expect(result.matches).toEqual([]);
     expect(result.columnsConsidered).toBe(0);
+  });
+
+  it("keeps the binary-search pool fast path when no predicate is supplied", () => {
+    const reader = sampleReader();
+    const getPoolBlock = vi.spyOn(reader, "getPoolBlock");
+    const forEachPoolValue = vi.spyOn(reader, "forEachPoolValue");
+
+    searchVanillaDbCache(reader, { query: "wh_main_grn_", mode: "prefix", caseSensitive: true });
+
+    expect(getPoolBlock).toHaveBeenCalled();
+    expect(forEachPoolValue).not.toHaveBeenCalled();
+  });
+
+  it("uses the pool walk when a global-search predicate is supplied", () => {
+    const reader = sampleReader();
+    const getPoolBlock = vi.spyOn(reader, "getPoolBlock");
+    const forEachPoolValue = vi.spyOn(reader, "forEachPoolValue");
+
+    searchVanillaDbCache(reader, { query: "ignored", matchesPoolValue: (value) => value.includes("spear") });
+
+    expect(getPoolBlock).not.toHaveBeenCalled();
+    expect(forEachPoolValue).toHaveBeenCalled();
   });
 });

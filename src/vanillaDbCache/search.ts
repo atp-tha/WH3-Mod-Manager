@@ -35,6 +35,10 @@ export interface VanillaSearchOptions {
   /** Restrict to tables whose packed file path contains this. */
   tableFilter?: string;
   caseSensitive?: boolean;
+  /** Overrides query/mode matching for a pool value, e.g. a regex matcher. */
+  matchesPoolValue?: (poolValue: string) => boolean;
+  /** Checked while the pool and tables are being walked. */
+  shouldCancel?: () => boolean;
 }
 
 export interface VanillaSearchMatch {
@@ -51,6 +55,9 @@ export interface VanillaSearchResult {
   truncated: boolean;
   columnsConsidered: number;
   columnsScanned: number;
+  canceled: boolean;
+  /** The pack represented by this cache, filled by the store wrapper. */
+  dbPackPath: string;
 }
 
 const DEFAULT_MAX_RESULTS = 500;
@@ -64,12 +71,12 @@ const DEFAULT_MAX_RESULTS = 500;
  */
 const findMatchingPoolIds = (
   reader: VanillaDbCacheReader,
-  { query, mode = "contains", caseSensitive = false }: VanillaSearchOptions,
-): { has: (poolId: number) => boolean; lowestId: number; highestId: number } => {
-  if (mode === "prefix" && caseSensitive) {
+  { query, mode = "contains", caseSensitive = false, matchesPoolValue, shouldCancel }: VanillaSearchOptions,
+): { has: (poolId: number) => boolean; lowestId: number; highestId: number; canceled: boolean } => {
+  if (!matchesPoolValue && mode === "prefix" && caseSensitive) {
     const pool = reader.getPoolBlock();
     const { start, end } = findFrontCodedPrefixRange(pool, query);
-    return { has: (poolId) => poolId >= start && poolId < end, lowestId: start, highestId: end - 1 };
+    return { has: (poolId) => poolId >= start && poolId < end, lowestId: start, highestId: end - 1, canceled: false };
   }
 
   const needle = caseSensitive ? query : query.toLowerCase();
@@ -77,16 +84,26 @@ const findMatchingPoolIds = (
   let lowestId = Number.POSITIVE_INFINITY;
   let highestId = -1;
 
+  let canceled = false;
+  let valuesSeen = 0;
   reader.forEachPoolValue((poolValue, poolId) => {
-    const value = caseSensitive ? poolValue : poolValue.toLowerCase();
-    const hit = mode === "prefix" ? value.startsWith(needle) : value.includes(needle);
+    if (shouldCancel && valuesSeen++ % 4096 === 0 && shouldCancel()) {
+      canceled = true;
+      return false;
+    }
+    const hit = matchesPoolValue
+      ? matchesPoolValue(poolValue)
+      : (() => {
+          const value = caseSensitive ? poolValue : poolValue.toLowerCase();
+          return mode === "prefix" ? value.startsWith(needle) : value.includes(needle);
+        })();
     if (!hit) return;
     matching.add(poolId);
     if (poolId < lowestId) lowestId = poolId;
     if (poolId > highestId) highestId = poolId;
   });
 
-  return { has: (poolId) => matching.has(poolId), lowestId, highestId };
+  return { has: (poolId) => matching.has(poolId), lowestId, highestId, canceled };
 };
 
 /** Whether a column's sorted dictionary contains anything the query matched. */
@@ -114,14 +131,50 @@ export const searchVanillaDbCache = (
   let columnsConsidered = 0;
   let columnsScanned = 0;
 
-  if (options.query === "") return { matches, truncated: false, columnsConsidered, columnsScanned };
+  if (options.query === "") {
+    return {
+      matches,
+      truncated: false,
+      columnsConsidered,
+      columnsScanned,
+      canceled: false,
+      dbPackPath: reader.meta.dbPackPath,
+    };
+  }
 
   const matcher = findMatchingPoolIds(reader, options);
+  if (matcher.canceled) {
+    return {
+      matches,
+      truncated: false,
+      columnsConsidered,
+      columnsScanned,
+      canceled: true,
+      dbPackPath: reader.meta.dbPackPath,
+    };
+  }
   if (matcher.highestId < 0) {
-    return { matches, truncated: false, columnsConsidered, columnsScanned };
+    return {
+      matches,
+      truncated: false,
+      columnsConsidered,
+      columnsScanned,
+      canceled: false,
+      dbPackPath: reader.meta.dbPackPath,
+    };
   }
 
   for (const table of reader.meta.tables) {
+    if (options.shouldCancel?.()) {
+      return {
+        matches,
+        truncated: false,
+        columnsConsidered,
+        columnsScanned,
+        canceled: true,
+        dbPackPath: reader.meta.dbPackPath,
+      };
+    }
     if (options.tableFilter && !table.packedFilePath.includes(options.tableFilter)) continue;
 
     for (const column of table.columns) {
@@ -135,6 +188,16 @@ export const searchVanillaDbCache = (
       if (!perRow) continue;
 
       for (let rowIndex = 0; rowIndex < perRow.length; rowIndex++) {
+        if (rowIndex % 4096 === 0 && options.shouldCancel?.()) {
+          return {
+            matches,
+            truncated: false,
+            columnsConsidered,
+            columnsScanned,
+            canceled: true,
+            dbPackPath: reader.meta.dbPackPath,
+          };
+        }
         if (!matcher.has(perRow[rowIndex])) continue;
         matches.push({
           packedFilePath: table.packedFilePath,
@@ -144,11 +207,25 @@ export const searchVanillaDbCache = (
           value: reader.resolvePoolValue(perRow[rowIndex]) ?? "",
         });
         if (matches.length >= maxResults) {
-          return { matches, truncated: true, columnsConsidered, columnsScanned };
+          return {
+            matches,
+            truncated: true,
+            columnsConsidered,
+            columnsScanned,
+            canceled: false,
+            dbPackPath: reader.meta.dbPackPath,
+          };
         }
       }
     }
   }
 
-  return { matches, truncated: false, columnsConsidered, columnsScanned };
+  return {
+    matches,
+    truncated: false,
+    columnsConsidered,
+    columnsScanned,
+    canceled: false,
+    dbPackPath: reader.meta.dbPackPath,
+  };
 };

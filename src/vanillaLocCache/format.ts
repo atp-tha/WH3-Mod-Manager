@@ -23,15 +23,19 @@
 export const VANILLA_LOC_CACHE_MAGIC = "WLCC";
 
 /** Bump when the layout changes. A reader rejects anything it does not recognise. */
-export const VANILLA_LOC_CACHE_VERSION = 1;
+export const VANILLA_LOC_CACHE_VERSION = 2;
 
-export const VANILLA_LOC_CACHE_HEADER_BYTES = 24;
+export const VANILLA_LOC_CACHE_HEADER_BYTES = 36;
 
 export interface VanillaLocCacheMeta {
   count: number;
   keyBytesLength: number;
   checkpointCount: number;
   valueBlobLength: number;
+  /** Front-coded source labels (`packPath\0locFilePath`). */
+  sourceBytesLength: number;
+  sourceCheckpointCount: number;
+  sourceCount: number;
 }
 
 /** Where each section starts, derived from the header so nothing stores redundant offsets. */
@@ -40,6 +44,9 @@ export interface VanillaLocCacheSections {
   checkpointsOffset: number;
   valueOffsetsOffset: number;
   valueBlobOffset: number;
+  sourceBytesOffset: number;
+  sourceCheckpointsOffset: number;
+  sourceIdsOffset: number;
   /** The furthest byte the layout points at, used to reject a file truncated mid-write. */
   requiredSize: number;
 }
@@ -50,12 +57,18 @@ export const getVanillaLocCacheSections = (meta: VanillaLocCacheMeta): VanillaLo
   const valueOffsetsOffset = checkpointsOffset + meta.checkpointCount * 4;
   // One extra offset closes the last value, so a value's length is always offsets[n + 1] - offsets[n].
   const valueBlobOffset = valueOffsetsOffset + (meta.count + 1) * 4;
+  const sourceBytesOffset = valueBlobOffset + meta.valueBlobLength;
+  const sourceCheckpointsOffset = sourceBytesOffset + meta.sourceBytesLength;
+  const sourceIdsOffset = sourceCheckpointsOffset + meta.sourceCheckpointCount * 4;
   return {
     keyBytesOffset,
     checkpointsOffset,
     valueOffsetsOffset,
     valueBlobOffset,
-    requiredSize: valueBlobOffset + meta.valueBlobLength,
+    sourceBytesOffset,
+    sourceCheckpointsOffset,
+    sourceIdsOffset,
+    requiredSize: sourceIdsOffset + meta.count * 2,
   };
 };
 
@@ -68,6 +81,9 @@ export const writeVanillaLocCacheHeader = (meta: VanillaLocCacheMeta): Uint8Arra
   view.setUint32(12, meta.keyBytesLength, true);
   view.setUint32(16, meta.checkpointCount, true);
   view.setUint32(20, meta.valueBlobLength, true);
+  view.setUint32(24, meta.sourceBytesLength, true);
+  view.setUint32(28, meta.sourceCheckpointCount, true);
+  view.setUint32(32, meta.sourceCount, true);
   return header;
 };
 
@@ -84,5 +100,8 @@ export const readVanillaLocCacheHeader = (bytes: Uint8Array): VanillaLocCacheMet
     keyBytesLength: view.getUint32(12, true),
     checkpointCount: view.getUint32(16, true),
     valueBlobLength: view.getUint32(20, true),
+    sourceBytesLength: view.getUint32(24, true),
+    sourceCheckpointCount: view.getUint32(28, true),
+    sourceCount: view.getUint32(32, true),
   };
 };

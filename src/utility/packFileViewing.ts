@@ -1,6 +1,6 @@
 export type PackedFileViewerKind = "text" | "image";
 
-const TEXT_FILE_EXTENSIONS = new Set([
+export const TEXT_FILE_EXTENSIONS = new Set([
   ".css",
   ".htm",
   ".html",
@@ -14,6 +14,16 @@ const TEXT_FILE_EXTENSIONS = new Set([
   ".xml",
   ".xml.material",
 ]);
+
+/** Fast path for callers that already hold a lowercased packed-file path. */
+export const isTextPackedFilePath = (lowerFilePath: string): boolean => {
+  const normalized = lowerFilePath;
+  if (normalized.startsWith("whmmflows\\")) return true;
+  const extension = normalized.endsWith(".xml.material")
+    ? ".xml.material"
+    : normalized.slice(normalized.lastIndexOf("."));
+  return TEXT_FILE_EXTENSIONS.has(extension);
+};
 
 const IMAGE_FILE_MIME_TYPES: Record<string, string> = {
   ".bmp": "image/bmp",
@@ -41,10 +51,10 @@ export const getPackedFileViewerKind = (filePath: string): PackedFileViewerKind 
     return "text";
   }
 
-  const extension = getPackedFileLowerExtension(filePath);
-  if (TEXT_FILE_EXTENSIONS.has(extension)) {
+  if (isTextPackedFilePath(normalizedFilePath)) {
     return "text";
   }
+  const extension = getPackedFileLowerExtension(filePath);
   if (IMAGE_FILE_MIME_TYPES[extension]) {
     return "image";
   }

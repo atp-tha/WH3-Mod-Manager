@@ -102,7 +102,8 @@ export interface VanillaLocCacheRequest {
   /** The game's localisation packs, in load order. */
   packPaths: readonly string[];
   /** Reads every loc entry out of those packs. Only called when the cache has to be built. */
-  readEntries: () => Promise<Iterable<readonly [string, string]>> | Iterable<readonly [string, string]>;
+  readEntries: () =>
+    Promise<Iterable<readonly [string, string, string?]>> | Iterable<readonly [string, string, string?]>;
 }
 
 /**

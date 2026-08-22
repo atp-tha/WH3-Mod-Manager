@@ -147,7 +147,10 @@ export const readFrontCodedEntry = (block: FrontCodedBlock, rank: number): strin
  * that just wants to test each value never has to hold all of them at once - over a large block that
  * array is the dominant cost, not the decoding.
  */
-export const forEachFrontCodedEntry = (block: FrontCodedBlock, visit: (value: string, rank: number) => void): void => {
+export const forEachFrontCodedEntry = (
+  block: FrontCodedBlock,
+  visit: (value: string, rank: number) => boolean | void,
+): void => {
   let offset = 0;
   let value = "";
 
@@ -155,7 +158,7 @@ export const forEachFrontCodedEntry = (block: FrontCodedBlock, visit: (value: st
     const [shared, afterShared] = readVarint(block.bytes, offset);
     const [suffixLength, afterLength] = readVarint(block.bytes, afterShared);
     value = value.slice(0, shared) + decodeSuffix(block.bytes, afterLength, afterLength + suffixLength);
-    visit(value, rank);
+    if (visit(value, rank) === false) return;
     offset = afterLength + suffixLength;
   }
 };

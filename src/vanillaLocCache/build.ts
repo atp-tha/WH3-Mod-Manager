@@ -10,16 +10,26 @@ const textEncoder = new TextEncoder();
  * an earlier one. Sorting happens here rather than in the caller because ranks in the key block have
  * to agree with the value offsets, and keeping both in one place is what guarantees that.
  */
-export const buildVanillaLocCacheBytes = (entriesInPackOrder: Iterable<readonly [string, string]>) => {
-  const byKey = new Map<string, string>();
-  for (const [key, value] of entriesInPackOrder) {
-    if (key !== "") byKey.set(key, value);
+export type VanillaLocCacheEntry = readonly [key: string, value: string, sourceLabel?: string];
+
+export const buildVanillaLocCacheBytes = (entriesInPackOrder: Iterable<VanillaLocCacheEntry>) => {
+  const byKey = new Map<string, { value: string; sourceLabel?: string }>();
+  for (const [key, value, sourceLabel] of entriesInPackOrder) {
+    if (key !== "") byKey.set(key, { value, sourceLabel });
   }
 
   const keys = Array.from(byKey.keys()).sort();
   const keyBlock = buildFrontCodedBlock(keys);
 
-  const encodedValues = keys.map((key) => textEncoder.encode(byKey.get(key)!));
+  const sourceLabels = Array.from(
+    new Set(keys.map((key) => byKey.get(key)?.sourceLabel).filter((source): source is string => !!source)),
+  ).sort();
+  const sourceBlock = buildFrontCodedBlock(sourceLabels);
+  const sourceIdByLabel = new Map(sourceLabels.map((source, index) => [source, index]));
+  const sourceIds = keys.map((key) => sourceIdByLabel.get(byKey.get(key)?.sourceLabel ?? "") ?? 0xffff);
+  const encodedSourceBytes = sourceBlock.bytes;
+
+  const encodedValues = keys.map((key) => textEncoder.encode(byKey.get(key)!.value));
   const valueBlobLength = encodedValues.reduce((total, value) => total + value.length, 0);
 
   const meta: VanillaLocCacheMeta = {
@@ -27,6 +37,9 @@ export const buildVanillaLocCacheBytes = (entriesInPackOrder: Iterable<readonly 
     keyBytesLength: keyBlock.bytes.length,
     checkpointCount: keyBlock.checkpoints.length,
     valueBlobLength,
+    sourceBytesLength: encodedSourceBytes.length,
+    sourceCheckpointCount: sourceBlock.checkpoints.length,
+    sourceCount: sourceLabels.length,
   };
   const sections = getVanillaLocCacheSections(meta);
   const bytes = new Uint8Array(sections.requiredSize);
@@ -45,6 +58,14 @@ export const buildVanillaLocCacheBytes = (entriesInPackOrder: Iterable<readonly 
     valueCursor += encodedValues[rank].length;
   }
   view.setUint32(sections.valueOffsetsOffset + encodedValues.length * 4, valueCursor, true);
+
+  bytes.set(encodedSourceBytes, sections.sourceBytesOffset);
+  for (let index = 0; index < sourceBlock.checkpoints.length; index++) {
+    view.setUint32(sections.sourceCheckpointsOffset + index * 4, sourceBlock.checkpoints[index], true);
+  }
+  for (let index = 0; index < sourceIds.length; index++) {
+    view.setUint16(sections.sourceIdsOffset + index * 2, sourceIds[index], true);
+  }
 
   return bytes;
 };

@@ -6,6 +6,7 @@ import { IoSearch } from "react-icons/io5";
 
 import localizationContext from "../../localizationContext";
 import { getPackNameFromPath } from "@/src/utility/packFileHelpers";
+import { createSearchMatcher } from "@/src/globalSearch/matcher";
 import {
   DEFAULT_GLOBAL_SEARCH_KINDS,
   GLOBAL_SEARCH_RESULT_KINDS,
@@ -52,25 +53,6 @@ const RESULT_ROW_HEIGHT = 22;
 
 const packPathKey = (value: string) => value.replaceAll("/", "\\").toLowerCase();
 
-/**
- * Whether the pattern compiles, for the regex toggle.
- *
- * Unlike the ancillaries filter box, an uncompilable pattern here does **not** fall back to a
- * literal search: that box filters as you type, this one runs on a button, and quietly searching for
- * the literal text `foo(` when the user meant a group is a wrong answer rather than a partial one.
- * The Search button is disabled instead, and the input says why.
- */
-const useRegexValidity = (query: string, isRegexEnabled: boolean): boolean =>
-  useMemo(() => {
-    if (!isRegexEnabled || query === "") return true;
-    try {
-      new RegExp(query);
-      return true;
-    } catch {
-      return false;
-    }
-  }, [isRegexEnabled, query]);
-
 /** Splits a value around a match so the matched run can be marked. */
 const renderHighlighted = (value: string, start: number, end: number) => {
   if (start < 0 || end <= start || start > value.length) return <>{value}</>;
@@ -116,7 +98,10 @@ const GlobalSearchPanel = memo(({ openPacks, onOpenDbResult, onOpenFileResult, o
   const searchCounterRef = useRef(0);
   const queryInputRef = useRef<HTMLInputElement>(null);
 
-  const isRegexValid = useRegexValidity(query, isRegex);
+  const isRegexValid = useMemo(
+    () => createSearchMatcher(query, { caseSensitive, regex: isRegex }).isValidRegex,
+    [caseSensitive, isRegex, query],
+  );
 
   useEffect(() => {
     queryInputRef.current?.focus();
