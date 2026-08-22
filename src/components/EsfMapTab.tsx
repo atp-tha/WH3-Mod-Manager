@@ -76,6 +76,7 @@ const EsfMapTab = memo(({ isActive = true }: EsfMapTabProps) => {
   enabledModsRef.current = enabledMods;
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const canvasWrapRef = useRef<HTMLDivElement>(null);
+  const mapListItemRefs = useRef(new Map<string, HTMLButtonElement>());
   const mapImagesRef = useRef(new Map<string, HTMLImageElement>());
   const mapDragRef = useRef<{
     pointerId: number;
@@ -156,6 +157,7 @@ const EsfMapTab = memo(({ isActive = true }: EsfMapTabProps) => {
     () => map?.markers.find((marker) => marker.id === selectedMarkerId),
     [map, selectedMarkerId],
   );
+  const selectedMarkerFactionKey = factionKey(selectedMarker?.ownerFaction);
 
   const factionsByKey = useMemo(
     () => new Map((map?.factions ?? []).map((faction) => [faction.key.toLowerCase(), faction])),
@@ -171,6 +173,51 @@ const EsfMapTab = memo(({ isActive = true }: EsfMapTabProps) => {
     );
   }, [filter, map]);
 
+  const centerMapOnPoint = useCallback(
+    (mapX: number, mapY: number) => {
+      const canvas = canvasRef.current;
+      const canvasWrap = canvasWrapRef.current;
+      if (!canvas || !canvasWrap || !map) return;
+
+      const scaleX = canvas.clientWidth / map.width;
+      const scaleY = canvas.clientHeight / map.height;
+      if (!scaleX || !scaleY) return;
+
+      const targetLeft = canvas.offsetLeft + mapX * scaleX - canvasWrap.clientWidth / 2;
+      const targetTop = canvas.offsetTop + mapY * scaleY - canvasWrap.clientHeight / 2;
+      const maxScrollLeft = Math.max(0, canvasWrap.scrollWidth - canvasWrap.clientWidth);
+      const maxScrollTop = Math.max(0, canvasWrap.scrollHeight - canvasWrap.clientHeight);
+      canvasWrap.scrollLeft = Math.max(0, Math.min(maxScrollLeft, targetLeft));
+      canvasWrap.scrollTop = Math.max(0, Math.min(maxScrollTop, targetTop));
+    },
+    [map],
+  );
+
+  const centerMapOnMarker = useCallback(
+    (marker: EsfMapMarker) => {
+      if (!map) return;
+      centerMapOnPoint(marker.gx, displayYFromCell(map.height, marker.gy, map.displayFlipY));
+    },
+    [centerMapOnPoint, map],
+  );
+
+  const centerMapOnMarkers = useCallback(
+    (markers: EsfMapMarker[]) => {
+      if (!map || markers.length === 0) return;
+
+      const points = markers.map((marker) => ({
+        x: marker.gx,
+        y: displayYFromCell(map.height, marker.gy, map.displayFlipY),
+      }));
+      const minX = Math.min(...points.map((point) => point.x));
+      const maxX = Math.max(...points.map((point) => point.x));
+      const minY = Math.min(...points.map((point) => point.y));
+      const maxY = Math.max(...points.map((point) => point.y));
+      centerMapOnPoint((minX + maxX) / 2, (minY + maxY) / 2);
+    },
+    [centerMapOnPoint, map],
+  );
+
   useEffect(() => {
     if (!map) return;
     const selectedRegion =
@@ -183,6 +230,21 @@ const EsfMapTab = memo(({ isActive = true }: EsfMapTabProps) => {
         : map.markers.find((marker) => marker.key.toLowerCase() === selectedRegion)?.id,
     );
   }, [map, mapSelectedRegion]);
+
+  useEffect(() => {
+    const itemKey =
+      mapView === "regions"
+        ? selectedMarkerId === undefined
+          ? undefined
+          : `region:${selectedMarkerId}`
+        : selectedMarkerFactionKey
+          ? `faction:${selectedMarkerFactionKey}`
+          : undefined;
+    if (!itemKey) return;
+
+    const listItem = mapListItemRefs.current.get(itemKey);
+    if (listItem?.scrollIntoView) listItem.scrollIntoView({ behavior: "instant", block: "nearest" });
+  }, [filter, map, mapView, selectedMarkerFactionKey, selectedMarkerId]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -386,18 +448,21 @@ const EsfMapTab = memo(({ isActive = true }: EsfMapTabProps) => {
     return () => canvasWrap.removeEventListener("wheel", handleWheel);
   }, [map, zoomAtPointer]);
 
-  const selectMapMarker = (marker: EsfMapMarker | undefined) => {
+  const selectMapMarker = (marker: EsfMapMarker | undefined, center = false) => {
     setSelectedMarkerId(marker?.id);
     if (marker && map) {
       dispatch(selectMapRegion({ campaign: map.campaignKey, region: marker.key }));
+      if (center) centerMapOnMarker(marker);
     } else {
       dispatch(clearMapRegionSelection());
     }
   };
 
   const selectMapFaction = (factionKeyToSelect: string) => {
-    const marker = map?.markers.find((candidate) => factionKey(candidate.ownerFaction) === factionKeyToSelect);
-    selectMapMarker(marker);
+    const factionMarkers =
+      map?.markers.filter((candidate) => factionKey(candidate.ownerFaction) === factionKeyToSelect) ?? [];
+    selectMapMarker(factionMarkers[0]);
+    centerMapOnMarkers(factionMarkers);
   };
 
   const beginMapDrag = (event: React.PointerEvent<HTMLCanvasElement>) => {
@@ -650,7 +715,12 @@ const EsfMapTab = memo(({ isActive = true }: EsfMapTabProps) => {
                     <button
                       key={`${marker.id}-${marker.key}`}
                       type="button"
-                      onClick={() => selectMapMarker(marker)}
+                      ref={(element) => {
+                        const key = `region:${marker.id}`;
+                        if (element) mapListItemRefs.current.set(key, element);
+                        else mapListItemRefs.current.delete(key);
+                      }}
+                      onClick={() => selectMapMarker(marker, true)}
                       className={`mb-1 block w-full rounded border px-2 py-1.5 text-left text-sm ${
                         selectedMarkerId === marker.id
                           ? "border-blue-500 bg-blue-950/60 text-gray-100"
@@ -669,6 +739,11 @@ const EsfMapTab = memo(({ isActive = true }: EsfMapTabProps) => {
                       <button
                         key={faction.key}
                         type="button"
+                        ref={(element) => {
+                          const key = `faction:${faction.key.toLowerCase()}`;
+                          if (element) mapListItemRefs.current.set(key, element);
+                          else mapListItemRefs.current.delete(key);
+                        }}
                         onClick={() => selectMapFaction(faction.key.toLowerCase())}
                         className={`mb-1 flex w-full items-center gap-2 rounded border px-2 py-1.5 text-left text-sm ${
                           isSelected
