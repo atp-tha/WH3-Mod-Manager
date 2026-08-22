@@ -134,6 +134,7 @@ export const FOREIGN_SLOT_TYPE_CULTURES: Readonly<Record<string, string>> = {
   TYRANTS_DEMANDS: "wh3_main_ogr_ogre_kingdoms",
   UNDERDEEP: "wh_main_dwf_dwarfs",
   UNDEREMPIRE: "wh2_main_skv_skaven",
+  BLACK_TOWER: "wh_main_emp_empire",
 };
 
 /**
