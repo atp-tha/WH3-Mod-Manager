@@ -500,6 +500,10 @@ const api = {
       variantMeshPath?: string;
       originPackPath: string;
       originLabel: string;
+      cultureKey?: string;
+      cultureName?: string;
+      cultures?: { key: string; name: string }[];
+      caste?: string;
     }[];
     error?: string;
   }> => ipcRenderer.invoke("getVisualsUnitsData", enabledMods),

@@ -25,6 +25,12 @@ const createMod = (name: string, overrides: Partial<Mod> = {}): Mod => ({
 describe("selectConfigSavePayload", () => {
   beforeEach(resetConfigSavePayloadCache);
 
+  it("includes the Visuals culture sort option in the saved config payload", () => {
+    const payload = selectConfigSavePayload({ ...initialState, isVisualsSortByCultureEnabled: true } as AppState);
+
+    expect(payload.config.isVisualsSortByCultureEnabled).toBe(true);
+  });
+
   it("retains cached metadata for unavailable preset mods and fills blank live metadata", () => {
     const liveMod = createMod("live.pack", { categories: [] });
     const appState = {

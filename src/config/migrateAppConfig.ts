@@ -151,6 +151,7 @@ const withDefaults = (config: AppConfig): AppConfig => {
     userFlowOptions: config.userFlowOptions ?? {},
     nodeEditorFavorites: config.nodeEditorFavorites ?? [],
     hiddenMainWindowTabs: config.hiddenMainWindowTabs ?? [],
+    isVisualsSortByCultureEnabled: config.isVisualsSortByCultureEnabled ?? false,
     moddersPrefix: config.moddersPrefix ?? "",
     modRowsSortingType: config.modRowsSortingType ?? SortingType.Ordered,
     enabledModsPaneSortingType: config.enabledModsPaneSortingType ?? SortingType.Ordered,

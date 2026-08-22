@@ -570,6 +570,11 @@ const getVisualsTableContribution = (pack: Pack): VisualsTableContribution => {
     variants: [],
     unitVariants: [],
     landUnits: [],
+    mainUnits: [],
+    mainUnitLinks: [],
+    unitPermissions: [],
+    factions: [],
+    culturesSubcultures: [],
   };
 
   const forEachTableRow = (tableName: string, visit: (schemaFieldRow: AmendedSchemaField[]) => void) => {
@@ -597,6 +602,31 @@ const getVisualsTableContribution = (pack: Pack): VisualsTableContribution => {
     const faction = row.find((field) => field.name === "faction")?.resolvedKeyValue || "";
     const variantName = row.find((field) => field.name === "variant")?.resolvedKeyValue || "";
     contribution.unitVariants.push([unitKey, faction, variantName]);
+  });
+  forEachTableRow("main_units_tables", (row) => {
+    const unitKey = row.find((field) => field.name === "unit")?.resolvedKeyValue;
+    const landUnitKey = row.find((field) => field.name === "land_unit")?.resolvedKeyValue;
+    if (!landUnitKey) return;
+    if (unitKey) contribution.mainUnitLinks!.push([unitKey, landUnitKey]);
+    const caste = row.find((field) => field.name === "caste")?.resolvedKeyValue || "";
+    contribution.mainUnits!.push([landUnitKey, caste]);
+  });
+  forEachTableRow("units_custom_battle_permissions_tables", (row) => {
+    const unitKey = row.find((field) => field.name === "unit")?.resolvedKeyValue;
+    const factionKey = row.find((field) => field.name === "faction")?.resolvedKeyValue;
+    if (unitKey && factionKey) contribution.unitPermissions!.push([unitKey, factionKey]);
+  });
+  forEachTableRow("factions_tables", (row) => {
+    const factionKey = row.find((field) => field.name === "key")?.resolvedKeyValue;
+    if (!factionKey) return;
+    const subculture = row.find((field) => field.name === "subculture")?.resolvedKeyValue || "";
+    contribution.factions!.push([factionKey, subculture]);
+  });
+  forEachTableRow("cultures_subcultures_tables", (row) => {
+    const subculture = row.find((field) => field.name === "subculture")?.resolvedKeyValue;
+    if (!subculture) return;
+    const culture = row.find((field) => field.name === "culture")?.resolvedKeyValue || "";
+    contribution.culturesSubcultures!.push([subculture, culture]);
   });
   forEachTableRow("land_units_tables", (row) => {
     const unitKey = row.find((field) => field.name === "key")?.resolvedKeyValue;
@@ -6504,7 +6534,15 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
       }
       const tablesToRead = Array.from(
         new Set(
-          ["land_units_tables", "unit_variants_tables", "variants_tables"]
+          [
+            "land_units_tables",
+            "main_units_tables",
+            "units_custom_battle_permissions_tables",
+            "unit_variants_tables",
+            "factions_tables",
+            "cultures_subcultures_tables",
+            "variants_tables",
+          ]
             .flatMap((tableName) => resolveTable(tableName))
             .map((tableName) => `db\\${tableName}\\`),
         ),
@@ -6656,7 +6694,17 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
           const contribution = contributionByPath.get(packPath)?.tables?.contribution;
           return contribution ? [{ packPath, contribution }] : [];
         });
-      const { variantsByName, unitToVariantRows, landUnitKeys, unitKeyToOriginPackPath } =
+      const {
+        variantsByName,
+        unitToVariantRows,
+        landUnitKeys,
+        unitKeyToOriginPackPath,
+        unitKeyToCaste,
+        mainUnitToLandUnit,
+        unitToPermissionFactions,
+        factionToSubculture,
+        subcultureToCulture,
+      } =
         mergeVisualsTableContributions(
           toTableContributions(tablePathsInMergeOrder),
           toTableContributions([...dbPriorityMods.map((mod) => mod.path), dbPackPath]),
@@ -6671,6 +6719,17 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
         const localized = getLocalizedName(locId);
         return resolveTextReplacements(localized, getLocalizedName) || localized;
       };
+      const landUnitToSubcultures = new Map<string, string[]>();
+      for (const [unitKey, factionKeys] of unitToPermissionFactions) {
+        const landUnitKey = mainUnitToLandUnit.get(unitKey) || (landUnitKeys.has(unitKey) ? unitKey : undefined);
+        if (!landUnitKey) continue;
+        const subcultures = new Set<string>();
+        for (const factionKey of factionKeys) {
+          const subculture = factionToSubculture.get(factionKey);
+          if (subculture) subcultures.add(subculture);
+        }
+        if (subcultures.size > 0) landUnitToSubcultures.set(landUnitKey, Array.from(subcultures));
+      }
       const visualsUnits = [] as {
         unitKey: string;
         faction: string;
@@ -6679,6 +6738,10 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
         variantMeshPath?: string;
         originPackPath: string;
         originLabel: string;
+        cultureKey: string;
+        cultureName: string;
+        cultures: Array<{ key: string; name: string }>;
+        caste: string;
       }[];
       for (const unitKey of landUnitKeys) {
         const rows = unitToVariantRows.get(unitKey);
@@ -6688,8 +6751,38 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
           originPackPath === dbPackPath
             ? "Vanilla"
             : modPathToLabel.get(originPackPath) || nodePath.basename(originPackPath);
+        const caste = unitKeyToCaste.get(unitKey) || "";
+        const addCultureMetadata = (faction: string) => {
+          const variantSubculture = factionToSubculture.get(faction) || "";
+          const subcultures = variantSubculture ? [variantSubculture] : landUnitToSubcultures.get(unitKey) || [];
+          const cultures = subcultures.map((subculture) => {
+            const parentCulture = subcultureToCulture.get(subculture) || "";
+            return {
+              key: subculture || parentCulture || "__unassigned",
+              name:
+                resolveVisualsLoc(`cultures_subcultures_name_${subculture}`) ||
+                resolveVisualsLoc(`cultures_name_${parentCulture}`) ||
+                subculture ||
+                parentCulture ||
+                "Unassigned",
+            };
+          });
+          if (cultures.length > 0) {
+            return { cultureKey: cultures[0].key, cultureName: cultures[0].name, cultures };
+          }
+          const unassigned = { key: "__unassigned", name: "Unassigned" };
+          return { cultureKey: unassigned.key, cultureName: unassigned.name, cultures: [unassigned] };
+        };
         if (!rows || rows.length === 0) {
-          visualsUnits.push({ unitKey, faction: "", localizedName, originPackPath, originLabel });
+          visualsUnits.push({
+            unitKey,
+            faction: "",
+            localizedName,
+            originPackPath,
+            originLabel,
+            ...addCultureMetadata(""),
+            caste,
+          });
           continue;
         }
         for (const row of rows) {
@@ -6704,6 +6797,8 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
             variantMeshPath,
             originPackPath,
             originLabel,
+            ...addCultureMetadata(row.faction),
+            caste,
           });
         }
       }

@@ -1114,6 +1114,8 @@ const appSlice = createSlice({
       state.technologyTreesDisplayMode =
         fromConfigAppState.technologyTreesDisplayMode ?? state.technologyTreesDisplayMode;
       state.hiddenMainWindowTabs = (fromConfigAppState.hiddenMainWindowTabs || []).filter(isHideableMainWindowTab);
+      state.isVisualsSortByCultureEnabled =
+        fromConfigAppState.isVisualsSortByCultureEnabled ?? state.isVisualsSortByCultureEnabled;
 
       const categoriesFromMods = new Set(state.currentPreset.mods.map((mod) => mod.categories ?? []).flat());
       if (fromConfigAppState.categories) {
@@ -1391,6 +1393,9 @@ const appSlice = createSlice({
     },
     toggleIsModListCategoryViewEnabled: (state: AppState) => {
       state.isModListCategoryViewEnabled = !state.isModListCategoryViewEnabled;
+    },
+    toggleIsVisualsSortByCultureEnabled: (state: AppState) => {
+      state.isVisualsSortByCultureEnabled = !state.isVisualsSortByCultureEnabled;
     },
     toggleIsPresetAuthorEnabled: (state: AppState) => {
       state.isPresetAuthorEnabled = !state.isPresetAuthorEnabled;
@@ -1777,6 +1782,7 @@ export const {
   toggleIsDualModListLayoutEnabled,
   toggleIsShowingDisabledModsLoadOrder,
   toggleIsModListCategoryViewEnabled,
+  toggleIsVisualsSortByCultureEnabled,
   setModListDensity,
   toggleIsPresetAuthorEnabled,
   toggleArePresetThumbnailsEnabled,

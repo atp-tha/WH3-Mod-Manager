@@ -2,7 +2,7 @@ import * as nodePath from "path";
 import * as fs from "fs";
 
 /** Bump whenever the extraction rules or the cached shape change. */
-export const VISUALS_DATA_CACHE_VERSION = 2;
+export const VISUALS_DATA_CACHE_VERSION = 4;
 /** Subfolder under `app.getPath("userData")`, so the two files stay together. */
 export const VISUALS_CACHE_DIR = "visuals";
 const VANILLA_CACHE_FILE = "vanilla.bin";
@@ -22,6 +22,16 @@ export interface VisualsTableContribution {
   variants: Array<[variantName: string, variantFilename: string]>;
   unitVariants: Array<[unitKey: string, faction: string, variantName: string]>;
   landUnits: string[];
+  /** Land-unit caste metadata from main_units, kept optional for callers constructing old fixtures. */
+  mainUnits?: Array<[landUnitKey: string, caste: string]>;
+  /** Main-unit -> land-unit links used to join Unit Viewer permissions to Visuals rows. */
+  mainUnitLinks?: Array<[unitKey: string, landUnitKey: string]>;
+  /** Main-unit -> faction permissions used by Unit Viewer to build culture/subculture groups. */
+  unitPermissions?: Array<[unitKey: string, factionKey: string]>;
+  /** Faction -> subculture metadata used to resolve a variant's culture. */
+  factions?: Array<[factionKey: string, subculture: string]>;
+  /** Subculture -> culture metadata used to group the Visuals list. */
+  culturesSubcultures?: Array<[subculture: string, culture: string]>;
 }
 
 export interface VisualsMergedTableData {
@@ -29,6 +39,11 @@ export interface VisualsMergedTableData {
   unitToVariantRows: Map<string, Array<{ faction: string; variantName: string }>>;
   landUnitKeys: Set<string>;
   unitKeyToOriginPackPath: Map<string, string>;
+  unitKeyToCaste: Map<string, string>;
+  mainUnitToLandUnit: Map<string, string>;
+  unitToPermissionFactions: Map<string, Set<string>>;
+  factionToSubculture: Map<string, string>;
+  subcultureToCulture: Map<string, string>;
 }
 
 export interface VisualsPackCacheIdentity {
@@ -324,6 +339,11 @@ export const mergeVisualsTableContributions = (
   const unitToVariantRows = new Map<string, Array<{ faction: string; variantName: string }>>();
   const landUnitKeys = new Set<string>();
   const unitKeyToOriginPackPath = new Map<string, string>();
+  const unitKeyToCaste = new Map<string, string>();
+  const mainUnitToLandUnit = new Map<string, string>();
+  const unitToPermissionFactions = new Map<string, Set<string>>();
+  const factionToSubculture = new Map<string, string>();
+  const subcultureToCulture = new Map<string, string>();
 
   for (const { contribution } of tableOrder) {
     for (const [variantName, variantFilename] of contribution.variants) {
@@ -337,6 +357,21 @@ export const mergeVisualsTableContributions = (
       else rows.push(nextRow);
       unitToVariantRows.set(unitKey, rows);
     }
+    for (const [landUnitKey, caste] of contribution.mainUnits || []) unitKeyToCaste.set(landUnitKey, caste);
+    for (const [unitKey, landUnitKey] of contribution.mainUnitLinks || []) {
+      mainUnitToLandUnit.set(unitKey, landUnitKey);
+    }
+    for (const [unitKey, factionKey] of contribution.unitPermissions || []) {
+      const factions = unitToPermissionFactions.get(unitKey) || new Set<string>();
+      factions.add(factionKey);
+      unitToPermissionFactions.set(unitKey, factions);
+    }
+    for (const [factionKey, subculture] of contribution.factions || []) {
+      factionToSubculture.set(factionKey, subculture);
+    }
+    for (const [subculture, culture] of contribution.culturesSubcultures || []) {
+      subcultureToCulture.set(subculture, culture);
+    }
     for (const unitKey of contribution.landUnits) landUnitKeys.add(unitKey);
   }
 
@@ -348,7 +383,17 @@ export const mergeVisualsTableContributions = (
     }
   }
 
-  return { variantsByName, unitToVariantRows, landUnitKeys, unitKeyToOriginPackPath };
+  return {
+    variantsByName,
+    unitToVariantRows,
+    landUnitKeys,
+    unitKeyToOriginPackPath,
+    unitKeyToCaste,
+    mainUnitToLandUnit,
+    unitToPermissionFactions,
+    factionToSubculture,
+    subcultureToCulture,
+  };
 };
 
 /** Merge localization entries in the same low-to-high priority order used by the live pack path. */

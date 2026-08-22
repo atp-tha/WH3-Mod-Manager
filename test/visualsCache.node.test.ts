@@ -123,11 +123,22 @@ describe("Visuals data cache", () => {
     vanilla.variants.push(["shared_variant", "vanilla.variantmeshdefinition"]);
     vanilla.unitVariants.push(["shared_unit", "faction", "shared_variant"]);
     vanilla.landUnits.push("shared_unit", "vanilla_only");
+    vanilla.mainUnits = [["shared_unit", "melee_infantry"]];
+    vanilla.mainUnitLinks = [["shared_main", "shared_unit"]];
+    vanilla.unitPermissions = [["shared_main", "faction"]];
+    vanilla.factions = [["faction", "emp_subculture"]];
+    vanilla.culturesSubcultures = [["emp_subculture", "human"]];
 
     const mod = emptyContribution();
     mod.variants.push(["shared_variant", "mod.variantmeshdefinition"]);
     mod.unitVariants.push(["shared_unit", "faction", "shared_variant"]);
     mod.landUnits.push("shared_unit", "mod_only");
+    mod.mainUnits = [["shared_unit", "lord"]];
+    mod.mainUnitLinks = [["shared_main", "shared_unit"]];
+    mod.unitPermissions = [["shared_main", "mod_faction"]];
+    mod.factions = [["faction", "chaos_subculture"]];
+    mod.factions.push(["mod_faction", "chaos_subculture"]);
+    mod.culturesSubcultures = [["chaos_subculture", "chaos"]];
 
     const merged = mergeVisualsTableContributions(
       [
@@ -144,6 +155,11 @@ describe("Visuals data cache", () => {
     expect(merged.unitKeyToOriginPackPath.get("shared_unit")).toBe("mod.pack");
     expect(merged.unitKeyToOriginPackPath.get("vanilla_only")).toBe("db.pack");
     expect(merged.landUnitKeys).toEqual(new Set(["shared_unit", "vanilla_only", "mod_only"]));
+    expect(merged.unitKeyToCaste.get("shared_unit")).toBe("lord");
+    expect(merged.mainUnitToLandUnit.get("shared_main")).toBe("shared_unit");
+    expect(merged.unitToPermissionFactions.get("shared_main")).toEqual(new Set(["faction", "mod_faction"]));
+    expect(merged.factionToSubculture.get("faction")).toBe("chaos_subculture");
+    expect(merged.subcultureToCulture.get("chaos_subculture")).toBe("chaos");
 
     expect(
       mergeVisualsLocContributions([

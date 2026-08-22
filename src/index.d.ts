@@ -242,6 +242,8 @@ declare global {
      * tab falls back to. Skill Trees and Tech Trees are steered by the tree display modes instead.
      */
     hiddenMainWindowTabs: MainWindowTab[];
+    /** Group the Visuals unit list by culture and then by unit caste. */
+    isVisualsSortByCultureEnabled: boolean;
     mapCampaignName: string;
     mapSelectedRegion?: MapRegionSelection;
     isCreateSteamCollectionOpen: boolean;
@@ -350,6 +352,7 @@ declare global {
     | "skillTreesDisplayMode"
     | "technologyTreesDisplayMode"
     | "hiddenMainWindowTabs"
+    | "isVisualsSortByCultureEnabled"
   >;
 
   /** Everything stored for one game. Per-mod data lives in modUserData, one copy, not once per preset. */

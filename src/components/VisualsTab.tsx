@@ -1,5 +1,7 @@
 import React, { memo, useEffect, useMemo, useRef, useState } from "react";
-import { useAppSelector } from "../hooks";
+import { toggleIsVisualsSortByCultureEnabled } from "../appSlice";
+import { useAppDispatch, useAppSelector } from "../hooks";
+import { useLocalizations } from "../localizationContext";
 import { compileVisualsUnitFilter } from "../visuals/unitFilter";
 import { Resizable } from "re-resizable";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
@@ -13,6 +15,20 @@ type VisualsUnitEntry = {
   variantMeshPath?: string;
   originPackPath: string;
   originLabel: string;
+  cultureKey?: string;
+  cultureName?: string;
+  cultures?: Array<{ key: string; name: string }>;
+  caste?: string;
+};
+
+type VisualsCultureGroup = {
+  key: string;
+  label: string;
+  castes: Array<{
+    key: string;
+    label: string;
+    units: VisualsUnitEntry[];
+  }>;
 };
 
 type VisualsViewerTab = {
@@ -41,6 +57,8 @@ type VisualsAssetEditorContextMenu = {
 
 const ALL_VISUALS_PACKS_VALUE = "all";
 const VANILLA_VISUALS_PACK_VALUE = "vanilla";
+const UNASSIGNED_CULTURE_KEY = "__unassigned";
+const UNKNOWN_CASTE_KEY = "__unknown";
 
 type VisualsPackOption = {
   value: string;
@@ -63,8 +81,21 @@ const getTabLabel = (path: string) => {
   return base.length > 48 ? `${base.slice(0, 45)}...` : base;
 };
 
+const getCasteSortOrder = (caste: string) => {
+  const normalized = caste.toLowerCase();
+  if (normalized === "lord") return 0;
+  if (normalized === "hero") return 1;
+  return 2;
+};
+
+const formatCasteLabel = (caste: string) =>
+  caste.replace(/[_-]+/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase()) || "Unknown caste";
+
 const VisualsTab = memo(() => {
+  const dispatch = useAppDispatch();
+  const localized = useLocalizations();
   const isFeaturesForModdersEnabled = useAppSelector((state) => state.app.isFeaturesForModdersEnabled);
+  const isSortByCultureEnabled = useAppSelector((state) => state.app.isVisualsSortByCultureEnabled);
   const currentPresetMods = useAppSelector((state) => state.app.currentPreset.mods);
   const enabledMods = useMemo(() => currentPresetMods.filter((mod) => mod.isEnabled), [currentPresetMods]);
 
@@ -78,6 +109,9 @@ const VisualsTab = memo(() => {
   const [packFilter, setPackFilter] = useState(ALL_VISUALS_PACKS_VALUE);
   const [isGroupedByOrigin, setIsGroupedByOrigin] = useState(false);
   const [collapsedOriginGroups, setCollapsedOriginGroups] = useState<Record<string, boolean>>({});
+  const [collapsedCultureGroups, setCollapsedCultureGroups] = useState<Record<string, boolean>>({});
+  const [collapsedCasteGroups, setCollapsedCasteGroups] = useState<Record<string, boolean>>({});
+  const [isOptionsMenuOpen, setIsOptionsMenuOpen] = useState(false);
   const [viewerMessage, setViewerMessage] = useState<string | null>(null);
 
   const [tabs, setTabs] = useState<VisualsViewerTab[]>([]);
@@ -94,6 +128,19 @@ const VisualsTab = memo(() => {
 
   const unitClickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fileClickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const optionsMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!isOptionsMenuOpen) return;
+
+    const onPointerDown = (event: MouseEvent) => {
+      if (optionsMenuRef.current?.contains(event.target as Node)) return;
+      setIsOptionsMenuOpen(false);
+    };
+
+    document.addEventListener("mousedown", onPointerDown);
+    return () => document.removeEventListener("mousedown", onPointerDown);
+  }, [isOptionsMenuOpen]);
 
   const enabledModsKey = useMemo(
     () =>
@@ -239,8 +286,73 @@ const VisualsTab = memo(() => {
     }));
   }, [filteredUnits, isGroupedByOrigin, unitComparator]);
 
+  const cultureGroupedUnits = useMemo<VisualsCultureGroup[]>(() => {
+    const groups = new Map<string, { label: string; units: VisualsUnitEntry[] }>();
+    for (const unit of filteredUnits) {
+      const cultures = unit.cultures?.length
+        ? unit.cultures
+        : [
+            {
+              key: unit.cultureKey || UNASSIGNED_CULTURE_KEY,
+              name:
+                unit.cultureName || (unit.cultureKey === UNASSIGNED_CULTURE_KEY ? "Unassigned" : unit.cultureKey || ""),
+            },
+          ];
+      for (const culture of cultures) {
+        const key = culture.key || UNASSIGNED_CULTURE_KEY;
+        const label = culture.name || (key === UNASSIGNED_CULTURE_KEY ? "Unassigned" : key);
+        const group = groups.get(key);
+        if (group) {
+          if (!group.units.includes(unit)) group.units.push(unit);
+        } else groups.set(key, { label, units: [unit] });
+      }
+    }
+
+    return Array.from(groups.entries())
+      .sort(([firstKey, first], [secondKey, second]) => {
+        if (firstKey === UNASSIGNED_CULTURE_KEY && secondKey !== UNASSIGNED_CULTURE_KEY) return 1;
+        if (secondKey === UNASSIGNED_CULTURE_KEY && firstKey !== UNASSIGNED_CULTURE_KEY) return -1;
+        return collator.compare(first.label, second.label) || collator.compare(firstKey, secondKey);
+      })
+      .map(([key, group]) => {
+        const casteGroups = new Map<string, { label: string; units: VisualsUnitEntry[] }>();
+        for (const unit of group.units) {
+          const caste = unit.caste?.trim() || "";
+          const casteKey = caste || UNKNOWN_CASTE_KEY;
+          const casteLabel = caste ? formatCasteLabel(caste) : "Unknown caste";
+          const casteGroup = casteGroups.get(casteKey);
+          if (casteGroup) casteGroup.units.push(unit);
+          else casteGroups.set(casteKey, { label: casteLabel, units: [unit] });
+        }
+
+        return {
+          key,
+          label: group.label,
+          castes: Array.from(casteGroups.entries())
+            .sort(([firstKey, first], [secondKey, second]) => {
+              const casteOrder = getCasteSortOrder(firstKey) - getCasteSortOrder(secondKey);
+              return casteOrder || collator.compare(first.label, second.label) || collator.compare(firstKey, secondKey);
+            })
+            .map(([casteKey, caste]) => ({
+              key: casteKey,
+              label: caste.label,
+              units: [...caste.units].sort(unitComparator),
+            })),
+        };
+      });
+  }, [filteredUnits, unitComparator]);
+
   const toggleOriginGroupCollapsed = (label: string) => {
     setCollapsedOriginGroups((prev) => ({ ...prev, [label]: !prev[label] }));
+  };
+
+  const toggleCultureGroupCollapsed = (cultureKey: string) => {
+    setCollapsedCultureGroups((prev) => ({ ...prev, [cultureKey]: !prev[cultureKey] }));
+  };
+
+  const toggleCasteGroupCollapsed = (cultureKey: string, casteKey: string) => {
+    const groupKey = `${cultureKey}|${casteKey}`;
+    setCollapsedCasteGroups((prev) => ({ ...prev, [groupKey]: !prev[groupKey] }));
   };
 
   const activeTab = tabs.find((tab) => tab.id === activeTabId) || null;
@@ -510,6 +622,94 @@ const VisualsTab = memo(() => {
     );
   };
 
+  const renderUnitRow = (unit: VisualsUnitEntry, rowKey: string) => {
+    const hasPath = !!unit.variantMeshPath;
+    return (
+      <div
+        key={rowKey}
+        className={`px-3 py-2 border-b border-gray-700 cursor-pointer hover:bg-gray-700 ${
+          !hasPath ? "opacity-70" : ""
+        }`}
+        onClick={(event) => {
+          event.preventDefault();
+          if (unitClickTimer.current) clearTimeout(unitClickTimer.current);
+          unitClickTimer.current = setTimeout(() => {
+            unitClickTimer.current = null;
+            onUnitSingleClick(unit);
+          }, 220);
+        }}
+        onDoubleClick={(event) => {
+          event.preventDefault();
+          if (unitClickTimer.current) {
+            clearTimeout(unitClickTimer.current);
+            unitClickTimer.current = null;
+          }
+          onUnitDoubleClick(unit);
+        }}
+        onContextMenu={(event) => openAssetEditorContextMenu(event, unit.variantMeshPath)}
+        title={unit.variantMeshPath || "No variantmeshdefinition resolved"}
+      >
+        <div className="text-sm">{unit.localizedName}</div>
+        <div className="text-xs text-gray-400 break-all">
+          {unit.unitKey}
+          {unit.faction ? ` | faction: ${unit.faction}` : ""}
+        </div>
+        {unit.variantName && <div className="text-xs text-gray-500 break-all">variant: {unit.variantName}</div>}
+        {!unit.variantMeshPath && <div className="text-xs text-red-300">No resolved variantmeshdefinition</div>}
+      </div>
+    );
+  };
+
+  const renderCultureGroupedUnits = () =>
+    cultureGroupedUnits.flatMap((culture) => {
+      const cultureUnitCount = culture.castes.reduce((count, caste) => count + caste.units.length, 0);
+      const isCultureCollapsed = !!collapsedCultureGroups[culture.key];
+      const rows: React.ReactNode[] = [
+        <button
+          key={`culture:${culture.key}`}
+          type="button"
+          aria-expanded={!isCultureCollapsed}
+          className="flex w-full items-center border-b border-gray-700 bg-gray-850 px-3 py-2 text-left text-xs uppercase tracking-wide text-gray-300 hover:bg-gray-700"
+          onClick={() => toggleCultureGroupCollapsed(culture.key)}
+        >
+          <FontAwesomeIcon
+            icon={faChevronRight}
+            className={`mr-2 transition-transform duration-150 ${isCultureCollapsed ? "" : "rotate-90"}`}
+          />
+          {culture.label} ({cultureUnitCount})
+        </button>,
+      ];
+      if (isCultureCollapsed) return rows;
+
+      for (const caste of culture.castes) {
+        const casteGroupKey = `${culture.key}|${caste.key}`;
+        const isCasteCollapsed = !!collapsedCasteGroups[casteGroupKey];
+        rows.push(
+          <button
+            key={`culture:${culture.key}|caste:${caste.key}`}
+            type="button"
+            aria-expanded={!isCasteCollapsed}
+            className="flex w-full items-center border-b border-gray-700 bg-gray-900/60 px-5 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-gray-400 hover:bg-gray-700"
+            onClick={() => toggleCasteGroupCollapsed(culture.key, caste.key)}
+          >
+            <FontAwesomeIcon
+              icon={faChevronRight}
+              className={`mr-2 transition-transform duration-150 ${isCasteCollapsed ? "" : "rotate-90"}`}
+            />
+            {caste.label} ({caste.units.length})
+          </button>,
+        );
+        if (!isCasteCollapsed) {
+          rows.push(
+            ...caste.units.map((unit) =>
+              renderUnitRow(unit, `culture:${culture.key}|caste:${caste.key}|${unit.unitKey}|${unit.faction}`),
+            ),
+          );
+        }
+      }
+      return rows;
+    });
+
   if (!isFeaturesForModdersEnabled) {
     return <div className="text-gray-300 p-4">Visuals tab is available only when Modders features are enabled.</div>;
   }
@@ -564,6 +764,34 @@ const VisualsTab = memo(() => {
           <input type="checkbox" checked={isGroupedByOrigin} onChange={() => setIsGroupedByOrigin((prev) => !prev)} />
           Group by source
         </label>
+        <div className="relative" ref={optionsMenuRef}>
+          <button
+            type="button"
+            aria-haspopup="menu"
+            aria-expanded={isOptionsMenuOpen}
+            onClick={() => setIsOptionsMenuOpen((currentValue) => !currentValue)}
+            className="rounded border border-gray-600 bg-gray-700 px-3 py-1 text-white hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-gray-500"
+          >
+            {localized.options || "Options"}
+          </button>
+          {isOptionsMenuOpen && (
+            <div
+              role="menu"
+              className="absolute right-0 z-[250] mt-1 w-48 rounded-lg border border-gray-700 bg-gray-800 p-1 text-left shadow-lg"
+            >
+              <button
+                type="button"
+                role="menuitemcheckbox"
+                aria-checked={isSortByCultureEnabled}
+                className="flex w-full items-center gap-2 rounded px-3 py-2 text-sm text-white hover:bg-gray-700"
+                onClick={() => dispatch(toggleIsVisualsSortByCultureEnabled())}
+              >
+                <input type="checkbox" readOnly checked={isSortByCultureEnabled} className="pointer-events-none" />
+                {localized.visualsSortByCulture || "Sort by culture"}
+              </button>
+            </div>
+          )}
+        </div>
         <span className="text-gray-400">
           {isLoadingUnits ? "Loading..." : `${filteredUnits.length}/${packFilteredUnits.length} units`}
         </span>
@@ -582,49 +810,12 @@ const VisualsTab = memo(() => {
             <div className="h-[87vh] border border-gray-700 bg-gray-800 rounded overflow-auto">
               {isLoadingUnits && units.length === 0 ? (
                 <div className="p-3 text-gray-300">Loading unit list...</div>
+              ) : isSortByCultureEnabled ? (
+                renderCultureGroupedUnits()
               ) : !isGroupedByOrigin || !groupedUnits ? (
-                filteredUnits.map((unit) => {
-                  const rowKey = `${unit.unitKey}|${unit.faction}`;
-                  const hasPath = !!unit.variantMeshPath;
-                  return (
-                    <div
-                      key={rowKey}
-                      className={`px-3 py-2 border-b border-gray-700 cursor-pointer hover:bg-gray-700 ${
-                        !hasPath ? "opacity-70" : ""
-                      }`}
-                      onClick={(e) => {
-                        e.preventDefault();
-                        if (unitClickTimer.current) clearTimeout(unitClickTimer.current);
-                        unitClickTimer.current = setTimeout(() => {
-                          unitClickTimer.current = null;
-                          onUnitSingleClick(unit);
-                        }, 220);
-                      }}
-                      onDoubleClick={(e) => {
-                        e.preventDefault();
-                        if (unitClickTimer.current) {
-                          clearTimeout(unitClickTimer.current);
-                          unitClickTimer.current = null;
-                        }
-                        onUnitDoubleClick(unit);
-                      }}
-                      onContextMenu={(event) => openAssetEditorContextMenu(event, unit.variantMeshPath)}
-                      title={unit.variantMeshPath || "No variantmeshdefinition resolved"}
-                    >
-                      <div className="text-sm">{unit.localizedName}</div>
-                      <div className="text-xs text-gray-400 break-all">
-                        {unit.unitKey}
-                        {unit.faction ? ` | faction: ${unit.faction}` : ""}
-                      </div>
-                      {unit.variantName && (
-                        <div className="text-xs text-gray-500 break-all">variant: {unit.variantName}</div>
-                      )}
-                      {!unit.variantMeshPath && (
-                        <div className="text-xs text-red-300">No resolved variantmeshdefinition</div>
-                      )}
-                    </div>
-                  );
-                })
+                filteredUnits.map((unit) =>
+                  renderUnitRow(unit, `${unit.unitKey}|${unit.faction}|${unit.variantName || ""}`),
+                )
               ) : (
                 groupedUnits.flatMap((group) => {
                   const isCollapsed = !!collapsedOriginGroups[group.label];
@@ -645,52 +836,17 @@ const VisualsTab = memo(() => {
                     </button>
                   );
 
-                  const rows = isCollapsed
-                    ? []
-                    : group.units.map((unit) => {
-                        const rowKey = `${group.label}|${unit.unitKey}|${unit.faction}`;
-                        const hasPath = !!unit.variantMeshPath;
-                        return (
-                          <div
-                            key={rowKey}
-                            className={`px-3 py-2 border-b border-gray-700 cursor-pointer hover:bg-gray-700 ${
-                              !hasPath ? "opacity-70" : ""
-                            }`}
-                            onClick={(e) => {
-                              e.preventDefault();
-                              if (unitClickTimer.current) clearTimeout(unitClickTimer.current);
-                              unitClickTimer.current = setTimeout(() => {
-                                unitClickTimer.current = null;
-                                onUnitSingleClick(unit);
-                              }, 220);
-                            }}
-                            onDoubleClick={(e) => {
-                              e.preventDefault();
-                              if (unitClickTimer.current) {
-                                clearTimeout(unitClickTimer.current);
-                                unitClickTimer.current = null;
-                              }
-                              onUnitDoubleClick(unit);
-                            }}
-                            onContextMenu={(event) => openAssetEditorContextMenu(event, unit.variantMeshPath)}
-                            title={unit.variantMeshPath || "No variantmeshdefinition resolved"}
-                          >
-                            <div className="text-sm">{unit.localizedName}</div>
-                            <div className="text-xs text-gray-400 break-all">
-                              {unit.unitKey}
-                              {unit.faction ? ` | faction: ${unit.faction}` : ""}
-                            </div>
-                            {unit.variantName && (
-                              <div className="text-xs text-gray-500 break-all">variant: {unit.variantName}</div>
-                            )}
-                            {!unit.variantMeshPath && (
-                              <div className="text-xs text-red-300">No resolved variantmeshdefinition</div>
-                            )}
-                          </div>
-                        );
-                      });
-
-                  return [header, ...rows];
+                  return [
+                    header,
+                    ...(isCollapsed
+                      ? []
+                      : group.units.map((unit) =>
+                          renderUnitRow(
+                            unit,
+                            `${group.label}|${unit.unitKey}|${unit.faction}|${unit.variantName || ""}`,
+                          ),
+                        )),
+                  ];
                 })
               )}
             </div>

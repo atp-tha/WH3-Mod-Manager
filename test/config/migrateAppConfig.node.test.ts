@@ -140,6 +140,7 @@ describe("migrateAppConfig", () => {
     const config = migrateAppConfig({});
 
     expect(config.currentGame).toBe("wh3");
+    expect(config.isVisualsSortByCultureEnabled).toBe(false);
     expect(config.games.rome2).toEqual({
       currentPreset: { name: "", mods: [], version: 2 },
       presets: [],
@@ -147,6 +148,12 @@ describe("migrateAppConfig", () => {
     });
     expect(config.gameFolderPaths.rome2.modSourceOrder).toEqual(["data", "workshop"]);
     expect(config.alwaysEnabledModNames).toEqual([]);
+  });
+
+  it("preserves the Visuals culture sort option", () => {
+    const config = migrateAppConfig({ ...createLegacyConfig(), isVisualsSortByCultureEnabled: true });
+
+    expect(config.isVisualsSortByCultureEnabled).toBe(true);
   });
 
   it("is idempotent and leaves an already-migrated config alone", () => {
