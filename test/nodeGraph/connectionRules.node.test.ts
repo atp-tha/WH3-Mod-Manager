@@ -326,6 +326,21 @@ describe("applyConnection", () => {
     expect(withBranch.edges.map((edge) => edge.source).toSorted()).toEqual(["branch", "filter"]);
   });
 
+  it("keeps both sources when a second table selection is connected to combine same tables", () => {
+    const state = createFanInState("combinesametables");
+
+    const withFilter = applyConnection(state, { source: "filter", target: "target" }, {} as any);
+    const withBranch = applyConnection(
+      { nodes: withFilter.nodes, edges: withFilter.edges },
+      { source: "branch", target: "target" },
+      {} as any,
+    );
+
+    expect(withBranch.accepted).toBe(true);
+    expect(withBranch.edges).toHaveLength(2);
+    expect(withBranch.edges.map((edge) => edge.source).toSorted()).toEqual(["branch", "filter"]);
+  });
+
   it("still replaces the previous edge for a node that takes a single input", () => {
     const state = createFanInState("columnselectiondropdown");
 

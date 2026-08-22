@@ -378,6 +378,13 @@ export interface DeduplicateNodeData extends NodeData {
   inputColumnNames?: string[];
 }
 
+export interface CombineSameTablesNodeData extends NodeData {
+  inputType: "TableSelection";
+  outputType: "TableSelection";
+  columnNames: string[];
+  connectedTableName?: string;
+}
+
 export interface CustomSchemaNodeData extends NodeData {
   schemaColumns: CustomSchemaColumnWithId[];
   outputType: "CustomSchema";

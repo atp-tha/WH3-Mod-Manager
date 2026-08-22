@@ -8,6 +8,7 @@ import type {
   AppendTextNodeData,
   ColumnSelectionDropdownNodeData,
   ColumnSelectionNodeData,
+  CombineSameTablesNodeData,
   CustomRowsInputNodeData,
   ConditionalBranchNodeData,
   CustomSchemaNodeData,
@@ -259,6 +260,21 @@ const nodeDefinitions: Record<FlowNodeType, NodeDefinition> = {
       inputType: "TableSelection",
       outputType: "TableSelection",
       columnNames: [],
+    }),
+  }),
+  combinesametables: createNodeDefinition<CombineSameTablesNodeData>({
+    type: "combinesametables",
+    labelKey: "nodeEditorNodeCombineSameTablesLabel",
+    labelFallback: "Combine Same Tables",
+    descriptionKey: "nodeEditorNodeCombineSameTablesDescription",
+    descriptionFallback: "Merges input entries for the same table into one, keeping every row",
+    createData: ({ label }) => ({
+      label,
+      type: "combinesametables",
+      inputType: "TableSelection",
+      outputType: "TableSelection",
+      columnNames: [],
+      connectedTableName: "",
     }),
   }),
   filter: createNodeDefinition<FilterNodeData>({
@@ -879,6 +895,7 @@ const nodeTypeSectionDefinitionsInput: NodeTypeSectionDefinition[] = [
     nodes: [
       "addnewcolumn",
       "aggregatenested",
+      "combinesametables",
       "deepclone",
       "dumptotsv",
       "extracttable",

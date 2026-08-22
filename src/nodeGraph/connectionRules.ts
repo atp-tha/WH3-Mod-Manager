@@ -46,6 +46,7 @@ const TABLE_SELECTION_SOURCES = new Set([
   "generaterowsschema",
   "addnewcolumn",
   "getcountercolumn",
+  "combinesametables",
   "customrowsinput",
   "readtsvfrompack",
   "deepclone",
@@ -67,6 +68,7 @@ const TABLE_METADATA_TARGETS = new Set([
   "aggregatenested",
   "groupby",
   "deduplicate",
+  "combinesametables",
   "addnewcolumn",
   "generaterowsschema",
   "getcountercolumn",
@@ -592,7 +594,8 @@ export const applyConnection = (state: GraphState, params: Connection, context: 
       targetNode.type === "mathceil" ||
       // The executor merges multiple table selections for these (buildInputDataForTarget), so
       // replacing the existing edge here silently threw away a connection the run supports.
-      targetNode.type === "dumptotsv"
+      targetNode.type === "dumptotsv" ||
+      targetNode.type === "combinesametables"
     ) {
       return [...edges, newEdge];
     }

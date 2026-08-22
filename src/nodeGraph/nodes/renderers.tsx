@@ -30,6 +30,7 @@ import type {
   ColumnSelectionDropdownNodeData,
   ColumnSelectionNodeData,
   ColumnTransformation,
+  CombineSameTablesNodeData,
   CustomRowsInputNodeData,
   ConditionalBranchNodeData,
   CustomSchemaNodeData,
@@ -2802,6 +2803,42 @@ export const FlattenNestedNode: React.FC<{ data: FlattenNestedNodeData; id: stri
 
       <div className="text-xs text-gray-300 italic my-3">
         {localized.nodeEditorFlattenNestedDescription || "Expands nested arrays into separate flat rows"}
+      </div>
+
+      <div className="mt-2 text-xs text-gray-400">
+        {localized.nodeEditorOutput || "Output:"} {localized.nodeEditorTableSelection || "TableSelection"}
+      </div>
+
+      <Handle
+        type="source"
+        position={Position.Right}
+        className="w-3 h-3 bg-orange-500"
+        data-output-type="TableSelection"
+      />
+    </div>
+  );
+};
+
+// Combine Same Tables Node - Merges entries for the same table while preserving row order
+export const CombineSameTablesNode: React.FC<{ data: CombineSameTablesNodeData; id: string }> = ({ data, id }) => {
+  const localized = useLocalizations();
+  return (
+    <div className="bg-gray-700 border-2 border-orange-500 rounded-lg p-4 min-w-[200px]">
+      <Handle
+        type="target"
+        position={Position.Left}
+        className="w-3 h-3 bg-orange-500"
+        data-input-type="TableSelection"
+      />
+
+      <div className="text-white font-medium text-sm mb-2">{data.label}</div>
+      <div className="text-xs text-gray-400 mb-2">
+        {localized.nodeEditorInput || "Input:"} {localized.nodeEditorTableSelection || "TableSelection"}
+      </div>
+
+      <div className="text-xs text-gray-300 italic my-3">
+        {localized.nodeEditorCombineSameTablesDescription ||
+          "Entries for the same table become one entry holding every row"}
       </div>
 
       <div className="mt-2 text-xs text-gray-400">

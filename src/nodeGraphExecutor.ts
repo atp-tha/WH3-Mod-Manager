@@ -362,7 +362,8 @@ const buildInputDataForTarget = (
   if (
     (targetNode.type === "generaterows" ||
       targetNode.type === "generaterowsschema" ||
-      targetNode.type === "dumptotsv") &&
+      targetNode.type === "dumptotsv" ||
+      targetNode.type === "combinesametables") &&
     targetIncomingConnections.length > 1
   ) {
     return mergeTableSelectionInputs(targetIncomingConnections, executionResults, nodeMap);

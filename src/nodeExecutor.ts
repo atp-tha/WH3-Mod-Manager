@@ -609,6 +609,9 @@ export const executeNodeAction = async (request: NodeExecutionRequest): Promise<
       case "deduplicate":
         return await executeDeduplicateNode(nodeId, textValue, inputData, config, executionContext);
 
+      case "combinesametables":
+        return executeCombineSameTablesNode(nodeId, inputData, executionContext);
+
       case "generaterows":
       case "generaterowsschema":
         return await executeGenerateRowsNode(nodeId, textValue, inputData, config, executionContext);
@@ -7398,6 +7401,91 @@ function executeConditionalBranchNode(
     success: true,
     data: inputData,
     activeOutputHandles: [activeHandle],
+  };
+}
+
+/**
+ * Combines schema-backed entries for the same table and schema version, preserving input order.
+ * Non-table payloads and exact-output files stay as separate entries because they have different
+ * save semantics.
+ */
+function executeCombineSameTablesNode(
+  nodeId: string,
+  inputData: DBTablesNodeData,
+  executionContext?: FlowExecutionContext,
+): NodeExecutionResult {
+  if (!inputData || inputData.type !== "TableSelection") {
+    return { success: false, error: "Invalid input: Expected TableSelection data" };
+  }
+
+  const inputTables = inputData.tables || [];
+  const combinedTables: DBTablesNodeTable[] = [];
+  const rowsByGroupKey = new Map<string, AmendedSchemaField[]>();
+  const versionsByTableName = new Map<string, Set<string>>();
+
+  for (const entry of inputTables) {
+    const packedFile = entry.table;
+    const canCombine = !entry.outputFileName && !!packedFile?.schemaFields && !!packedFile.tableSchema;
+
+    if (!canCombine) {
+      combinedTables.push(entry);
+      continue;
+    }
+
+    const bareTableName = toBareTableName(entry.name).toLowerCase();
+    const version = packedFile.tableSchema!.version ?? packedFile.version ?? "";
+    const versionKey = String(version);
+    const versions = versionsByTableName.get(bareTableName) || new Set<string>();
+    versions.add(versionKey);
+    versionsByTableName.set(bareTableName, versions);
+
+    const groupKey = `${bareTableName}|${versionKey}|${entry.outputPathPrefix ?? ""}|${entry.outputPathSuffix ?? ""}`;
+    // flat() hands back a fresh array, so the group's first entry can own it outright and every
+    // later entry appends into it. Rebuilding the array per entry instead made combining the same
+    // table across a large mod list quadratic in the cells it copied.
+    const rows = getRowsForPackedFile(packedFile, executionContext).flat();
+    const combinedRows = rowsByGroupKey.get(groupKey);
+    if (combinedRows) {
+      // One at a time: push(...rows) passes every cell as an argument, which overflows the stack
+      // on a table of any real size.
+      for (const row of rows) combinedRows.push(row);
+      continue;
+    }
+
+    rowsByGroupKey.set(groupKey, rows);
+    combinedTables.push({
+      ...entry,
+      table: {
+        ...packedFile,
+        schemaFields: rows,
+      },
+    });
+  }
+
+  const warnings = [...versionsByTableName.entries()]
+    .filter(([, versions]) => versions.size > 1)
+    .map(([tableName, versions]) => {
+      const orderedVersions = [...versions].toSorted((left, right) =>
+        left.localeCompare(right, undefined, { numeric: true }),
+      );
+      const formattedVersions =
+        orderedVersions.length === 2
+          ? orderedVersions.join(" and ")
+          : `${orderedVersions.slice(0, -1).join(", ")}, and ${orderedVersions.at(-1)}`;
+      return `${tableName} appears at versions ${formattedVersions}; only entries at the same version were combined`;
+    });
+
+  console.log(`Combine Same Tables Node ${nodeId}: ${inputTables.length} entries in → ${combinedTables.length} out`);
+
+  return {
+    success: true,
+    data: {
+      type: "TableSelection",
+      tables: combinedTables,
+      sourceFiles: inputData.sourceFiles,
+      tableCount: combinedTables.length,
+    },
+    warnings: warnings.length > 0 ? warnings : undefined,
   };
 }
 

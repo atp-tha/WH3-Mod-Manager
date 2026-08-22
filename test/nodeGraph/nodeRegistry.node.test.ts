@@ -26,6 +26,24 @@ describe("nodeRegistry", () => {
     });
   });
 
+  it("creates Combine Same Tables with a table-selection pass-through shape", () => {
+    const node = createNodeFromDefinition("combinesametables", {
+      nodeId: "node_combine",
+      position: { x: 0, y: 0 },
+      label: "Combine Same Tables",
+      sortedTableNames: [],
+    });
+
+    expect(node.data).toMatchObject({
+      label: "Combine Same Tables",
+      type: "combinesametables",
+      inputType: "TableSelection",
+      outputType: "TableSelection",
+      columnNames: [],
+      connectedTableName: "",
+    });
+  });
+
   it("creates the schema variant of generate rows with custom schema defaults", () => {
     const node = createNodeFromDefinition("generaterowsschema", {
       nodeId: "node_2",

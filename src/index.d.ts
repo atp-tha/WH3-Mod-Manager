@@ -1352,6 +1352,7 @@ declare global {
     | "multifilter"
     | "addnewcolumn"
     | "deduplicate"
+    | "combinesametables"
     | "deepclone"
     | "conditionalbranch"
     | "removetables"
