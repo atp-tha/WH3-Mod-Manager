@@ -15,7 +15,11 @@ import {
   type AncillariesEditAction,
   type AncillariesEditState,
 } from "../src/ancillariesData/edits";
-import type { AncillariesCatalog, AncillaryDetail as AncillaryDetailModel } from "../src/ancillariesData/types";
+import type {
+  AncillariesCatalog,
+  AncillaryDetail as AncillaryDetailModel,
+  AncillaryUniquenessGrouping,
+} from "../src/ancillariesData/types";
 
 const catalog: AncillariesCatalog = {
   categories: [
@@ -69,6 +73,23 @@ const detail: AncillaryDetailModel = {
     },
   ],
 };
+
+const uniquenessGroupings: AncillaryUniquenessGrouping[] = [
+  {
+    groupKey: "common",
+    localizedName: "Common",
+    uniquenessMin: 0,
+    uniquenessMax: 35,
+    color: { r: 255, g: 255, b: 255 },
+  },
+  {
+    groupKey: "unique",
+    localizedName: "Unique",
+    uniquenessMin: 130,
+    uniquenessMax: 999,
+    color: { r: 180, g: 60, b: 220 },
+  },
+];
 
 /**
  * Renders with a live reducer, so a dispatch actually updates the store the panel reads back -
@@ -149,6 +170,18 @@ describe("AncillaryDetail card", () => {
     expect(screen.getByRole("tooltip")).toHaveTextContent("A very hot spell.");
 
     fireEvent.mouseLeave(effectLabel.parentElement!.parentElement!);
+    expect(screen.queryByRole("tooltip")).toBeNull();
+  });
+
+  it("shows uniqueness score cutoffs when hovering the score label", () => {
+    renderDetail({ catalog: { ...catalog, uniquenessGroupings } });
+    fireEvent.mouseEnter(screen.getByText("Uniqueness score"));
+
+    expect(screen.getByRole("tooltip")).toHaveTextContent("Uniqueness score cutoffs");
+    expect(screen.getByRole("tooltip")).toHaveTextContent("Common0–35");
+    expect(screen.getByRole("tooltip")).toHaveTextContent("Unique130–999");
+
+    fireEvent.mouseLeave(screen.getByText("Uniqueness score"));
     expect(screen.queryByRole("tooltip")).toBeNull();
   });
 });

@@ -92,6 +92,35 @@ describe("buildAncillariesData", () => {
     expect(data.ancillaries.find((ancillary) => ancillary.key === "anc_charm")?.subcategory).toBe("rune");
   });
 
+  it("assigns uniqueness colors and sorts ancillaries by their score group", () => {
+    const tables = fixtureTables();
+    tables.ancillary_uniqueness_groupings_tables = [
+      { group_key: "common", uniqueness_min: "0", uniqueness_max: "35", col_r: "255", col_g: "255", col_b: "255" },
+      { group_key: "rare", uniqueness_min: "36", uniqueness_max: "129", col_r: "60", col_g: "140", col_b: "240" },
+      { group_key: "unique", uniqueness_min: "130", uniqueness_max: "999", col_r: "180", col_g: "60", col_b: "220" },
+    ];
+    tables.ancillaries_tables = [
+      { key: "anc_unique", type: "type_sword", category: "weapon", subcategory: "", uniqueness_score: "200" },
+      { key: "anc_common", type: "type_sword", category: "weapon", subcategory: "", uniqueness_score: "20" },
+      { key: "anc_rare", type: "type_sword", category: "weapon", subcategory: "", uniqueness_score: "80" },
+    ];
+    const data = buildAncillariesData(
+      tables,
+      (key) =>
+        ({
+          ...LOC,
+          ancillary_uniqueness_groupings_onscreen_name_common: "Common",
+          ancillary_uniqueness_groupings_onscreen_name_rare: "Rare",
+          ancillary_uniqueness_groupings_onscreen_name_unique: "Unique",
+        })[key],
+    );
+
+    expect(data.uniquenessGroupings.map((grouping) => grouping.localizedName)).toEqual(["Common", "Rare", "Unique"]);
+    expect(data.ancillaries.map((ancillary) => ancillary.key)).toEqual(["anc_common", "anc_rare", "anc_unique"]);
+    expect(data.ancillaries[0].uniquenessGrouping?.color).toEqual({ r: 255, g: 255, b: 255 });
+    expect(data.ancillaries[2].uniquenessGrouping?.groupKey).toBe("unique");
+  });
+
   it("resolves the icon through ancillaries.type -> ancillary_types.ui_icon, normalising slashes", () => {
     const data = buildAncillariesData(fixtureTables(), getLoc);
     expect(data.ancillaries.find((ancillary) => ancillary.key === "anc_sword")?.iconPath).toBe(

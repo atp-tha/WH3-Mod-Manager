@@ -42,6 +42,22 @@ export interface AncillarySubcategoryRow {
   localizedName: string;
 }
 
+/** A rarity/uniqueness band from `ancillary_uniqueness_groupings_tables`. */
+export interface AncillaryUniquenessGrouping {
+  groupKey: string;
+  /** `ancillary_uniqueness_groupings_onscreen_name_<group_key>`, falling back to the key. */
+  localizedName: string;
+  description?: string;
+  uniquenessMin: number;
+  uniquenessMax: number;
+  color: {
+    r: number;
+    g: number;
+    b: number;
+  };
+  uiState?: string;
+}
+
 export interface AncillaryEffectRow {
   ancillary: string;
   effectKey: string;
@@ -87,6 +103,10 @@ export interface AncillarySummary {
   /** Set by the main process to a `whmm://icon/...` URL, when the icon was found. */
   iconUrl?: string;
   originPackPath?: string;
+  /** The value used to select `uniquenessGrouping`, when the source row has one. */
+  uniquenessScore?: number;
+  /** The uniqueness grouping whose inclusive range contains `uniquenessScore`. */
+  uniquenessGrouping?: AncillaryUniquenessGrouping;
 }
 
 /** Everything the detail card shows for one ancillary. */
@@ -113,7 +133,8 @@ export interface AncillaryDetail extends AncillarySummary {
 export interface BuiltAncillariesData {
   categories: AncillaryCategoryRow[];
   subcategories: AncillarySubcategoryRow[];
-  /** Every ancillary, sorted by category sort order then localized name. */
+  uniquenessGroupings: AncillaryUniquenessGrouping[];
+  /** Every ancillary, sorted by category, subcategory, uniqueness group, then localized name. */
   ancillaries: AncillarySummary[];
   /** The full source row per ancillary, for the inline editor and the detail card. */
   rowValuesByKey: Record<string, Record<string, string>>;
@@ -177,6 +198,8 @@ export interface AncillariesEffectOption extends AncillariesOption {
 export interface AncillariesCatalog {
   categories: AncillaryCategoryRow[];
   subcategories: AncillarySubcategoryRow[];
+  /** The score ranges and colors used by the ancillary browser and score tooltip. */
+  uniquenessGroupings?: AncillaryUniquenessGrouping[];
   ancillaries: AncillarySummary[];
   effects: AncillariesEffectOption[];
   effectScopes: string[];

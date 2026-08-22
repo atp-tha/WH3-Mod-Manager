@@ -14,7 +14,12 @@ import {
   type AncillariesNewRow,
   type AncillariesRowOrigin,
 } from "../../ancillariesData/edits";
-import { ancillaryColourTextLocKey, ancillaryExplanationLocKey, ancillaryNameLocKey } from "../../ancillariesData/data";
+import {
+  ancillaryColourTextLocKey,
+  ancillaryExplanationLocKey,
+  ancillaryNameLocKey,
+  ancillaryUniquenessColor,
+} from "../../ancillariesData/data";
 import AncillaryTypesModal from "./AncillaryTypesModal";
 import { useLocalizations } from "../../localizationContext";
 import AbilityTooltipCard from "../skillsViewer/AbilityTooltipCard";
@@ -22,6 +27,7 @@ import type {
   AncillariesCatalog,
   AncillaryDetail as AncillaryDetailModel,
   AncillaryEffectRow,
+  AncillaryUniquenessGrouping,
 } from "../../ancillariesData/types";
 
 const tooltipFrame = require("../../assets/skills/tooltip_frame.png");
@@ -143,6 +149,71 @@ const AncillaryAbilityEffectTooltip = ({
                   />
                 );
               })}
+            </div>
+          </div>,
+          document.body,
+        )}
+    </>
+  );
+};
+
+const AncillaryUniquenessTooltip = ({
+  groupings,
+  children,
+}: {
+  groupings: AncillaryUniquenessGrouping[];
+  children: React.ReactNode;
+}) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const localized = useLocalizations();
+  const { refs, floatingStyles } = useFloating({
+    placement: "top-start",
+    middleware: [offset(8), shift({ padding: 8 })],
+    whileElementsMounted: autoUpdate,
+  });
+
+  if (groupings.length === 0) return <>{children}</>;
+
+  return (
+    <>
+      <span
+        ref={refs.setReference}
+        tabIndex={0}
+        className="cursor-help border-b border-dotted border-gray-500"
+        onMouseEnter={() => setIsOpen(true)}
+        onMouseLeave={() => setIsOpen(false)}
+        onFocus={() => setIsOpen(true)}
+        onBlur={() => setIsOpen(false)}
+      >
+        {children}
+      </span>
+      {isOpen &&
+        createPortal(
+          <div
+            ref={refs.setFloating}
+            style={{ ...floatingStyles, zIndex: 60 }}
+            className="pointer-events-none"
+            role="tooltip"
+          >
+            <div
+              style={{ backgroundImage: `url('${tooltipFrame}')`, fontFamily: '"Libre Baskerville", serif' }}
+              className="skillTooltip w-[330px] space-y-1.5 text-sm text-gray-100"
+            >
+              <div className="font-semibold text-amber-200">
+                {localized.ancillariesUniquenessCutoffs || "Uniqueness score cutoffs"}
+              </div>
+              {groupings.map((grouping) => (
+                <div key={grouping.groupKey} className="flex items-center gap-2 text-xs">
+                  <span
+                    className="h-3 w-3 shrink-0 rounded-full border border-white/40"
+                    style={{ backgroundColor: ancillaryUniquenessColor(grouping) }}
+                  />
+                  <span className="min-w-0 flex-1 truncate">{grouping.localizedName}</span>
+                  <span className="shrink-0 text-amber-200">
+                    {grouping.uniquenessMin}–{grouping.uniquenessMax}
+                  </span>
+                </div>
+              ))}
             </div>
           </div>,
           document.body,
@@ -828,7 +899,13 @@ const AncillaryDetail = memo(
               <div className="grid grid-cols-2 gap-2">
                 {fields.map((field) => (
                   <label key={field.column} className="text-xs text-gray-400">
-                    {field.label}
+                    {field.column === "uniqueness_score" ? (
+                      <AncillaryUniquenessTooltip groupings={catalog?.uniquenessGroupings ?? []}>
+                        {field.label}
+                      </AncillaryUniquenessTooltip>
+                    ) : (
+                      field.label
+                    )}
                     {field.kind === "select" && field.withIcons ? (
                       <div className="flex items-end gap-2">
                         <div className="min-w-0 flex-1">

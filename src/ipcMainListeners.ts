@@ -73,6 +73,8 @@ import type {
 } from "./buildingsData/types";
 import {
   ANCILLARY_TABLES,
+  ancillaryUniquenessGroupingDescriptionLocKey,
+  ancillaryUniquenessGroupingNameLocKey,
   buildAncillariesData,
   categoryIconPath,
   createAncillariesLocLookup,
@@ -4307,6 +4309,8 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
     "ancillaries_colour_text_",
     "ancillaries_categories_onscreen_name_",
     "ancillaries_subcategories_onscreen_name_",
+    "ancillary_uniqueness_groupings_onscreen_name_",
+    "ancillary_uniqueness_groupings_description_",
     "effects_description_",
     "ui_text_replacements_localised_text_",
   ];
@@ -4377,6 +4381,12 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
     for (const row of tables.ancillaries_subcategories_tables ?? []) {
       const key = (row.subcategory ?? "").trim();
       if (key) recordWithReplacements(`ancillaries_subcategories_onscreen_name_${key}`);
+    }
+    for (const row of tables.ancillary_uniqueness_groupings_tables ?? []) {
+      const key = (row.group_key ?? "").trim();
+      if (!key) continue;
+      recordWithReplacements(ancillaryUniquenessGroupingNameLocKey(key));
+      recordWithReplacements(ancillaryUniquenessGroupingDescriptionLocKey(key));
     }
     // Every effect, not only the ones an ancillary already has: the "+ Add effect" picker offers
     // all of them, and a key recorded here is the only way the panel can name one later.
@@ -4633,6 +4643,7 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
       iconUrl: ancillaryIconUrl(built, category.iconName ? categoryIconPath(category.iconName) : undefined),
     })),
     subcategories: data.subcategories,
+    uniquenessGroupings: data.uniquenessGroupings,
     ancillaries: data.ancillaries.map((ancillary) => ({
       ...ancillary,
       iconUrl: ancillaryIconUrl(built, ancillary.iconPath),

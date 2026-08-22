@@ -18,6 +18,7 @@ import type {
   AncillaryEffectRow,
   AncillarySubcategoryRow,
   AncillarySummary,
+  AncillaryUniquenessGrouping,
   BuiltAncillariesData,
 } from "./types";
 
@@ -27,12 +28,14 @@ export type AncillariesGetLoc = (key: string) => string | undefined;
  * The tables the Ancillaries tab reads.
  *
  * `ancillary_info_tables` is here because `ancillaries_tables.key` *references* it - a new
- * ancillary without an info row is a dangling key, which `validate.ts` reports.
+ * ancillary without an info row is a dangling key, which `validate.ts` reports. The uniqueness
+ * grouping table supplies the score bands and colors used by the browser.
  */
 export const ANCILLARY_TABLES = [
   "ancillaries_tables",
   "ancillary_info_tables",
   "ancillary_types_tables",
+  "ancillary_uniqueness_groupings_tables",
   "ancillaries_categories_tables",
   "ancillaries_subcategories_tables",
   "ancillary_to_effects_tables",
@@ -49,6 +52,7 @@ export const ANCILLARY_TABLE_KEY_COLUMNS: Record<string, string[]> = {
   ancillaries_tables: ["key"],
   ancillary_info_tables: ["ancillary"],
   ancillary_types_tables: ["type"],
+  ancillary_uniqueness_groupings_tables: ["group_key"],
   ancillaries_categories_tables: ["category"],
   ancillaries_subcategories_tables: ["subcategory"],
   ancillary_to_effects_tables: ["ancillary", "effect"],
@@ -99,6 +103,13 @@ const localize = (getLoc: AncillariesGetLoc, key: string) => {
 export const ancillaryNameLocKey = (key: string) => `ancillaries_onscreen_name_${key}`;
 export const ancillaryExplanationLocKey = (key: string) => `ancillaries_explanation_text_${key}`;
 export const ancillaryColourTextLocKey = (key: string) => `ancillaries_colour_text_${key}`;
+export const ancillaryUniquenessGroupingNameLocKey = (groupKey: string) =>
+  `ancillary_uniqueness_groupings_onscreen_name_${groupKey}`;
+export const ancillaryUniquenessGroupingDescriptionLocKey = (groupKey: string) =>
+  `ancillary_uniqueness_groupings_description_${groupKey}`;
+
+export const ancillaryUniquenessColor = (grouping: AncillaryUniquenessGrouping) =>
+  `rgb(${grouping.color.r}, ${grouping.color.g}, ${grouping.color.b})`;
 
 /** Pack-relative path of a category's icon; `icon_name` is a bare name, not a path. */
 export const categoryIconPath = (iconName: string) => `ui\\skins\\default\\${iconName}.png`;
@@ -139,6 +150,36 @@ export const buildAncillariesData = (
     });
   }
   subcategories.sort((a, b) => a.localizedName.localeCompare(b.localizedName));
+
+  // --- uniqueness groupings --------------------------------------------------
+  const uniquenessGroupings: AncillaryUniquenessGrouping[] = [];
+  for (const row of rowsOf("ancillary_uniqueness_groupings_tables")) {
+    const groupKey = str(row, "group_key");
+    if (!groupKey) continue;
+    const clampColor = (column: string) => Math.max(0, Math.min(255, Math.round(num(row, column))));
+    uniquenessGroupings.push({
+      groupKey,
+      localizedName: localize(getLoc, ancillaryUniquenessGroupingNameLocKey(groupKey)) || groupKey,
+      description: localize(getLoc, ancillaryUniquenessGroupingDescriptionLocKey(groupKey)),
+      uniquenessMin: num(row, "uniqueness_min"),
+      uniquenessMax: num(row, "uniqueness_max"),
+      color: {
+        r: clampColor("col_r"),
+        g: clampColor("col_g"),
+        b: clampColor("col_b"),
+      },
+      uiState: optional(str(row, "ui_state")),
+    });
+  }
+  uniquenessGroupings.sort(
+    (a, b) =>
+      a.uniquenessMin - b.uniquenessMin ||
+      a.uniquenessMax - b.uniquenessMax ||
+      a.localizedName.localeCompare(b.localizedName),
+  );
+  const uniquenessGroupingForScore = (score: number) =>
+    uniquenessGroupings.find((grouping) => score >= grouping.uniquenessMin && score <= grouping.uniquenessMax);
+  const uniquenessGroupingOrder = new Map(uniquenessGroupings.map((grouping, index) => [grouping.groupKey, index]));
 
   // --- types ------------------------------------------------------------------
   const typeIcons: Record<string, string> = {};
@@ -240,6 +281,8 @@ export const buildAncillariesData = (
       type,
       iconPath: typeIcons[type],
       originPackPath: originPackPathByAncillary[key],
+      uniquenessScore: num(row, "uniqueness_score"),
+      uniquenessGrouping: uniquenessGroupingForScore(num(row, "uniqueness_score")),
     });
   }
   ancillaries.sort(
@@ -247,6 +290,8 @@ export const buildAncillariesData = (
       (categoryOrder.get(a.category) ?? Number.MAX_SAFE_INTEGER) -
         (categoryOrder.get(b.category) ?? Number.MAX_SAFE_INTEGER) ||
       a.subcategory.localeCompare(b.subcategory) ||
+      (uniquenessGroupingOrder.get(a.uniquenessGrouping?.groupKey ?? "") ?? Number.MAX_SAFE_INTEGER) -
+        (uniquenessGroupingOrder.get(b.uniquenessGrouping?.groupKey ?? "") ?? Number.MAX_SAFE_INTEGER) ||
       a.localizedName.localeCompare(b.localizedName),
   );
 
@@ -257,6 +302,7 @@ export const buildAncillariesData = (
   return {
     categories,
     subcategories,
+    uniquenessGroupings,
     ancillaries,
     rowValuesByKey,
     infoKeys,

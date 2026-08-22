@@ -26,7 +26,7 @@ export interface AncillariesRowIssue {
 }
 
 /** Which key universe a column's value has to be found in. */
-type KeyUniverse = "ancillary" | "category" | "subcategory" | "type" | "effect";
+type KeyUniverse = "ancillary" | "category" | "subcategory" | "type" | "effect" | "uniquenessGrouping";
 
 const REFERENCE_COLUMNS: Record<string, Record<string, KeyUniverse>> = {
   ancillaries_tables: { category: "category", subcategory: "subcategory", type: "type" },
@@ -43,6 +43,7 @@ const REFERENCE_COLUMNS: Record<string, Record<string, KeyUniverse>> = {
  */
 const IDENTITY_TABLES: Record<string, KeyUniverse> = {
   ancillaries_tables: "ancillary",
+  ancillary_uniqueness_groupings_tables: "uniquenessGrouping",
   ancillaries_categories_tables: "category",
   ancillaries_subcategories_tables: "subcategory",
   ancillary_types_tables: "type",
@@ -70,6 +71,10 @@ export const validateNewRows = (base: BuiltAncillariesData, state: AncillariesEd
     ]),
     type: new Set([...base.typeKeys, ...pendingKeys("ancillary_types_tables", "type")]),
     effect: new Set([...base.effects.map((option) => option.key), ...pendingKeys("effects_tables", "effect")]),
+    uniquenessGrouping: new Set([
+      ...base.uniquenessGroupings.map((grouping) => grouping.groupKey),
+      ...pendingKeys("ancillary_uniqueness_groupings_tables", "group_key"),
+    ]),
   };
 
   const baseUniverses: Record<KeyUniverse, Set<string>> = {
@@ -78,6 +83,7 @@ export const validateNewRows = (base: BuiltAncillariesData, state: AncillariesEd
     subcategory: new Set(base.subcategories.map((row) => row.key)),
     type: new Set(base.typeKeys),
     effect: new Set(base.effects.map((option) => option.key)),
+    uniquenessGrouping: new Set(base.uniquenessGroupings.map((grouping) => grouping.groupKey)),
   };
 
   // `ancillaries_tables.key` references `ancillary_info_tables.ancillary`, so every *new* ancillary

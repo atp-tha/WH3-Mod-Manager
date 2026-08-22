@@ -17,7 +17,7 @@ vi.mock("react-virtualized", () => ({
 
 import AncillariesBrowser from "../src/components/ancillaries/AncillariesBrowser";
 import { createAncillaryFilter, matchesModFilter } from "../src/ancillariesData/filter";
-import type { AncillariesCatalog, AncillarySummary } from "../src/ancillariesData/types";
+import type { AncillariesCatalog, AncillarySummary, AncillaryUniquenessGrouping } from "../src/ancillariesData/types";
 
 const MOD_PACK = "C:\\mods\\extra_items.pack";
 
@@ -61,6 +61,30 @@ const mixedSubcategoryCatalog: AncillariesCatalog = {
 };
 
 const mods = [{ path: MOD_PACK, label: "Extra Items" }];
+
+const commonGrouping: AncillaryUniquenessGrouping = {
+  groupKey: "common",
+  localizedName: "Common",
+  uniquenessMin: 0,
+  uniquenessMax: 35,
+  color: { r: 255, g: 255, b: 255 },
+};
+const uniqueGrouping: AncillaryUniquenessGrouping = {
+  groupKey: "unique",
+  localizedName: "Unique",
+  uniquenessMin: 130,
+  uniquenessMax: 999,
+  color: { r: 180, g: 60, b: 220 },
+};
+
+const groupedCatalog: AncillariesCatalog = {
+  ...catalog,
+  uniquenessGroupings: [commonGrouping, uniqueGrouping],
+  ancillaries: [
+    ancillary({ key: "anc_unique", localizedName: "Unique Item", uniquenessGrouping: uniqueGrouping }),
+    ancillary({ key: "anc_common", localizedName: "Common Item", uniquenessGrouping: commonGrouping }),
+  ],
+};
 
 const renderBrowser = (props: Partial<React.ComponentProps<typeof AncillariesBrowser>> = {}) =>
   render(<AncillariesBrowser catalog={catalog} onSelect={vi.fn()} mods={mods} {...props} />);
@@ -198,6 +222,23 @@ describe("AncillariesBrowser", () => {
 
     expect(screen.getByText("(no subcategory)")).toBeTruthy();
     expect(screen.getByText("Rune")).toBeTruthy();
+  });
+
+  it("groups items by uniqueness range and draws each range color", async () => {
+    renderBrowser({ catalog: groupedCatalog });
+    await userEvent.click(screen.getByText("Weapon"));
+
+    expect(screen.getByText("Common")).toBeTruthy();
+    expect(screen.getByText("Unique")).toBeTruthy();
+    expect(screen.getByText("Common Item")).toBeTruthy();
+    expect(screen.getByText("Unique Item")).toBeTruthy();
+    expect(screen.getAllByLabelText("Common color")).toHaveLength(2);
+    expect(screen.getAllByLabelText("Unique color")).toHaveLength(2);
+
+    const names = [...screen.getAllByRole("button")]
+      .map((button) => button.textContent)
+      .filter((text): text is string => text?.includes("Item") ?? false);
+    expect(names).toEqual(["Common Item", "Unique Item"]);
   });
 
   it("skips the subcategory row when a category has only one", async () => {
