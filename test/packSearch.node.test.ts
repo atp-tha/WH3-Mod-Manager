@@ -45,6 +45,13 @@ describe("packFileContains", () => {
     await expect(packFileContains(packPath, "effect[")).resolves.toBe(true);
   });
 
+  it("does not apply the global search query-length guard to legacy pack searches", async () => {
+    const searchTerm = "g".repeat(513);
+    const packPath = await writePack(`prefix${searchTerm}suffix`);
+
+    await expect(packFileContains(packPath, searchTerm)).resolves.toBe(true);
+  });
+
   it("reports no match when the term is absent", async () => {
     const packPath = await writePack(Buffer.alloc(4096, 0x41));
 

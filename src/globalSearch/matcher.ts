@@ -17,6 +17,8 @@ export interface SearchMatcher {
 export interface SearchMatcherOptions {
   caseSensitive?: boolean;
   regex?: boolean;
+  /** Override the global-search length guard for legacy callers such as packFileContains. */
+  maxQueryLength?: number;
 }
 
 const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -52,26 +54,22 @@ const tryBuildRegExp = (source: string, caseSensitive: boolean): { regex: RegExp
   }
 };
 
-/**
- * Creates the single matching abstraction shared by DB, loc, text and binary searches.
- *
- * The boolean overload is retained for callers that naturally have the two UI toggles as
- * positional arguments: `createSearchMatcher(query, caseSensitive, regex)`.
- */
-export const createSearchMatcher = (
-  query: string,
-  options: SearchMatcherOptions | boolean = {},
-  regexArgument = false,
-): SearchMatcher => {
-  const caseSensitive = typeof options === "boolean" ? options : (options.caseSensitive ?? false);
-  const regex = typeof options === "boolean" ? regexArgument : (options.regex ?? false);
+/** Creates the single matching abstraction shared by DB, loc, text and binary searches. */
+export const createSearchMatcher = (query: string, options: SearchMatcherOptions = {}): SearchMatcher => {
+  const caseSensitive = options.caseSensitive ?? false;
+  const regex = options.regex ?? false;
+  const maxQueryLength = options.maxQueryLength ?? MAX_GLOBAL_SEARCH_QUERY_LENGTH;
   const isEmpty = query.length === 0;
-  const isWithinLimit = query.length <= MAX_GLOBAL_SEARCH_QUERY_LENGTH;
+  const isWithinLimit = query.length <= maxQueryLength;
   const regexResult = regex && isWithinLimit ? tryBuildRegExp(query, caseSensitive) : undefined;
   const regexValue = regexResult?.regex ?? noMatchRegExp();
   const isValidRegex = !regex || (isWithinLimit && regexResult?.valid === true);
   const literal = regex ? undefined : caseSensitive ? query : query.toLowerCase();
-  const insensitiveLiteralRegExp = !regex && !caseSensitive ? buildRegExp(escapeRegExp(query), false) : undefined;
+  const findPattern = regex
+    ? regexResult?.valid
+      ? new RegExp(query, `${caseSensitive ? "" : "i"}g`)
+      : noMatchRegExp()
+    : new RegExp(escapeRegExp(query), `${caseSensitive ? "" : "i"}g`);
 
   const toRegExp = (extraFlags = ""): RegExp => {
     if (!isWithinLimit || (regex && !isValidRegex)) return noMatchRegExp();
@@ -94,11 +92,8 @@ export const createSearchMatcher = (
 
     // A lowercased copy is not length-preserving for every Unicode code point. Use a regex for the
     // result position rather than trying to translate an index from the folded copy.
-    const pattern = regex
-      ? new RegExp(query, `${caseSensitive ? "" : "i"}g`)
-      : new RegExp(insensitiveLiteralRegExp!.source, "gi");
-    pattern.lastIndex = Math.max(0, fromIndex);
-    const match = pattern.exec(value);
+    findPattern.lastIndex = Math.max(0, fromIndex);
+    const match = findPattern.exec(value);
     if (!match) return undefined;
     return { start: match.index, end: match.index + match[0].length };
   };
@@ -113,6 +108,3 @@ export const createSearchMatcher = (
     toRegExp,
   };
 };
-
-/** Alias used by a few non-UI callers that describe the operation as making a matcher. */
-export const makeSearchMatcher = createSearchMatcher;

@@ -35,4 +35,29 @@ describe("vanilla loc cache enumeration", () => {
     expect(values).toEqual(["value-0", "value-1", "value-2", "value-3"]);
     expect(source.bytesRead - afterOpen).toBe(values.join("").length);
   });
+
+  it("supports an async early-exit walk with event-loop yields", async () => {
+    const reader = openVanillaLocCache(
+      createMemorySource(
+        buildVanillaLocCacheBytes([
+          ["a", "one"],
+          ["b", "two"],
+          ["c", "three"],
+        ]),
+      ),
+    )!;
+    const keys: string[] = [];
+    let yields = 0;
+
+    await reader.forEachEntryAsync!(
+      (key) => {
+        keys.push(key);
+        return keys.length < 2;
+      },
+      { yieldEvery: 1, yieldToEventLoop: async () => void yields++ },
+    );
+
+    expect(keys).toEqual(["a", "b"]);
+    expect(yields).toBe(1);
+  });
 });

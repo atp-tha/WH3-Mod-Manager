@@ -106,6 +106,14 @@ export interface VanillaLocCacheRequest {
     Promise<Iterable<readonly [string, string, string?]>> | Iterable<readonly [string, string, string?]>;
 }
 
+/** A canceled build must not be memoized as broken or written as a partial cache. */
+export class VanillaLocCacheBuildCanceled extends Error {
+  constructor() {
+    super("Vanilla localisation cache build canceled");
+    this.name = "VanillaLocCacheBuildCanceled";
+  }
+}
+
 /**
  * A reader for the game's locs, building the cache first if it is missing or stale.
  *
@@ -152,6 +160,7 @@ export const openOrBuildVanillaLocCache = async (
       }
       return reader;
     } catch (error) {
+      if (error instanceof VanillaLocCacheBuildCanceled) return undefined;
       console.log("vanilla loc cache: could not build", error);
       abandoned.add(identity);
       return undefined;

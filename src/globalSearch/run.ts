@@ -178,15 +178,16 @@ const makeEngineContext = (
 const sourceFromLabel = (
   sourceLabel: string | undefined,
   fallbackPackPath: string | undefined,
-): { packPath: string; filePath: string; packLabel: string } => {
+): { packPath: string; filePath: string; packLabel: string } | undefined => {
   if (sourceLabel) {
     const separator = sourceLabel.indexOf("\0");
-    if (separator >= 0) {
+    if (separator > 0) {
       const packPath = sourceLabel.slice(0, separator);
       return { packPath, filePath: sourceLabel.slice(separator + 1), packLabel: packLabelFromPath(packPath) };
     }
   }
-  const packPath = fallbackPackPath ?? "vanilla";
+  if (!fallbackPackPath) return undefined;
+  const packPath = fallbackPackPath;
   return { packPath, filePath: sourceLabel ?? "", packLabel: packLabelFromPath(packPath) };
 };
 
@@ -213,6 +214,7 @@ const searchVanillaDbTarget = async (
     const parsed = parseDBTablePath(match.packedFilePath);
     if (!parsed) continue;
     context.markFile(result.dbPackPath, match.packedFilePath);
+    if (!state.matcher.test(match.value)) continue;
     const found = state.matcher.find(match.value);
     if (!found) continue;
     const outcome = context.addResult({
@@ -246,20 +248,26 @@ const searchVanillaLocTarget = async (
   }
   const fallbackPackPath = state.deps.getVanillaPackPathsInLoadOrder()[0];
   let stopped: "canceled" | "stopped" | undefined;
-  reader.forEachEntry((key, value, _rank, sourceLabel) => {
+  const visit = (key: string, value: string, _rank: number, sourceLabel?: string) => {
     if (state.deps.isCanceled()) {
       stopped = "canceled";
       return false;
     }
     const source = sourceFromLabel(sourceLabel, fallbackPackPath);
-    const context = contextForLabel(source.packLabel);
+    if (!source) {
+      contextForLabel().addWarning("Base game loc result provenance unavailable.");
+      return undefined;
+    }
     const searchIn = state.request.locSearchIn ?? "both";
     const searchedValues: Array<["key" | "value", string]> = [];
     if (searchIn === "keys" || searchIn === "both") searchedValues.push(["key", key]);
     if (searchIn === "values" || searchIn === "both") searchedValues.push(["value", value]);
+    let context: SearchEngineContext | undefined;
     for (const [matchedIn, searched] of searchedValues) {
+      if (!state.matcher.test(searched)) continue;
       const found = state.matcher.find(searched);
       if (!found) continue;
+      context ??= contextForLabel(source.packLabel);
       context.markFile(source.packPath, source.filePath);
       const outcome = context.addResult({
         kind: "loc",
@@ -278,7 +286,15 @@ const searchVanillaLocTarget = async (
       }
     }
     return undefined;
-  });
+  };
+  if (reader.forEachEntryAsync) {
+    await reader.forEachEntryAsync(visit, {
+      yieldEvery: 512,
+      yieldToEventLoop: state.deps.yieldToEventLoop,
+    });
+  } else {
+    reader.forEachEntry(visit);
+  }
   contextForLabel().addWarning("base game loc: localisation packs only");
   return stopped ?? (state.deps.isCanceled() ? "canceled" : "complete");
 };
@@ -294,10 +310,9 @@ const searchVanillaFilesTarget = async (
     return "complete";
   }
   const winningFiles = collectVanillaFilesMatching(index, (filePath) => {
-    const lower = filePath.replace(/\//g, "\\").toLowerCase();
     return (
-      (target.kinds.includes("text") && isTextPackedFilePath(lower)) ||
-      (target.kinds.includes("rigidModel") && lower.endsWith(".rigid_model_v2"))
+      (target.kinds.includes("text") && isTextPackedFilePath(filePath)) ||
+      (target.kinds.includes("rigidModel") && filePath.endsWith(".rigid_model_v2"))
     );
   });
   const pathsByPack = new Map<string, Set<string>>();
@@ -323,8 +338,15 @@ const searchVanillaFilesTarget = async (
         visit,
         options,
       );
-    const status = await searchPackFiles(packPath, context, visitFiles);
-    if (status !== "complete") return status;
+    try {
+      const status = await searchPackFiles(packPath, context, visitFiles);
+      if (status !== "complete") return status;
+    } catch (error) {
+      context.addWarning(
+        `${context.packLabel}: could not read pack (${error instanceof Error ? error.message : String(error)}).`,
+      );
+      if (state.deps.isCanceled()) return "canceled";
+    }
   }
   return state.deps.isCanceled() ? "canceled" : "complete";
 };
@@ -354,7 +376,14 @@ const searchPackTarget = async (state: RunState, target: GlobalSearchTarget, con
     }
   }
   if (target.kinds.includes("text") || target.kinds.includes("rigidModel")) {
-    return searchPackFiles(packPath, context, state.deps.forEachPackedFileBuffer);
+    try {
+      return await searchPackFiles(packPath, context, state.deps.forEachPackedFileBuffer);
+    } catch (error) {
+      context.addWarning(
+        `${context.packLabel}: could not read pack (${error instanceof Error ? error.message : String(error)}).`,
+      );
+      return state.deps.isCanceled() ? "canceled" : "complete";
+    }
   }
   return state.deps.isCanceled() ? "canceled" : "complete";
 };

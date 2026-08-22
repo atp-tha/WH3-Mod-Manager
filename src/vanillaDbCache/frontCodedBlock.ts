@@ -163,6 +163,20 @@ export const forEachFrontCodedEntry = (
   }
 };
 
+/** Forward iterator for consumers that need to coordinate decoded keys with another stream. */
+export function* iterateFrontCodedEntries(block: FrontCodedBlock): Generator<{ value: string; rank: number }> {
+  let offset = 0;
+  let value = "";
+
+  for (let rank = 0; rank < block.count; rank++) {
+    const [shared, afterShared] = readVarint(block.bytes, offset);
+    const [suffixLength, afterLength] = readVarint(block.bytes, afterShared);
+    value = value.slice(0, shared) + decodeSuffix(block.bytes, afterLength, afterLength + suffixLength);
+    yield { value, rank };
+    offset = afterLength + suffixLength;
+  }
+}
+
 /** Every value in the block, in rank order. For building indexes, not for lookups. */
 export const readAllFrontCodedEntries = (block: FrontCodedBlock): string[] => {
   const values: string[] = new Array(block.count);

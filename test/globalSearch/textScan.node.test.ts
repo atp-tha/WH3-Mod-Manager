@@ -24,4 +24,11 @@ describe("global search text scanner", () => {
     const matches = scanTextForMatches("needle needle", createSearchMatcher("needle", { regex: true }));
     expect(matches.map((match) => match.offset)).toEqual([0, 7]);
   });
+
+  it("keeps line accounting linear across many matches", () => {
+    const text = `${"filler\n".repeat(2000)}needle\nneedle\nneedle`;
+    const matches = scanTextForMatches(text, createSearchMatcher("needle", { caseSensitive: true }));
+
+    expect(matches.map((match) => match.line)).toEqual([2001, 2002, 2003]);
+  });
 });

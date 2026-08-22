@@ -122,7 +122,7 @@ import { addFactionDataToEsfMap, factionFlagPath } from "./esfMap/factions";
 import { addSettlementTypeDataToEsfMap } from "./esfMap/settlementTypes";
 import type { EsfMapResponse } from "./esfMap/types";
 import { getVanillaLocalisationPackPaths as getVanillaLocalisationPackPathsFor } from "./vanillaLocCache/packs";
-import { openOrBuildVanillaLocCache } from "./vanillaLocCache/store";
+import { VanillaLocCacheBuildCanceled, openOrBuildVanillaLocCache } from "./vanillaLocCache/store";
 import { runGlobalSearch, type GlobalSearchRunDeps } from "./globalSearch/run";
 import type { GlobalSearchRequest, GlobalSearchResponse } from "./globalSearch/types";
 import {
@@ -654,6 +654,8 @@ const globalSearchCancelStateByWebContentsId = new Map<
   number,
   { canceled: boolean; done?: Promise<GlobalSearchResponse> }
 >();
+/** Serializes the handoff between overlapping invocations from one viewer sender. */
+const globalSearchStartLockByWebContentsId = new Map<number, Promise<void>>();
 const dbIndirectReferenceCacheByWebContentsId = new Map<number, DBIndirectReferenceCacheContext>();
 const createDBIndirectReferenceCacheContext = (): DBIndirectReferenceCacheContext => ({
   packByPath: new Map<string, Pack>(),
@@ -7391,10 +7393,32 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
   });
   ipcMain.handle("runGlobalSearch", async (event, request: GlobalSearchRequest): Promise<GlobalSearchResponse> => {
     const webContentsId = event.sender.id;
-    const previous = globalSearchCancelStateByWebContentsId.get(webContentsId);
-    if (previous) {
-      previous.canceled = true;
-      if (previous.done) await previous.done;
+    const previousStart = globalSearchStartLockByWebContentsId.get(webContentsId);
+    let releaseStart!: () => void;
+    let startReleased = false;
+    const startGate = new Promise<void>((resolve) => {
+      releaseStart = () => {
+        if (startReleased) return;
+        startReleased = true;
+        resolve();
+      };
+    });
+    const startLock = (previousStart ?? Promise.resolve()).then(() => startGate);
+    globalSearchStartLockByWebContentsId.set(webContentsId, startLock);
+
+    try {
+      await previousStart;
+      const previous = globalSearchCancelStateByWebContentsId.get(webContentsId);
+      if (previous) {
+        previous.canceled = true;
+        if (previous.done) await previous.done;
+      }
+    } catch (error) {
+      releaseStart();
+      if (globalSearchStartLockByWebContentsId.get(webContentsId) === startLock) {
+        globalSearchStartLockByWebContentsId.delete(webContentsId);
+      }
+      throw error;
     }
 
     const cancelState: { canceled: boolean; done?: Promise<GlobalSearchResponse> } = { canceled: false };
@@ -7403,6 +7427,10 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
     cancelState.done = new Promise<GlobalSearchResponse>((resolve) => {
       resolveDone = resolve;
     });
+    releaseStart();
+    if (globalSearchStartLockByWebContentsId.get(webContentsId) === startLock) {
+      globalSearchStartLockByWebContentsId.delete(webContentsId);
+    }
     const sendProgress = (progress: Parameters<GlobalSearchRunDeps["report"]>[0]) => {
       if (event.sender.isDestroyed()) return;
       try {
@@ -7466,12 +7494,13 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
           readEntries: async () => {
             const entries: Array<readonly [string, string, string]> = [];
             for (const packPath of packPaths) {
-              if (cancelState.canceled) break;
+              if (cancelState.canceled) throw new VanillaLocCacheBuildCanceled();
               const pack = await readPackRegistered(packPath, { skipParsingTables: true, readLocs: true });
               forEachPackLocEntry(pack, (key, value, locFileName) => {
                 entries.push([key, value, `${pack.path}\0${locFileName}`]);
               });
             }
+            if (cancelState.canceled) throw new VanillaLocCacheBuildCanceled();
             return entries;
           },
         });
@@ -10093,6 +10122,7 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
       const globalSearchState = globalSearchCancelStateByWebContentsId.get(viewerWebContentsId);
       if (globalSearchState) globalSearchState.canceled = true;
       globalSearchCancelStateByWebContentsId.delete(viewerWebContentsId);
+      globalSearchStartLockByWebContentsId.delete(viewerWebContentsId);
       if (windows.viewerWindow === viewerWindow) {
         windows.viewerWindow = undefined;
       }

@@ -45,33 +45,27 @@ const withGlobal = (pattern: RegExp): RegExp => {
   return new RegExp(pattern.source, flags.replace("y", ""));
 };
 
-const scanDecodedWindow = (
+const forEachDecodedMatch = (
   value: string,
   matcher: SearchMatcher,
   allowStart: boolean,
   allowEnd: boolean,
-  maxExcerptLength: number,
-): Array<{ start: number; end: number; excerpt: string; matchStartInExcerpt: number; matchEndInExcerpt: number }> => {
-  if (!matcher.isValidRegex || matcher.isEmpty) return [];
+  visit: (start: number, end: number) => boolean,
+): boolean => {
+  if (!matcher.isValidRegex || matcher.isEmpty) return false;
   const constrained = constrainWholeFileAnchors(matcher.toRegExp(), allowStart, allowEnd);
   const pattern = withGlobal(constrained);
-  const matches: Array<{
-    start: number;
-    end: number;
-    excerpt: string;
-    matchStartInExcerpt: number;
-    matchEndInExcerpt: number;
-  }> = [];
+  let foundAny = false;
   for (;;) {
     const found = pattern.exec(value);
     if (!found) break;
     const start = found.index;
     const end = start + found[0].length;
-    const excerpt = makeMatchExcerpt(value, start, end, maxExcerptLength);
-    matches.push({ start, end, ...excerpt });
+    foundAny = true;
+    if (!visit(start, end)) return true;
     if (found[0].length === 0) pattern.lastIndex++;
   }
-  return matches;
+  return foundAny;
 };
 
 /** Boolean counterpart used by the legacy streaming pack search. */
@@ -81,9 +75,9 @@ export const containsBytesInWindow = (
   allowStart: boolean,
   allowEnd: boolean,
 ): boolean =>
-  scanDecodedWindow(buffer.toString("utf8"), matcher, allowStart, allowEnd, 0).length > 0 ||
-  scanDecodedWindow(buffer.toString("utf16le"), matcher, allowStart, allowEnd, 0).length > 0 ||
-  scanDecodedWindow(buffer.subarray(1).toString("utf16le"), matcher, allowStart, allowEnd, 0).length > 0;
+  forEachDecodedMatch(buffer.toString("utf8"), matcher, allowStart, allowEnd, () => false) ||
+  forEachDecodedMatch(buffer.toString("utf16le"), matcher, allowStart, allowEnd, () => false) ||
+  forEachDecodedMatch(buffer.subarray(1).toString("utf16le"), matcher, allowStart, allowEnd, () => false);
 
 const byteOffsetForUtf8Index = (value: string, index: number): number =>
   Buffer.byteLength(value.slice(0, index), "utf8");
@@ -121,27 +115,23 @@ export const scanBytesForMatches = (
     isFirstWindow: boolean,
     isLastWindow: boolean,
   ): boolean => {
-    const decodedMatches = scanDecodedWindow(
-      decoded,
-      matcher,
-      isFirstWindow && alignment === 0,
-      isLastWindow,
-      maxExcerptLength,
-    );
-    for (const match of decodedMatches) {
+    forEachDecodedMatch(decoded, matcher, isFirstWindow && alignment === 0, isLastWindow, (start, end) => {
       const offset =
         encoding === "utf8"
-          ? windowStart + byteOffsetForUtf8Index(decoded, match.start)
-          : windowStart + alignment + match.start * 2;
-      const key = `${encoding}:${offset}:${match.end - match.start}`;
-      if (seen.has(key)) continue;
+          ? windowStart + byteOffsetForUtf8Index(decoded, start)
+          : windowStart + alignment + start * 2;
+      const key = `${encoding}:${offset}:${end - start}`;
+      if (seen.has(key)) return true;
       seen.add(key);
-      matches.push({ offset, encoding, ...match });
+      const excerpt = makeMatchExcerpt(decoded, start, end, maxExcerptLength);
+      matches.push({ offset, encoding, ...excerpt });
       if (matches.length >= maxMatches) {
         truncated = true;
         return false;
       }
-    }
+      return true;
+    });
+    if (truncated) return false;
     return true;
   };
 

@@ -1,4 +1,9 @@
-import { findFrontCodedRank, readFrontCodedEntry, type FrontCodedBlock } from "../vanillaDbCache/frontCodedBlock";
+import {
+  findFrontCodedRank,
+  forEachFrontCodedEntry,
+  iterateFrontCodedEntries,
+  type FrontCodedBlock,
+} from "../vanillaDbCache/frontCodedBlock";
 import { createFileSource, createMemorySource, type VanillaDbCacheSource } from "../vanillaDbCache/read";
 import { getVanillaLocCacheSections, readVanillaLocCacheHeader, VANILLA_LOC_CACHE_HEADER_BYTES } from "./format";
 
@@ -15,6 +20,15 @@ export interface VanillaLocCacheReader {
     visit: (key: string, value: string, rank: number, sourceLabel?: string) => boolean | void,
     options?: { batchBytes?: number },
   ): void;
+  /** Async counterpart for long walks that must give cancellation and IPC messages a turn. */
+  forEachEntryAsync?: (
+    visit: (key: string, value: string, rank: number, sourceLabel?: string) => boolean | void,
+    options?: {
+      batchBytes?: number;
+      yieldEvery?: number;
+      yieldToEventLoop?: () => Promise<void>;
+    },
+  ) => Promise<void>;
   readonly count: number;
   /** Bytes held resident: the key block, its checkpoints and the value offsets. */
   readonly residentBytes: number;
@@ -83,8 +97,12 @@ export const openVanillaLocCache = (source: VanillaLocCacheSource): VanillaLocCa
     checkpoints: sourceCheckpoints,
     count: meta.sourceCount,
   };
+  const sourceLabels: Array<string | undefined> = new Array(meta.sourceCount);
+  forEachFrontCodedEntry(sourceBlock, (sourceLabel, sourceId) => {
+    sourceLabels[sourceId] = sourceLabel;
+  });
   const sourceById = (sourceId: number): string | undefined =>
-    sourceId === 0xffff ? undefined : readFrontCodedEntry(sourceBlock, sourceId);
+    sourceId === 0xffff ? undefined : sourceLabels[sourceId];
 
   const decodeValueAt = (rank: number): string => {
     const start = valueOffsets[rank];
@@ -101,6 +119,7 @@ export const openVanillaLocCache = (source: VanillaLocCacheSource): VanillaLocCa
     forEachEntry(visit, { batchBytes = 1024 * 1024 } = {}) {
       if (meta.count === 0) return;
       const safeBatchBytes = Math.max(1, batchBytes);
+      const keyIterator = iterateFrontCodedEntries(keyBlock);
       let batchStart = 0;
       while (batchStart < meta.count) {
         let batchEnd = batchStart + 1;
@@ -110,11 +129,41 @@ export const openVanillaLocCache = (source: VanillaLocCacheSource): VanillaLocCa
         const batchLength = valueOffsets[batchEnd] - valueOffsets[batchStart];
         const batch = source.read(sections.valueBlobOffset + valueOffsets[batchStart], batchLength);
         for (let rank = batchStart; rank < batchEnd; rank++) {
+          const keyEntry = keyIterator.next().value;
+          if (!keyEntry) return;
           const start = valueOffsets[rank] - valueOffsets[batchStart];
           const end = valueOffsets[rank + 1] - valueOffsets[batchStart];
           const value = textDecoder.decode(batch.subarray(start, end));
           const sourceLabel = sourceById(sourceIds[rank]);
-          if (visit(readFrontCodedEntry(keyBlock, rank)!, value, rank, sourceLabel) === false) return;
+          if (visit(keyEntry.value, value, rank, sourceLabel) === false) return;
+        }
+        batchStart = batchEnd;
+      }
+    },
+    async forEachEntryAsync(visit, { batchBytes = 1024 * 1024, yieldEvery = 512, yieldToEventLoop } = {}) {
+      if (meta.count === 0) return;
+      const safeBatchBytes = Math.max(1, batchBytes);
+      const safeYieldEvery = Math.max(1, yieldEvery);
+      const keyIterator = iterateFrontCodedEntries(keyBlock);
+      let visited = 0;
+      let batchStart = 0;
+      while (batchStart < meta.count) {
+        let batchEnd = batchStart + 1;
+        while (batchEnd < meta.count && valueOffsets[batchEnd + 1] - valueOffsets[batchStart] <= safeBatchBytes) {
+          batchEnd++;
+        }
+        const batchLength = valueOffsets[batchEnd] - valueOffsets[batchStart];
+        const batch = source.read(sections.valueBlobOffset + valueOffsets[batchStart], batchLength);
+        for (let rank = batchStart; rank < batchEnd; rank++) {
+          const keyEntry = keyIterator.next().value;
+          if (!keyEntry) return;
+          const start = valueOffsets[rank] - valueOffsets[batchStart];
+          const end = valueOffsets[rank + 1] - valueOffsets[batchStart];
+          const value = textDecoder.decode(batch.subarray(start, end));
+          const sourceLabel = sourceById(sourceIds[rank]);
+          if (visit(keyEntry.value, value, rank, sourceLabel) === false) return;
+          visited++;
+          if (yieldToEventLoop && visited % safeYieldEvery === 0) await yieldToEventLoop();
         }
         batchStart = batchEnd;
       }

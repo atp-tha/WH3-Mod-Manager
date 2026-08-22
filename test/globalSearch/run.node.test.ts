@@ -122,6 +122,53 @@ describe("global search run", () => {
     expect(response.warnings).toContain("mod.pack: unsaved viewer changes are not included; search uses saved data.");
   });
 
+  it("keeps a single unreadable pack from failing the whole search", async () => {
+    const response = await runGlobalSearch(
+      makeRequest({ kinds: { db: false, loc: false, text: true, rigidModel: false } }),
+      {},
+      makeDeps({
+        forEachPackedFileBuffer: async () => {
+          throw new Error("corrupt pack index");
+        },
+      }),
+    );
+
+    expect(response.success).toBe(true);
+    expect(response.warnings).toContain("mod.pack: could not read pack (corrupt pack index).");
+  });
+
+  it("uses the async vanilla loc walk so cancellation can arrive between batches", async () => {
+    let canceled = false;
+    const locReader = {
+      get: () => undefined,
+      forEachEntry: () => undefined,
+      forEachEntryAsync: async (
+        visit: (key: string, value: string, rank: number, sourceLabel?: string) => boolean | void,
+        options?: { yieldToEventLoop?: () => Promise<void> },
+      ) => {
+        if (visit("loc_key", "needle", 0, "localisation.pack\0text\\test.loc") === false) return;
+        canceled = true;
+        await options?.yieldToEventLoop?.();
+        visit("second_key", "needle", 1, "localisation.pack\0text\\test.loc");
+      },
+      count: 2,
+      residentBytes: 0,
+      close: () => undefined,
+    };
+    const response = await runGlobalSearch(
+      makeRequest({ sources: [{ kind: "vanilla" }], kinds: { db: false, loc: true, text: false, rigidModel: false } }),
+      {},
+      makeDeps({
+        getVanillaLocReader: async () => locReader,
+        getVanillaPackPathsInLoadOrder: () => ["vanilla.pack"],
+        isCanceled: () => canceled,
+      }),
+    );
+
+    expect(response.canceled).toBe(true);
+    expect(response.results).toHaveLength(1);
+  });
+
   it("stops when cancellation becomes observable", async () => {
     let canceled = false;
     const response = await runGlobalSearch(

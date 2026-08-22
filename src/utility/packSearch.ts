@@ -31,13 +31,22 @@ export const packFileContains = async (
   searchTerm: string,
   { chunkBytes = DEFAULT_CHUNK_BYTES, overlapBytes = DEFAULT_OVERLAP_BYTES }: PackSearchOptions = {},
 ): Promise<boolean> => {
+  if (searchTerm.length === 0) return true;
   // The legacy pack-wide search predates the global-search UI and intentionally keeps its old
   // invalid-regex-as-literal behaviour. The new panel uses the matcher directly and rejects such a
   // query instead.
-  const regexMatcher = createSearchMatcher(searchTerm, { regex: true, caseSensitive: false });
+  const regexMatcher = createSearchMatcher(searchTerm, {
+    regex: true,
+    caseSensitive: false,
+    maxQueryLength: Number.POSITIVE_INFINITY,
+  });
   const matcher = regexMatcher.isValidRegex
     ? regexMatcher
-    : createSearchMatcher(searchTerm, { regex: false, caseSensitive: false });
+    : createSearchMatcher(searchTerm, {
+        regex: false,
+        caseSensitive: false,
+        maxQueryLength: Number.POSITIVE_INFINITY,
+      });
   const stream = fs.createReadStream(filePath, { highWaterMark: chunkBytes });
   let tail: Buffer = Buffer.alloc(0);
   let pendingChunk: Buffer | undefined;
@@ -62,6 +71,6 @@ export const packFileContains = async (
     stream.destroy();
   }
 
-  // An empty file yields no chunks, so match the whole-file behaviour against the empty string.
-  return pendingChunk === undefined && matcher.toRegExp().test("");
+  // A non-empty file was handled by the stream above. An empty file also contains the empty term.
+  return pendingChunk === undefined;
 };

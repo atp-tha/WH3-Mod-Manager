@@ -55,29 +55,10 @@ export const makeMatchExcerpt = (
   };
 };
 
-interface LineRange {
-  start: number;
-  end: number;
-  line: number;
-}
-
-const lineRangeAt = (value: string, offset: number, firstContentOffset: number): LineRange => {
-  let lineStart = firstContentOffset;
-  let line = 1;
-  for (let index = firstContentOffset; index < offset; index++) {
-    if (value[index] === "\r") {
-      if (value[index + 1] === "\n") index++;
-      lineStart = index + 1;
-      line++;
-    } else if (value[index] === "\n") {
-      lineStart = index + 1;
-      line++;
-    }
-  }
-
-  let end = lineStart;
-  while (end < value.length && value[end] !== "\r" && value[end] !== "\n") end++;
-  return { start: lineStart, end, line };
+const findLineEnd = (value: string, lineStart: number): number => {
+  let lineEnd = lineStart;
+  while (lineEnd < value.length && value[lineEnd] !== "\r" && value[lineEnd] !== "\n") lineEnd++;
+  return lineEnd;
 };
 
 /**
@@ -95,21 +76,29 @@ export const scanTextForMatches = (
   // UTF-8 BOMs are not content in an editor. Keep it in the returned offset so the caller can map
   // back to the decoded buffer, but start line/column accounting after it.
   const firstContentOffset = text.charCodeAt(0) === 0xfeff ? 1 : 0;
+  let lineStart = firstContentOffset;
+  let lineNumber = 1;
+  let lineEnd = findLineEnd(text, lineStart);
   let fromIndex = firstContentOffset;
   let truncated = false;
   while (fromIndex <= text.length) {
     const found = matcher.find(text, fromIndex);
     if (!found) break;
-    const line = lineRangeAt(text, found.start, firstContentOffset);
+    while (found.start > lineEnd) {
+      const newlineLength = text[lineEnd] === "\r" && text[lineEnd + 1] === "\n" ? 2 : 1;
+      lineStart = lineEnd + newlineLength;
+      lineNumber++;
+      lineEnd = findLineEnd(text, lineStart);
+    }
     const excerpt = makeMatchExcerpt(
-      text.slice(line.start, line.end),
-      found.start - line.start,
-      found.end - line.start,
+      text.slice(lineStart, lineEnd),
+      found.start - lineStart,
+      found.end - lineStart,
       maxExcerptLength,
     );
     matches.push({
-      line: line.line,
-      column: found.start - line.start + 1,
+      line: lineNumber,
+      column: found.start - lineStart + 1,
       offset: found.start,
       excerpt: excerpt.excerpt,
       matchStartInExcerpt: excerpt.matchStartInExcerpt,

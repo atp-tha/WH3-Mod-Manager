@@ -22,8 +22,8 @@
 
 export const VANILLA_LOC_CACHE_MAGIC = "WLCC";
 
-/** Bump when the layout changes. A reader rejects anything it does not recognise. */
-export const VANILLA_LOC_CACHE_VERSION = 2;
+/** Bump when the layout or build-validity contract changes. A reader rejects older files. */
+export const VANILLA_LOC_CACHE_VERSION = 3;
 
 export const VANILLA_LOC_CACHE_HEADER_BYTES = 36;
 

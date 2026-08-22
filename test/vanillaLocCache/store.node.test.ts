@@ -7,6 +7,7 @@ import {
   closeVanillaLocCaches,
   getVanillaLocCacheIdentity,
   openOrBuildVanillaLocCache,
+  VanillaLocCacheBuildCanceled,
 } from "../../src/vanillaLocCache/store";
 
 const makeWorkspace = () => {
@@ -82,6 +83,22 @@ describe("vanilla loc cache store", () => {
     expect(await openOrBuildVanillaLocCache(request)).toBeUndefined();
     // The caller falls back to the live path; repeating a failing multi-second build helps nobody.
     expect(readEntries).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not persist or abandon a canceled build", async () => {
+    const { userDataPath, packPath } = makeWorkspace();
+    const readEntries = vi
+      .fn()
+      .mockImplementationOnce(() => {
+        throw new VanillaLocCacheBuildCanceled();
+      })
+      .mockReturnValue([["key", "rebuilt"] as const]);
+    const request = { userDataPath, game: "wh3", packPaths: [packPath], readEntries };
+
+    expect(await openOrBuildVanillaLocCache(request)).toBeUndefined();
+    expect(fs.readdirSync(userDataPath).some((entry) => entry.endsWith(".bin"))).toBe(false);
+    expect((await openOrBuildVanillaLocCache(request))?.get("key")).toBe("rebuilt");
+    expect(readEntries).toHaveBeenCalledTimes(2);
   });
 
   it("keys identity on the packs, not on unrelated changes", async () => {

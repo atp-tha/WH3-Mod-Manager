@@ -1,17 +1,15 @@
 import type { DBVersion, Field, Pack, SchemaField, SCHEMA_FIELD_TYPE } from "../packFileTypes";
 import { parseDBTablePath } from "../utility/packFileHelpers";
+import { isSchemaFieldNumber, isSchemaFieldNumberInteger } from "../utility/frontend/packDataHandling";
 import type { SearchEngineContext } from "./engineTypes";
 import type { GlobalSearchDbResult } from "./types";
 
-const integerFieldTypes = new Set<SCHEMA_FIELD_TYPE>(["I16", "I32", "I64"]);
-const numberFieldTypes = new Set<SCHEMA_FIELD_TYPE>(["I16", "I32", "I64", "F32", "F64"]);
-
 /** The same display conversion the viewer uses for a parsed cell. */
 export const resolveSearchFieldValue = (fieldType: SCHEMA_FIELD_TYPE, fields: Field[]): string => {
-  if (numberFieldTypes.has(fieldType)) {
+  if (isSchemaFieldNumber(fieldType)) {
     const number = fields[0]?.val as number | undefined;
     if (number === undefined) return "";
-    return integerFieldTypes.has(fieldType) ? number.toFixed(0) : number.toFixed(3);
+    return isSchemaFieldNumberInteger(fieldType) ? number.toFixed(0) : number.toFixed(3);
   }
   if (fieldType === "OptionalStringU8" || fieldType === "StringU8") {
     if (!fields[0]?.val) return "";
@@ -47,11 +45,13 @@ export const searchPackDb = async (
     }
 
     const columnCount = tableSchema.fields.length;
-    for (let index = 0; index + columnCount <= schemaFields.length; index++) {
+    const usableCellCount = schemaFields.length - (schemaFields.length % columnCount);
+    for (let index = 0; index < usableCellCount; index++) {
       if (context.isCanceled()) return "canceled";
       const column = tableSchema.fields[index % columnCount];
       const cell = schemaFields[index] as SchemaField;
       const value = resolveSearchFieldValue(column.field_type, cell.fields);
+      if (!context.matcher.test(value)) continue;
       const found = context.matcher.find(value);
       if (!found) continue;
 
@@ -102,6 +102,7 @@ export const searchPackLoc = (
     if (searchIn === "values" || searchIn === "both") values.push(["value", value]);
 
     for (const [matchedIn, searched] of values) {
+      if (!context.matcher.test(searched)) continue;
       const found = context.matcher.find(searched);
       if (!found) continue;
       const result = {
