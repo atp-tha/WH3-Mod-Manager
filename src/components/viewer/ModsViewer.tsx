@@ -1,4 +1,5 @@
-import React, { memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import React, { memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useStore } from "react-redux";
 import { useAppDispatch, useAppSelector } from "../../hooks";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faXmark } from "@fortawesome/free-solid-svg-icons";
@@ -11,8 +12,16 @@ import localizationContext from "../../localizationContext";
 import { gameToPackWithDBTablesName } from "../../supportedGames";
 import { Modal } from "@/src/flowbite";
 import DBDuplication from "@/src/components/viewer/DBDuplication";
-import { requestFlowFileReload, selectDBTable, selectFlowFile, setDeepCloneTarget, setPacksData } from "@/src/appSlice";
+import {
+  removePackData,
+  requestFlowFileReload,
+  selectDBTable,
+  selectFlowFile,
+  setDeepCloneTarget,
+  setPacksData,
+} from "@/src/appSlice";
 import NodeEditor from "../NodeEditor";
+import type { RootState } from "../../store";
 import type { ShowViewerDialog } from "./viewerDialogs";
 import { makeSelectCurrentPackData, makeSelectCurrentPackUnsavedFiles } from "./viewerSelectors";
 import {
@@ -21,7 +30,9 @@ import {
   getDBPackedFilePath,
   getPackNameFromPath,
 } from "@/src/utility/packFileHelpers";
-import { getDefaultSaveAsPackName, getPackFileInventory, hasLoadedDBTable } from "./viewerHelpers";
+import { clearPackDataStoreForPack } from "./packDataStore";
+import { clearPreparedTableForPack } from "./tablePrepCache";
+import { getDefaultSaveAsPackName, getPackFileInventory, getPreferredTreeTab, hasLoadedDBTable } from "./viewerHelpers";
 
 type ViewerTabKind = "db" | "flow" | "file";
 
@@ -41,21 +52,25 @@ type ViewerTab = {
 
 type ViewerTabCandidate = Omit<ViewerTab, "id">;
 
+type PackTab = { packPath: string; openTabs: ViewerTab[]; activeTabId: string | null };
+const EMPTY_TABS: ViewerTab[] = [];
+/** Below this the two modder buttons cannot show their labels inside the sidebar's width. */
+const TOOLBAR_ICON_ONLY_SIDEBAR_WIDTH = 300;
+
 const hasDBSelectionTarget = (selection?: DBTableSelection): selection is DBTableSelection =>
   Boolean(selection?.packPath && selection.dbName && selection.dbSubname);
 
-const getEmptyPackSelectionPath = (selection?: DBTableSelection): string | undefined =>
-  selection?.packPath && !selection.dbName && !selection.dbSubname ? selection.packPath : undefined;
-
 const ModsViewer = memo(() => {
   const dispatch = useAppDispatch();
+  const viewerStore = useStore<RootState>();
   const currentDBTableSelection = useAppSelector((state) => state.app.currentDBTableSelection);
   const currentFlowFileSelection = useAppSelector((state) => state.app.currentFlowFileSelection);
   const currentFlowFilePackPath = useAppSelector((state) => state.app.currentFlowFilePackPath);
   const currentGame = useAppSelector((state) => state.app.currentGame);
   const isFeaturesForModdersEnabled = useAppSelector((state) => state.app.isFeaturesForModdersEnabled);
-  // Use currentFlowFilePackPath if a flow file is selected, otherwise use DB table pack path
-  const packPath =
+  // Use currentFlowFilePackPath if a flow file is selected, otherwise use DB table pack path.
+  // This is only the Redux fallback for the content pane; pack tabs own the active path once opened.
+  const reduxFallbackPackPath =
     currentFlowFilePackPath ??
     currentDBTableSelection?.packPath ??
     (gameToPackWithDBTablesName[currentGame] || "db.pack");
@@ -76,24 +91,66 @@ const ModsViewer = memo(() => {
   const [isNewPackModalOpen, setIsNewPackModalOpen] = React.useState(false);
   const [newPackName, setNewPackName] = React.useState("");
   const [isNewPackProcessing, setIsNewPackProcessing] = React.useState(false);
-  const [openTabs, setOpenTabs] = useState<ViewerTab[]>([]);
-  const [activeTabId, setActiveTabId] = useState<string | null>(null);
+  const [packCloseConfirmPath, setPackCloseConfirmPath] = useState<string | null>(null);
+  const [packTabs, setPackTabs] = useState<PackTab[]>([]);
+  const [activePackPath, setActivePackPath] = useState<string | null>(null);
+  // Written synchronously so a handler can create a pack tab and open a file tab in it in one tick,
+  // before setActivePackPath has been applied.
+  const activePackPathRef = useRef<string | null>(null);
+  const activatePackTab = useCallback((packPath: string | null) => {
+    activePackPathRef.current = packPath;
+    setActivePackPath(packPath);
+  }, []);
+  const activePackTab = useMemo(
+    () => packTabs.find((packTab) => packTab.packPath === activePackPath) ?? null,
+    [packTabs, activePackPath],
+  );
+  const openTabs = activePackTab?.openTabs ?? EMPTY_TABS;
+  const activeTabId = activePackTab?.activeTabId ?? null;
+  const setOpenTabs = useCallback((action: React.SetStateAction<ViewerTab[]>) => {
+    const targetPackPath = activePackPathRef.current;
+    if (!targetPackPath) return;
+    setPackTabs((prev) =>
+      prev.map((packTab) =>
+        packTab.packPath !== targetPackPath
+          ? packTab
+          : { ...packTab, openTabs: typeof action === "function" ? action(packTab.openTabs) : action },
+      ),
+    );
+  }, []);
+  const setActiveTabId = useCallback((tabId: string | null) => {
+    const targetPackPath = activePackPathRef.current;
+    if (!targetPackPath) return;
+    setPackTabs((prev) =>
+      prev.map((packTab) => (packTab.packPath === targetPackPath ? { ...packTab, activeTabId: tabId } : packTab)),
+    );
+  }, []);
   const [messageDialog, setMessageDialog] = useState<{ title: string; message: string } | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const activeTab = useMemo(() => openTabs.find((tab) => tab.id === activeTabId) ?? null, [openTabs, activeTabId]);
-  const activeViewerPackPath = activeTab?.packPath ?? packPath;
+  const activeViewerPackPath = activePackPath ?? reduxFallbackPackPath;
   const currentPackData = useAppSelector((state) => selectCurrentPackData(state, activeViewerPackPath));
   const unsavedFiles = useAppSelector((state) => selectCurrentPackUnsavedFiles(state, activeViewerPackPath));
+  const packOpenRequest = useAppSelector((state) => state.app.packOpenRequest);
   const packFileInventory = useMemo(
     () => (currentPackData ? getPackFileInventory(currentPackData, unsavedFiles) : undefined),
     [currentPackData, unsavedFiles],
   );
 
-  const treeViewRef = useRef<PackTablesTreeViewHandle>(null);
+  const treeViewRefs = useRef<Record<string, PackTablesTreeViewHandle | null>>({});
+  const treeScrollTopsRef = useRef<Record<string, number>>({});
+  const treeScrollElementsRef = useRef<Record<string, HTMLDivElement | null>>({});
+  const viewerRootRef = useRef<HTMLDivElement>(null);
+  const sidebarResizableRef = useRef<Resizable>(null);
+  const [isSidebarNarrow, setIsSidebarNarrow] = useState(false);
   const saveAsPackNameInputRef = useRef<HTMLInputElement>(null);
   const newPackNameInputRef = useRef<HTMLInputElement>(null);
   const tabIdCounterRef = useRef(0);
-  const lastActionRef = useRef<{ fileKey: string; at: number; openedNew: boolean; tabId?: string } | null>(null);
+  const lastActionRef = useRef<{ key: string; at: number; openedNew: boolean; tabId?: string } | null>(null);
+  const lastHandledPackOpenNonceRef = useRef(0);
+  const lastObservedPackOpenNonceRef = useRef(0);
+  const pendingPackOpenRequestsRef = useRef<PackOpenRequest[]>([]);
+  const [packOpenRequestVersion, setPackOpenRequestVersion] = useState(0);
   const lastSelectionKeyRef = useRef<string | null>(null);
   const lastProcessedSelectionRequestKeyRef = useRef<string | null>(null);
   const suppressSelectionToTabSyncRef = useRef(false);
@@ -179,18 +236,6 @@ const ModsViewer = memo(() => {
     };
   }, []);
 
-  const buildEmptyPackTabCandidate = useCallback((packPath: string): ViewerTabCandidate => {
-    const packLabel = getPackNameFromPath(packPath) ?? packPath;
-    return {
-      fileKey: `pack|${packPath}`,
-      title: packLabel,
-      kind: "db",
-      packPath,
-      dbName: "",
-      dbSubname: "",
-    };
-  }, []);
-
   const buildFlowTabCandidate = useCallback((flowFile: string, packPath: string): ViewerTabCandidate => {
     const packLabel = getPackNameFromPath(packPath) ?? packPath;
     const shortFlowName = flowFile.replace(/^whmmflows[\\/]/, "");
@@ -216,12 +261,26 @@ const ModsViewer = memo(() => {
     };
   }, []);
 
+  const openOrActivatePackTab = useCallback(
+    (packPath: string) => {
+      setPackTabs((prev) =>
+        prev.some((packTab) => packTab.packPath === packPath)
+          ? prev
+          : [...prev, { packPath, openTabs: [], activeTabId: null }],
+      );
+      activatePackTab(packPath);
+    },
+    [activatePackTab],
+  );
+
   const openOrActivateTab = useCallback(
     (candidate: ViewerTabCandidate, options: { forceNewTab?: boolean } = {}) => {
+      if (activePackPathRef.current !== candidate.packPath) openOrActivatePackTab(candidate.packPath);
       const now = Date.now();
       const lastAction = lastActionRef.current;
+      const actionKey = `${candidate.packPath}|${candidate.fileKey}`;
       const isJustOpenedSame =
-        lastAction && lastAction.fileKey === candidate.fileKey && lastAction.openedNew && now - lastAction.at < 350;
+        lastAction && lastAction.key === actionKey && lastAction.openedNew && now - lastAction.at < 350;
 
       if (options.forceNewTab && isJustOpenedSame && lastAction?.tabId) {
         setActiveTabId(lastAction.tabId);
@@ -235,7 +294,7 @@ const ModsViewer = memo(() => {
           openTabs.find((tab) => tab.fileKey === candidate.fileKey);
         if (existingTab) {
           setActiveTabId(existingTab.id);
-          lastActionRef.current = { fileKey: candidate.fileKey, at: now, openedNew: false, tabId: existingTab.id };
+          lastActionRef.current = { key: actionKey, at: now, openedNew: false, tabId: existingTab.id };
           return;
         }
       }
@@ -247,24 +306,22 @@ const ModsViewer = memo(() => {
         const newTab: ViewerTab = { id: createTabId(), ...candidate };
         openedNew = true;
         tabToActivate = newTab;
-        setOpenTabs([...openTabs, newTab]);
+        setOpenTabs((prevTabs) => [...prevTabs, newTab]);
       } else {
         const activeTabIndex = openTabs.findIndex((tab) => tab.id === activeTabId);
         if (activeTabIndex < 0) {
           const newTab: ViewerTab = { id: createTabId(), ...candidate };
           openedNew = true;
           tabToActivate = newTab;
-          setOpenTabs([...openTabs, newTab]);
+          setOpenTabs((prevTabs) => [...prevTabs, newTab]);
         } else {
           tabToActivate = { ...openTabs[activeTabIndex], ...candidate };
-          const nextTabs = [...openTabs];
-          nextTabs[activeTabIndex] = tabToActivate;
-          setOpenTabs(nextTabs);
+          setOpenTabs((prevTabs) => prevTabs.map((tab) => (tab.id === tabToActivate.id ? tabToActivate : tab)));
         }
       }
 
       setActiveTabId(tabToActivate.id);
-      lastActionRef.current = { fileKey: candidate.fileKey, at: now, openedNew, tabId: tabToActivate.id };
+      lastActionRef.current = { key: actionKey, at: now, openedNew, tabId: tabToActivate.id };
       if (tabToActivate.kind === "db" && tabToActivate.dbName && tabToActivate.dbSubname) {
         const selection = {
           dbFolder: tabToActivate.dbFolder,
@@ -282,7 +339,16 @@ const ModsViewer = memo(() => {
         }
       }
     },
-    [activeTabId, createTabId, openTabs, packsDataByPath, unsavedPacksDataByPath],
+    [
+      activeTabId,
+      createTabId,
+      openOrActivatePackTab,
+      openTabs,
+      packsDataByPath,
+      setActiveTabId,
+      setOpenTabs,
+      unsavedPacksDataByPath,
+    ],
   );
 
   const handleOpenDBTable = useCallback(
@@ -314,31 +380,47 @@ const ModsViewer = memo(() => {
 
   const handleCloseTab = useCallback(
     (tabId: string) => {
-      setOpenTabs((prevTabs) => {
-        const tabIndex = prevTabs.findIndex((tab) => tab.id === tabId);
-        if (tabIndex < 0) return prevTabs;
-        const nextTabs = prevTabs.filter((tab) => tab.id !== tabId);
+      const targetPackPath = activePackPathRef.current;
+      if (!targetPackPath) return;
+      const targetPackTab = packTabs.find((packTab) => packTab.packPath === targetPackPath);
+      if (!targetPackTab) return;
+      const tabIndex = targetPackTab.openTabs.findIndex((tab) => tab.id === tabId);
+      if (tabIndex < 0) return;
 
-        if (tabId === activeTabId) {
-          const nextActive = nextTabs[tabIndex - 1] ?? nextTabs[tabIndex] ?? null;
-          setActiveTabId(nextActive?.id ?? null);
-        }
-
-        return nextTabs;
-      });
+      const nextOpenTabs = targetPackTab.openTabs.filter((tab) => tab.id !== tabId);
+      const nextActiveTabId =
+        tabId === targetPackTab.activeTabId
+          ? ((nextOpenTabs[tabIndex - 1] ?? nextOpenTabs[tabIndex])?.id ?? null)
+          : targetPackTab.activeTabId;
+      setPackTabs((prevPackTabs) =>
+        prevPackTabs.map((packTab) =>
+          packTab.packPath === targetPackPath
+            ? { ...packTab, openTabs: nextOpenTabs, activeTabId: nextActiveTabId }
+            : packTab,
+        ),
+      );
     },
-    [activeTabId],
+    [packTabs],
   );
 
   const hasUnsavedFiles = unsavedFiles.length > 0;
   // Save As works on any pack that exists on disk, changed or not - it saves a copy. A memory pack
   // has no file to copy, so it needs something unsaved in it before there is anything to write.
-  const canSavePackAs = !packPath.startsWith("memory://") || hasUnsavedFiles;
+  const canSavePackAs = !activeViewerPackPath.startsWith("memory://") || hasUnsavedFiles;
 
   useEffect(() => {
-    if (!activeTabId) return;
-    const activeTab = openTabs.find((tab) => tab.id === activeTabId);
-    if (!activeTab) return;
+    if (!activePackPath) return;
+    const activeTab =
+      openTabs.find((tab) => tab.id === activeTabId) ??
+      ({
+        fileKey: `pack|${activePackPath}`,
+        kind: "db",
+        packPath: activePackPath,
+        dbName: "",
+        dbSubname: "",
+        id: "",
+        title: "",
+      } as ViewerTab);
     const currentDBSelection = currentDBTableSelectionRef.current;
     const currentFlowSelection = currentFlowFileSelectionRef.current;
     const currentFlowPackPath = currentFlowFilePackPathRef.current;
@@ -357,6 +439,22 @@ const ModsViewer = memo(() => {
     }
 
     if (activeTab.kind === "file" && activeTab.filePath) {
+      const isAlreadySelected =
+        !currentFlowSelection &&
+        currentDBSelection?.packPath === activeTab.packPath &&
+        !currentDBSelection?.dbName &&
+        !currentDBSelection?.dbSubname;
+      if (!isAlreadySelected) {
+        suppressSelectionToTabSyncRef.current = true;
+        if (currentFlowSelection) dispatch(selectFlowFile(undefined));
+        dispatch(
+          selectDBTable({
+            packPath: activeTab.packPath,
+            dbName: "",
+            dbSubname: "",
+          }),
+        );
+      }
       lastSelectionKeyRef.current = activeTab.fileKey;
       return;
     }
@@ -411,22 +509,17 @@ const ModsViewer = memo(() => {
       );
       lastSelectionKeyRef.current = activeTab.fileKey;
     }
-  }, [activeTabId, openTabs, dispatch]);
+  }, [activePackPath, activeTabId, openTabs, dispatch]);
 
   useEffect(() => {
     let selectionRequestKey: string | null = null;
     if (currentFlowFileSelection) {
-      const flowPackPath = currentFlowFilePackPath ?? currentDBTableSelection?.packPath ?? packPath;
+      const flowPackPath = currentFlowFilePackPath ?? currentDBTableSelection?.packPath ?? reduxFallbackPackPath;
       if (flowPackPath) {
         selectionRequestKey = `flow|${flowPackPath}|${currentFlowFileSelection}`;
       }
     } else if (hasDBSelectionTarget(currentDBTableSelection)) {
       selectionRequestKey = `db|${currentDBTableSelection.packPath}|${currentDBTableSelection.dbName}|${currentDBTableSelection.dbSubname}`;
-    } else {
-      const emptyPackPath = getEmptyPackSelectionPath(currentDBTableSelection);
-      if (emptyPackPath) {
-        selectionRequestKey = `pack|${emptyPackPath}`;
-      }
     }
 
     if (suppressSelectionToTabSyncRef.current) {
@@ -442,8 +535,9 @@ const ModsViewer = memo(() => {
     lastProcessedSelectionRequestKeyRef.current = selectionRequestKey;
 
     if (currentFlowFileSelection) {
-      const flowPackPath = currentFlowFilePackPath ?? currentDBTableSelection?.packPath ?? packPath;
+      const flowPackPath = currentFlowFilePackPath ?? currentDBTableSelection?.packPath ?? reduxFallbackPackPath;
       if (!flowPackPath) return;
+      if (activePackPath && flowPackPath !== activePackPath) return;
       const candidate = buildFlowTabCandidate(currentFlowFileSelection, flowPackPath);
       if (lastSelectionKeyRef.current === candidate.fileKey) return;
       openOrActivateTab(candidate);
@@ -451,33 +545,69 @@ const ModsViewer = memo(() => {
     }
 
     if (hasDBSelectionTarget(currentDBTableSelection)) {
+      if (activePackPath && currentDBTableSelection.packPath !== activePackPath) return;
       const candidate = buildDbTabCandidate(currentDBTableSelection);
       if (lastSelectionKeyRef.current === candidate.fileKey) return;
       openOrActivateTab(candidate);
       return;
     }
-
-    const emptyPackPath = getEmptyPackSelectionPath(currentDBTableSelection);
-    if (emptyPackPath) {
-      const candidate = buildEmptyPackTabCandidate(emptyPackPath);
-      if (lastSelectionKeyRef.current === candidate.fileKey) return;
-      openOrActivateTab(candidate);
-    }
   }, [
     currentFlowFileSelection,
     currentFlowFilePackPath,
     currentDBTableSelection,
-    packPath,
-    buildEmptyPackTabCandidate,
+    reduxFallbackPackPath,
+    activePackPath,
     buildFlowTabCandidate,
     buildDbTabCandidate,
     openOrActivateTab,
   ]);
 
   useEffect(() => {
+    const capturePackOpenRequest = () => {
+      const request = viewerStore.getState().app.packOpenRequest;
+      if (!request) {
+        // removePackData clears a request for the closed path; allow that path to be reopened with
+        // the reducer's fresh nonce sequence.
+        lastObservedPackOpenNonceRef.current = 0;
+        lastHandledPackOpenNonceRef.current = 0;
+        return;
+      }
+      if (request.nonce <= lastObservedPackOpenNonceRef.current) return;
+      lastObservedPackOpenNonceRef.current = request.nonce;
+      pendingPackOpenRequestsRef.current.push(request);
+      setPackOpenRequestVersion((version) => version + 1);
+    };
+
+    const unsubscribe = viewerStore.subscribe(capturePackOpenRequest);
+    capturePackOpenRequest();
+    return unsubscribe;
+  }, [viewerStore]);
+
+  useEffect(() => {
+    // The selector is retained as a dependency for the initial/fallback path; the store
+    // subscription above captures every nonce even when React batches several dispatches together.
+    if (packOpenRequest && packOpenRequest.nonce > lastObservedPackOpenNonceRef.current) {
+      lastObservedPackOpenNonceRef.current = packOpenRequest.nonce;
+      pendingPackOpenRequestsRef.current.push(packOpenRequest);
+    }
+
+    const pendingRequests = pendingPackOpenRequestsRef.current.splice(0);
+    for (const request of pendingRequests) {
+      if (request.nonce <= lastHandledPackOpenNonceRef.current) continue;
+      lastHandledPackOpenNonceRef.current = request.nonce;
+      openOrActivatePackTab(request.packPath);
+    }
+  }, [packOpenRequest, packOpenRequestVersion, openOrActivatePackTab]);
+
+  useEffect(() => {
+    if (activePackPath) window.api?.setViewerActivePack?.(activePackPath);
+  }, [activePackPath]);
+
+  useEffect(() => {
+    if (!activePackPath) return;
     if (activeTabId) return;
-    if (currentFlowFileSelection) return;
-    if (hasDBSelectionTarget(currentDBTableSelection)) return;
+    if (currentFlowFileSelection && currentFlowFilePackPath === activePackPath) return;
+    if (hasDBSelectionTarget(currentDBTableSelection) && currentDBTableSelection.packPath === activePackPath) return;
 
     if (!currentPackData) return;
 
@@ -485,17 +615,26 @@ const ModsViewer = memo(() => {
     if (!hasDefaultTable) return;
 
     handleOpenDBTable({
-      packPath,
+      packPath: activeViewerPackPath,
       dbName: "main_units_tables",
       dbSubname: "data__",
     });
-  }, [activeTabId, currentFlowFileSelection, currentDBTableSelection, currentPackData, packPath, handleOpenDBTable]);
+  }, [
+    activePackPath,
+    activeTabId,
+    currentFlowFilePackPath,
+    currentFlowFileSelection,
+    currentDBTableSelection,
+    currentPackData,
+    activeViewerPackPath,
+    handleOpenDBTable,
+  ]);
 
   const handleSavePack = useCallback(async () => {
     if (!hasUnsavedFiles) return;
 
     try {
-      const result = await window.api?.savePackWithUnsavedFiles(packPath);
+      const result = await window.api?.savePackWithUnsavedFiles(activeViewerPackPath);
       if (result?.success) {
         console.log("Pack saved successfully:", result.savedPath);
         // A warning is something to read, so it keeps the dialog; a plain success does not.
@@ -514,11 +653,11 @@ const ModsViewer = memo(() => {
         title: "Save Failed",
       });
     }
-  }, [hasUnsavedFiles, packPath, showDialog, showToast]);
+  }, [activeViewerPackPath, hasUnsavedFiles, showDialog, showToast]);
 
   const handleSavePackAs = useCallback(async () => {
     // Deliberately not gated on unsaved changes: Save As on an untouched pack saves a copy of it.
-    setSaveAsPackName(getDefaultSaveAsPackName(packPath));
+    setSaveAsPackName(getDefaultSaveAsPackName(activeViewerPackPath));
     setSaveAsDirectory(undefined);
     setOverwriteConfirmPath(null);
     setIsSaveAsModalOpen(true);
@@ -528,7 +667,7 @@ const ModsViewer = memo(() => {
     const dataFolder = await window.api?.getDataFolder();
     // Only fills a still-empty field: Browse may already have won the race.
     if (dataFolder) setSaveAsDirectory((currentDirectory) => currentDirectory ?? dataFolder);
-  }, [packPath]);
+  }, [activeViewerPackPath]);
 
   const handleSaveAsConfirm = useCallback(
     async (overwriteExisting = false) => {
@@ -541,7 +680,7 @@ const ModsViewer = memo(() => {
 
       try {
         const result = await window.api?.savePackAsWithUnsavedFiles(
-          packPath,
+          activeViewerPackPath,
           saveAsPackName.trim(),
           saveAsDirectory,
           overwriteExisting,
@@ -575,7 +714,7 @@ const ModsViewer = memo(() => {
         setIsSaveAsProcessing(false);
       }
     },
-    [packPath, saveAsDirectory, saveAsPackName, showDialog, showToast],
+    [activeViewerPackPath, saveAsDirectory, saveAsPackName, showDialog, showToast],
   );
 
   const handleSelectSaveAsDirectory = useCallback(async () => {
@@ -613,7 +752,6 @@ const ModsViewer = memo(() => {
     try {
       const packName = newPackName.trim();
       const packPath = `memory://${packName}`;
-      const emptyPackTabCandidate = buildEmptyPackTabCandidate(packPath);
 
       const newPackData: PackViewData = {
         packName: packName,
@@ -623,16 +761,7 @@ const ModsViewer = memo(() => {
       };
 
       dispatch(setPacksData([newPackData]));
-      openOrActivateTab(emptyPackTabCandidate, { forceNewTab: true });
-      dispatch(selectFlowFile(undefined));
-
-      dispatch(
-        selectDBTable({
-          packPath: packPath,
-          dbName: "",
-          dbSubname: "",
-        }),
-      );
+      openOrActivatePackTab(packPath);
 
       console.log("Pack created in memory:", packName);
       setIsNewPackModalOpen(false);
@@ -645,7 +774,70 @@ const ModsViewer = memo(() => {
     } finally {
       setIsNewPackProcessing(false);
     }
-  }, [buildEmptyPackTabCandidate, dispatch, newPackName, openOrActivateTab, showDialog]);
+  }, [dispatch, newPackName, openOrActivatePackTab, showDialog]);
+
+  const closePackTab = useCallback(
+    (packPath: string) => {
+      const packIndex = packTabs.findIndex((packTab) => packTab.packPath === packPath);
+      if (packIndex < 0) return;
+
+      const nextPackTabs = packTabs.filter((packTab) => packTab.packPath !== packPath);
+      if (activePackPathRef.current === packPath) {
+        const nextActivePack = nextPackTabs[packIndex - 1] ?? nextPackTabs[packIndex] ?? null;
+        activatePackTab(nextActivePack?.packPath ?? null);
+      }
+      setPackTabs(nextPackTabs);
+
+      clearPackDataStoreForPack(packPath);
+      clearPreparedTableForPack(packPath);
+      // referencesHash is global to the renderer and is refreshed by the next pack data-store update.
+      delete treeScrollTopsRef.current[packPath];
+      delete treeScrollElementsRef.current[packPath];
+      delete treeViewRefs.current[packPath];
+      dispatch(removePackData(packPath));
+      window.api?.viewerClosedPack?.(packPath);
+    },
+    [activatePackTab, dispatch, packTabs],
+  );
+
+  const requestClosePackTab = useCallback(
+    (packPath: string) => {
+      if (unsavedPacksDataByPath[packPath]?.length) {
+        setPackCloseConfirmPath(packPath);
+        return;
+      }
+      closePackTab(packPath);
+    },
+    [closePackTab, unsavedPacksDataByPath],
+  );
+
+  useLayoutEffect(() => {
+    if (!activePackPath) return;
+    const scrollElement = treeScrollElementsRef.current[activePackPath];
+    if (scrollElement) scrollElement.scrollTop = treeScrollTopsRef.current[activePackPath] ?? 0;
+  }, [activePackPath]);
+
+  useLayoutEffect(() => {
+    const sidebarElement = sidebarResizableRef.current?.resizable;
+    const rootElement = viewerRootRef.current;
+    if (!sidebarElement || !rootElement || typeof ResizeObserver === "undefined") return;
+
+    const apply = (width: number) => {
+      rootElement.style.setProperty("--viewer-sidebar-width", `${width}px`);
+      setIsSidebarNarrow(width < TOOLBAR_ICON_ONLY_SIDEBAR_WIDTH);
+    };
+
+    apply(sidebarElement.getBoundingClientRect().width);
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) return;
+      const borderBoxSize = entry.borderBoxSize;
+      const width = borderBoxSize?.[0]?.inlineSize ?? entry.contentRect.width;
+      if (width != undefined) apply(width);
+    });
+    observer.observe(sidebarElement);
+    return () => observer.disconnect();
+  }, [isOpen]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -665,21 +857,21 @@ const ModsViewer = memo(() => {
   // only runs when mounted first time
   useEffect(() => {
     if (!currentDBTableSelection) {
-      // window.api?.getPackData(packPath, { dbName: "main_units_tables", dbSubname: "data__" });
+      // window.api?.getPackData(activeViewerPackPath, { dbName: "main_units_tables", dbSubname: "data__" });
       // dispatch(
       //   selectDBTable({
-      //     packPath: `\\\\${packPath}`,
+      //     packPath: `\\\\${activeViewerPackPath}`,
       //     dbName: "main_units_tables",
       //     dbSubname: "data__",
       //   })
       // );
     }
-  }, []);
+  }, [currentDBTableSelection]);
 
   // for testing, automatically opens db.pack main_units_tablesl
   useEffect(() => {
     if (startArgs.includes("-testDBClone")) {
-      window.api?.getPackData(packPath, { dbName: "main_units_tables", dbSubname: "data__" });
+      window.api?.getPackData(activeViewerPackPath, { dbName: "main_units_tables", dbSubname: "data__" });
       dispatch(
         selectDBTable({
           packPath: `K:\\SteamLibrary\\steamapps\\common\\Total War WARHAMMER III\\data\\db.pack`,
@@ -688,12 +880,7 @@ const ModsViewer = memo(() => {
         }),
       );
     }
-  }, []);
-
-  if (!currentPackData) {
-    console.log(`ModsViewer: no ${packPath} in packsData`);
-    return <></>;
-  }
+  }, [activeViewerPackPath, dispatch, startArgs]);
 
   // console.log(`currentPackData.data is ${currentPackData.data}`);
 
@@ -842,6 +1029,38 @@ const ModsViewer = memo(() => {
         </Modal.Footer>
       </Modal>
 
+      {/* Discard confirmation for a dirty pack tab */}
+      <Modal onClose={() => setPackCloseConfirmPath(null)} show={!!packCloseConfirmPath} size="md" position="center">
+        <Modal.Header>Close Pack</Modal.Header>
+        <Modal.Body>
+          <div className="text-sm text-gray-200">
+            This pack has unsaved files. Closing it will discard:
+            <ul className="mt-2 max-h-48 overflow-auto list-disc list-inside text-gray-400 break-all">
+              {(packCloseConfirmPath ? (unsavedPacksDataByPath[packCloseConfirmPath] ?? []) : []).map((file) => (
+                <li key={file.name}>{file.name}</li>
+              ))}
+            </ul>
+          </div>
+        </Modal.Body>
+        <Modal.Footer>
+          <button
+            onClick={() => setPackCloseConfirmPath(null)}
+            className="px-4 py-2 bg-gray-600 hover:bg-gray-500 text-white font-medium rounded-lg transition-colors duration-200"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => {
+              if (packCloseConfirmPath) closePackTab(packCloseConfirmPath);
+              setPackCloseConfirmPath(null);
+            }}
+            className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-medium rounded-lg transition-colors duration-200"
+          >
+            Discard and Close
+          </button>
+        </Modal.Footer>
+      </Modal>
+
       {toast && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 pointer-events-none">
           <button
@@ -868,79 +1087,135 @@ const ModsViewer = memo(() => {
         </Modal.Footer>
       </Modal>
 
-      <div className="dark:text-gray-300 explicit-height-without-topbar-and-padding flex flex-col">
+      <div ref={viewerRootRef} className="dark:text-gray-300 explicit-height-without-topbar-and-padding flex flex-col">
         {isOpen && (
           <>
-            {/* Toolbar - Save As needs no unsaved changes, so it can be the only thing in here */}
-            {(isFeaturesForModdersEnabled || hasUnsavedFiles || canSavePackAs) && (
-              <div className="flex justify-between items-center p-2 bg-gray-800 border-b border-gray-600">
-                <div className="flex gap-2">
-                  {isFeaturesForModdersEnabled && (
-                    <>
-                      <button
-                        onClick={handleNewPack}
-                        className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white font-medium rounded-lg shadow-lg transition-colors duration-200 flex items-center gap-2"
-                      >
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                        </svg>
-                        New Pack
-                      </button>
+            <div className="flex items-center py-2 pr-2 bg-gray-800 border-b border-gray-600">
+              {/* Clamped to the sidebar so the strip beside it starts exactly where the table view does. */}
+              <div
+                className="flex gap-2 shrink-0 overflow-hidden"
+                style={{ width: "var(--viewer-sidebar-width, 17%)" }}
+              >
+                {isFeaturesForModdersEnabled && (
+                  <>
+                    <button
+                      onClick={handleNewPack}
+                      title="New Pack"
+                      aria-label="New Pack"
+                      className={
+                        (isSidebarNarrow ? "px-2" : "px-4") +
+                        " py-2 bg-purple-600 hover:bg-purple-700 text-white font-medium rounded-lg shadow-lg transition-colors duration-200 flex items-center gap-2 shrink-0"
+                      }
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                      </svg>
+                      {!isSidebarNarrow && "New Pack"}
+                    </button>
 
-                      <button
-                        onClick={() => treeViewRef.current?.openNewFlowDialog()}
-                        className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-lg shadow-lg transition-colors duration-200 flex items-center gap-2"
-                      >
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                        </svg>
-                        Add New Flow
-                      </button>
-                    </>
-                  )}
-                </div>
-
-                {(hasUnsavedFiles || canSavePackAs) && (
-                  <div className="flex gap-2">
-                    {hasUnsavedFiles && !activeViewerPackPath.startsWith("memory://") && (
-                      <button
-                        onClick={handleSavePack}
-                        className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-medium rounded-lg shadow-lg transition-colors duration-200 flex items-center gap-2"
-                      >
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3-3m0 0l-3 3m3-3v12"
-                          />
-                        </svg>
-                        Save Pack
-                      </button>
-                    )}
-                    {canSavePackAs && (
-                      <button
-                        onClick={() => void handleSavePackAs()}
-                        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg shadow-lg transition-colors duration-200 flex items-center gap-2"
-                      >
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M12 19l9 2-9-18-9 18 9-2m0 0v-8m0 8l-6-4m6 4l6-4"
-                          />
-                        </svg>
-                        Save As
-                      </button>
-                    )}
-                  </div>
+                    <button
+                      onClick={() => treeViewRefs.current[activePackPath ?? ""]?.openNewFlowDialog()}
+                      title="Add New Flow"
+                      aria-label="Add New Flow"
+                      className={
+                        (isSidebarNarrow ? "px-2" : "px-4") +
+                        " py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-lg shadow-lg transition-colors duration-200 flex items-center gap-2 shrink-0"
+                      }
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                      </svg>
+                      {!isSidebarNarrow && "Add New Flow"}
+                    </button>
+                  </>
                 )}
               </div>
-            )}
+
+              {/* Pack tabs begin exactly at the sidebar's right edge. */}
+              <div className="flex flex-1 min-w-0 items-center gap-1 overflow-x-auto">
+                {packTabs.map((packTab) => {
+                  const isActive = packTab.packPath === activePackPath;
+                  const packLabel =
+                    packsDataByPath[packTab.packPath]?.packName ??
+                    getPackNameFromPath(packTab.packPath) ??
+                    packTab.packPath;
+                  const isDirty = (unsavedPacksDataByPath[packTab.packPath]?.length ?? 0) > 0;
+                  return (
+                    <div
+                      key={packTab.packPath}
+                      className={
+                        "flex items-center gap-1 rounded-md border text-xs shrink-0 " +
+                        (isActive
+                          ? "bg-gray-700 text-white border-gray-500"
+                          : "bg-gray-800 text-gray-300 border-gray-700 hover:bg-gray-700/60")
+                      }
+                    >
+                      <button
+                        type="button"
+                        onClick={() => activatePackTab(packTab.packPath)}
+                        className="px-2 py-1 max-w-[220px] truncate"
+                        title={packLabel}
+                      >
+                        {isDirty && <span aria-hidden="true">• </span>}
+                        {packLabel}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          requestClosePackTab(packTab.packPath);
+                        }}
+                        className="px-1 pr-2 text-gray-400 hover:text-white"
+                        aria-label={`Close ${packLabel}`}
+                      >
+                        <FontAwesomeIcon icon={faXmark} />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {(hasUnsavedFiles || canSavePackAs) && (
+                <div className="flex gap-2 shrink-0 ml-2">
+                  {hasUnsavedFiles && !activeViewerPackPath.startsWith("memory://") && (
+                    <button
+                      onClick={handleSavePack}
+                      className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-medium rounded-lg shadow-lg transition-colors duration-200 flex items-center gap-2"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14V9a2 2 0 00-2-2h-3m-1 4l-3-3m0 0l-3 3m3-3v12"
+                        />
+                      </svg>
+                      Save Pack
+                    </button>
+                  )}
+                  {canSavePackAs && (
+                    <button
+                      onClick={() => void handleSavePackAs()}
+                      className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg shadow-lg transition-colors duration-200 flex items-center gap-2"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M12 19l9 2-9-18-9 18 9-2m0 0v-8m0 8l-6-4m6 4l6-4"
+                        />
+                      </svg>
+                      Save As
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
 
             <div className="flex flex-1 w-full h-full overflow-hidden">
               <Resizable
+                ref={sidebarResizableRef}
                 defaultSize={{
                   width: "17%",
                   height: "100%",
@@ -949,23 +1224,35 @@ const ModsViewer = memo(() => {
                 minWidth="1"
               >
                 <div className="h-full flex flex-col">
-                  <div className="overflow-auto flex-1 scrollbar scrollbar-track-gray-700 scrollbar-thumb-blue-700">
-                    <PackTablesTreeView
-                      ref={treeViewRef}
-                      packPath={activeViewerPackPath}
-                      preferredTab={
-                        activeTab?.kind === "flow" ||
-                        activeTab?.kind === "file" ||
-                        (!packFileInventory?.hasDBTables && packFileInventory?.hasFiles)
-                          ? "files"
-                          : "db"
-                      }
-                      tableFilter={dbTableFilter}
-                      showDialog={showDialog}
-                      onOpenDBTable={handleOpenDBTable}
-                      onOpenFlowFile={handleOpenFlowFile}
-                      onOpenPackedFile={handleOpenPackedFile}
-                    />
+                  <div className="relative flex-1 min-h-0">
+                    {packTabs.map((packTab) => (
+                      <div
+                        key={packTab.packPath}
+                        ref={(element) => {
+                          treeScrollElementsRef.current[packTab.packPath] = element;
+                        }}
+                        onScroll={(event) => {
+                          treeScrollTopsRef.current[packTab.packPath] = event.currentTarget.scrollTop;
+                        }}
+                        className={
+                          "absolute inset-0 overflow-auto scrollbar scrollbar-track-gray-700 scrollbar-thumb-blue-700 " +
+                          (packTab.packPath === activePackPath ? "" : "hidden")
+                        }
+                      >
+                        <PackTablesTreeView
+                          ref={(handle) => {
+                            treeViewRefs.current[packTab.packPath] = handle;
+                          }}
+                          packPath={packTab.packPath}
+                          preferredTab={getPreferredTreeTab(packTab, packsDataByPath, unsavedPacksDataByPath)}
+                          tableFilter={dbTableFilter}
+                          showDialog={showDialog}
+                          onOpenDBTable={handleOpenDBTable}
+                          onOpenFlowFile={handleOpenFlowFile}
+                          onOpenPackedFile={handleOpenPackedFile}
+                        />
+                      </div>
+                    ))}
                   </div>
 
                   <div className="flex items-center mt-3">
@@ -1030,7 +1317,9 @@ const ModsViewer = memo(() => {
                   )}
                 </div>
                 <div className="flex-1 min-h-0">
-                  {activeTab ? (
+                  {!currentPackData ? (
+                    <div className="h-full flex items-center justify-center text-sm text-gray-400">Loading pack…</div>
+                  ) : activeTab ? (
                     activeTab.kind === "db" && !activeTab.dbName && !activeTab.dbSubname ? (
                       <div className="h-full flex items-center justify-center text-sm text-gray-400">
                         {packFileInventory?.isEmpty
@@ -1050,7 +1339,9 @@ const ModsViewer = memo(() => {
                     )
                   ) : (
                     <div className="h-full flex items-center justify-center text-sm text-gray-400">
-                      Select a file to view
+                      {packFileInventory?.isEmpty
+                        ? "Empty pack. Add a flow or create/edit files to populate it."
+                        : "Select a file to view"}
                     </div>
                   )}
                 </div>

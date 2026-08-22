@@ -998,6 +998,17 @@ const appSlice = createSlice({
         packsData.map((pd) => pd.packName),
       );
     },
+    removePackData: (state: AppState, action: PayloadAction<string>) => {
+      const packPath = action.payload;
+      delete state.packsData[packPath];
+      delete state.unsavedPacksData[packPath];
+      if (state.currentDBTableSelection?.packPath === packPath) state.currentDBTableSelection = undefined;
+      if (state.currentFlowFilePackPath === packPath) {
+        state.currentFlowFileSelection = undefined;
+        state.currentFlowFilePackPath = undefined;
+      }
+      if (state.packOpenRequest?.packPath === packPath) state.packOpenRequest = undefined;
+    },
     setUnsavedPacksData: (state: AppState, action: PayloadAction<SetUnsavedPacksDataPayload>) => {
       const { packPath, unsavedFileData } = action.payload;
       // The main process sends the complete authoritative list. Replacing it also lets a successful
@@ -1540,6 +1551,12 @@ const appSlice = createSlice({
       console.log("APPSLICE selectDBTable:", action.payload);
       state.currentDBTableSelection = action.payload;
     },
+    requestOpenPackTab: (state: AppState, action: PayloadAction<string>) => {
+      state.packOpenRequest = {
+        packPath: action.payload,
+        nonce: (state.packOpenRequest?.nonce ?? 0) + 1,
+      };
+    },
     selectFlowFile: (
       state: AppState,
       action: PayloadAction<{ flowFile: string | undefined; packPath?: string } | undefined>,
@@ -1790,6 +1807,7 @@ export const {
   importModsFromUsedMods,
   resolveUsedModsImport,
   setPacksData,
+  removePackData,
   setUnsavedPacksData,
   setPacksDataRead,
   setPackCollisions,
@@ -1805,6 +1823,7 @@ export const {
   setCurrentlyReadingMod,
   setLastModThatWasRead,
   selectDBTable,
+  requestOpenPackTab,
   selectFlowFile,
   requestFlowFileReload,
   setCurrentTab,

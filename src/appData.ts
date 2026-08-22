@@ -192,7 +192,10 @@ interface AppData {
   isViewerReady: boolean;
   areSkillsReady: boolean;
   queuedViewerData: (PackViewData | undefined)[];
-  lastOpenedViewerPackPath?: string;
+  /** Packs the viewer currently has tabs for, oldest first; replayed when the viewer reloads. */
+  openViewerPackPaths: string[];
+  /** Which of those is in front, for the native window title. */
+  activeViewerPackPath?: string;
   queuedSkillsData: SkillsData | undefined;
   lastSkillsSelection?: {
     currentSubtype: string;
@@ -263,7 +266,8 @@ const appData = {
   isViewerReady: false,
   areSkillsReady: false,
   queuedViewerData: [],
-  lastOpenedViewerPackPath: undefined,
+  openViewerPackPaths: [],
+  activeViewerPackPath: undefined,
   queuedSkillsData: undefined,
   lastSkillsSelection: undefined,
   lastSkillsDataSignature: undefined,

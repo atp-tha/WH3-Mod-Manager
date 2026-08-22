@@ -66,6 +66,29 @@ export const getPackFileInventory = (
   };
 };
 
+export interface PackTabTreeState {
+  packPath: string;
+  openTabs: ReadonlyArray<{ id: string; kind: "db" | "flow" | "file" }>;
+  activeTabId: string | null;
+}
+
+/** Chooses the tree sub-tab without changing the value for unrelated pack updates. */
+export const getPreferredTreeTab = (
+  packTab: PackTabTreeState,
+  packsDataByPath: Record<string, PackViewData>,
+  unsavedPacksDataByPath: Record<string, PackedFile[]>,
+): "db" | "files" => {
+  const activeTab = packTab.openTabs.find((tab) => tab.id === packTab.activeTabId);
+  const packData = packsDataByPath[packTab.packPath];
+  const inventory = packData
+    ? getPackFileInventory(packData, unsavedPacksDataByPath[packTab.packPath] ?? [])
+    : undefined;
+
+  return activeTab?.kind === "flow" || activeTab?.kind === "file" || (!inventory?.hasDBTables && inventory?.hasFiles)
+    ? "files"
+    : "db";
+};
+
 /** True when switching to this table can be satisfied entirely from renderer memory. */
 export const hasLoadedDBTable = (
   packData: Pick<PackViewData, "packedFiles"> | undefined,

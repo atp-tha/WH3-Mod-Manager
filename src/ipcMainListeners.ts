@@ -9545,6 +9545,22 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
       appData.isViewerReady = false;
     });
   };
+  const updateViewerTitle = () => {
+    const viewerWindow = getLiveViewerWindow();
+    if (!viewerWindow) return;
+
+    const activePackPath = appData.activeViewerPackPath;
+    if (!activePackPath) {
+      viewerWindow.setTitle("WH3 Mod Manager Mod Viewer");
+      return;
+    }
+
+    const additionalPackCount = Math.max(0, appData.openViewerPackPaths.length - 1);
+    viewerWindow.setTitle(
+      `WH3 Mod Manager v${version}: viewing ${nodePath.basename(activePackPath)}` +
+        (additionalPackCount > 0 ? ` (+${additionalPackCount} more)` : ""),
+    );
+  };
   const createSkillsWindow = () => {
     if (windows.skillsWindow) return;
     const skillsWindowState = windowStateKeeper({
@@ -9631,24 +9647,42 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
       }
     }
     console.log("ON requestOpenModInViewer", modPath);
-    appData.lastOpenedViewerPackPath = modPath;
+    if (!appData.openViewerPackPaths.includes(modPath)) {
+      appData.openViewerPackPaths.push(modPath);
+      getPackData(modPath);
+    }
+    appData.activeViewerPackPath = modPath;
     let viewerWindow = getLiveViewerWindow();
     if (!viewerWindow) {
       createViewerWindow();
       viewerWindow = getLiveViewerWindow();
     }
-    getPackData(modPath);
     if (viewerWindow?.webContents && !viewerWindow.webContents.isDestroyed() && appData.isViewerReady) {
       viewerWindow.webContents.send("openModInViewer", modPath);
-      viewerWindow.setTitle(`WH3 Mod Manager v${version}: viewing ${nodePath.basename(modPath)}`);
+      viewerWindow.webContents.send("setUnsavedPacksData", modPath, appData.unsavedPacksData[modPath] ?? []);
       viewerWindow.focus();
     } else if (viewerWindow) {
       viewerWindow.focus();
     }
+    updateViewerTitle();
   };
   openModInViewerFromMainProcess = openModInViewerWindow;
 
   ipcMain.on("requestOpenModInViewer", (_event, modPath: string) => openModInViewerWindow(modPath));
+  ipcMain.on("viewerClosedPack", (_event, packPath: string) => {
+    appData.openViewerPackPaths = appData.openViewerPackPaths.filter((path) => path !== packPath);
+    if (appData.activeViewerPackPath === packPath) {
+      appData.activeViewerPackPath = appData.openViewerPackPaths.at(-1);
+    }
+    // The user confirmed the edits are gone, so main must not keep them and later write them.
+    delete appData.unsavedPacksData[packPath];
+    mainWindow?.webContents.send("setUnsavedPacksData", packPath, []);
+    updateViewerTitle();
+  });
+  ipcMain.on("setViewerActivePack", (_event, packPath: string) => {
+    appData.activeViewerPackPath = packPath;
+    updateViewerTitle();
+  });
   ipcMain.on("requestOpenSkillsWindow", async (event, mods: Mod[]) => {
     console.log("ON requestOpenSkillsWindow");
     const enabledMods = mods.filter((mod) => mod.isEnabled);
@@ -9959,13 +9993,20 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
     console.log("SENDING QUEUED DATA TO VIEWER");
     const queuedPackPath = appData.queuedViewerData[0]?.packPath;
     if (queuedPackPath) {
-      appData.lastOpenedViewerPackPath = queuedPackPath;
+      if (!appData.openViewerPackPaths.includes(queuedPackPath)) appData.openViewerPackPaths.push(queuedPackPath);
+      appData.activeViewerPackPath = queuedPackPath;
     }
+    const queuedPackPaths = new Set(
+      appData.queuedViewerData.map((packViewData) => packViewData?.packPath).filter((path): path is string => !!path),
+    );
     windows.viewerWindow?.webContents.send("setCurrentGameNaive", appData.currentGame);
     windows.viewerWindow?.webContents.send("setPacksData", appData.queuedViewerData);
-    windows.viewerWindow?.webContents.send("openModInViewer", queuedPackPath);
-    if (queuedPackPath)
-      windows.viewerWindow?.setTitle(`WH3 Mod Manager v${version}: viewing ${nodePath.basename(queuedPackPath)}`);
+    for (const packPath of appData.openViewerPackPaths) {
+      if (!queuedPackPaths.has(packPath)) getPackData(packPath);
+      windows.viewerWindow?.webContents.send("openModInViewer", packPath);
+      windows.viewerWindow?.webContents.send("setUnsavedPacksData", packPath, appData.unsavedPacksData[packPath] ?? []);
+    }
+    updateViewerTitle();
     windows.viewerWindow?.focus();
     appData.queuedViewerData = [];
   };
@@ -9992,13 +10033,18 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
     // console.log("QUEUED DATA IS ", queuedViewerData);
     if (appData.queuedViewerData.length > 0) {
       sendQueuedDataToViewer();
-    } else if (appData.lastOpenedViewerPackPath) {
+    } else {
       windows.viewerWindow?.webContents.send("setCurrentGameNaive", appData.currentGame);
-      getPackData(appData.lastOpenedViewerPackPath);
-      windows.viewerWindow?.webContents.send("openModInViewer", appData.lastOpenedViewerPackPath);
-      windows.viewerWindow?.setTitle(
-        `WH3 Mod Manager v${version}: viewing ${nodePath.basename(appData.lastOpenedViewerPackPath)}`,
-      );
+      for (const packPath of appData.openViewerPackPaths) {
+        getPackData(packPath);
+        windows.viewerWindow?.webContents.send("openModInViewer", packPath);
+        windows.viewerWindow?.webContents.send(
+          "setUnsavedPacksData",
+          packPath,
+          appData.unsavedPacksData[packPath] ?? [],
+        );
+      }
+      updateViewerTitle();
     }
   });
   const sendQueuedDataToSkills = async () => {

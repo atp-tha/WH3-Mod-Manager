@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   getDefaultSaveAsPackName,
   getPackFileInventory,
+  getPreferredTreeTab,
   hasLoadedDBTable,
   pickWidestValue,
 } from "../src/components/viewer/viewerHelpers";
@@ -46,6 +47,34 @@ describe("viewer pack inventory", () => {
       hasDBTables: true,
       hasFiles: true,
     });
+  });
+});
+
+describe("preferred tree tab", () => {
+  it("uses the active file tab for each pack independently", () => {
+    const packA = "/mods/a.pack";
+    const packB = "/mods/b.pack";
+
+    expect(
+      getPreferredTreeTab(
+        { packPath: packA, openTabs: [{ id: "a-flow", kind: "flow" }], activeTabId: "a-flow" },
+        {
+          [packA]: { packName: "a", packPath: packA, tables: ["db\\units_tables\\data__"], packedFiles: {} },
+          [packB]: { packName: "b", packPath: packB, tables: ["file.txt"], packedFiles: {} },
+        },
+        {},
+      ),
+    ).toBe("files");
+    expect(
+      getPreferredTreeTab(
+        { packPath: packB, openTabs: [], activeTabId: null },
+        {
+          [packA]: { packName: "a", packPath: packA, tables: ["db\\units_tables\\data__"], packedFiles: {} },
+          [packB]: { packName: "b", packPath: packB, tables: ["file.txt"], packedFiles: {} },
+        },
+        {},
+      ),
+    ).toBe("files");
   });
 });
 

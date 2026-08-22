@@ -73,6 +73,7 @@ const initialState = {
   isSetAppFolderPathsDone: false,
   overwrittenDataPackedFiles: {},
   outdatedPackFiles: {},
+  packOpenRequest: undefined,
   startArgs: [],
   currentTab: "mods",
   hiddenMainWindowTabs: [],

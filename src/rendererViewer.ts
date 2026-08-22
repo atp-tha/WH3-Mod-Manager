@@ -8,8 +8,7 @@ import store from "./store";
 import { renderViewerWindow } from "./appViewer";
 import { setupRendererLogging } from "./rendererCommon";
 import {
-  selectDBTable,
-  selectFlowFile,
+  requestOpenPackTab,
   setCurrentGameNaive,
   setCurrentLanguage,
   setIsFeaturesForModdersEnabled,
@@ -51,14 +50,7 @@ window.api?.setCurrentGameNaive((event, game) => {
 });
 
 window.api?.openModInViewer((event, modPath: string) => {
-  store.dispatch(selectFlowFile(undefined));
-  store.dispatch(
-    selectDBTable({
-      packPath: modPath,
-      dbName: "",
-      dbSubname: "",
-    }),
-  );
+  store.dispatch(requestOpenPackTab(modPath));
 });
 
 window.api?.setPacksData((event, packsData: PackViewData[]) => {

@@ -231,6 +231,7 @@ declare global {
     outdatedPackFiles: Record<string, string[]>;
     dataModLastChangedLocal?: number;
     currentDBTableSelection?: DBTableSelection;
+    packOpenRequest?: PackOpenRequest;
     currentFlowFileSelection?: string;
     currentFlowFilePackPath?: string;
     /** Bumped to make the node editor re-read the open flow when the selection itself cannot change. */
@@ -462,6 +463,12 @@ declare global {
 
   interface DBTableSelection extends DBTable {
     packPath: string;
+  }
+
+  interface PackOpenRequest {
+    packPath: string;
+    /** Monotonic: reopening the same pack must still be an event. */
+    nonce: number;
   }
 
   interface PackViewData {
