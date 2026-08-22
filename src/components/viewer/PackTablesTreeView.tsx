@@ -35,6 +35,8 @@ type PackTablesTreeViewProps = {
 
 type TreeData = { name: string; children?: TreeData[] };
 type TableOption = { value: string; label: string };
+type TreeTab = "db" | "files";
+type ContextMenuTreeTab = TreeTab | "empty";
 
 export type PackTablesTreeViewHandle = {
   openNewFlowDialog: () => void;
@@ -178,7 +180,7 @@ const PackTablesTreeView = React.memo(
     const selectCurrentPackUnsavedFiles = useMemo(makeSelectCurrentPackUnsavedFiles, []);
 
     const [activeTreeTab, setActiveTreeTab] = React.useState<"db" | "files">(props.preferredTab);
-    const [contextMenu, setContextMenu] = React.useState<{ x: number; y: number; treeTab: "db" | "files" } | null>(
+    const [contextMenu, setContextMenu] = React.useState<{ x: number; y: number; treeTab: ContextMenuTreeTab } | null>(
       null,
     );
     const [isNewFlowDialogOpen, setIsNewFlowDialogOpen] = React.useState(false);
@@ -219,6 +221,18 @@ const PackTablesTreeView = React.memo(
     const unsavedFiles = useAppSelector((state) => selectCurrentPackUnsavedFiles(state, packPath));
     const isVanillaPackOpen = packData ? vanillaPackNames.includes(packData.packName) : false;
 
+    const packFileNames = useMemo(() => {
+      if (!packData) return [];
+
+      return Array.from(
+        new Set([
+          ...packData.tables,
+          ...Object.keys(packData.packedFiles || {}),
+          ...unsavedFiles.map((unsavedFile) => unsavedFile.name),
+        ]),
+      );
+    }, [packData, unsavedFiles]);
+
     const vanillaTableOptions = useMemo<TableOption[]>(
       () =>
         Object.keys(availableTableVersions)
@@ -246,10 +260,7 @@ const PackTablesTreeView = React.memo(
       }
 
       const root: TreeData = { name: "", children: [] };
-      const dbEntriesByName = groupDBTablePaths([
-        ...packData.tables,
-        ...unsavedFiles.toReversed().map((unsavedFile) => unsavedFile.name),
-      ]);
+      const dbEntriesByName = groupDBTablePaths(packFileNames);
 
       for (const groupName of [...dbEntriesByName.keys()].toSorted((first, second) => first.localeCompare(second))) {
         const subnames = dbEntriesByName.get(groupName);
@@ -262,7 +273,7 @@ const PackTablesTreeView = React.memo(
       }
 
       return flattenTree(root);
-    }, [packData, unsavedFiles]);
+    }, [packData, packFileNames]);
 
     const fileData = useMemo(() => {
       if (!packData) {
@@ -270,23 +281,28 @@ const PackTablesTreeView = React.memo(
       }
 
       const fileNames = new Set<string>();
-      for (const packFileName of packData.tables) {
+      for (const packFileName of packFileNames) {
         if (!isDBPackedFileName(packFileName)) {
           fileNames.add(packFileName);
         }
       }
-      for (const unsavedFile of unsavedFiles) {
-        if (!isDBPackedFileName(unsavedFile.name)) {
-          fileNames.add(unsavedFile.name);
-        }
-      }
 
       return flattenTree(buildPathTree(Array.from(fileNames).toSorted((first, second) => first.localeCompare(second))));
-    }, [packData, unsavedFiles]);
+    }, [packData, packFileNames]);
 
     const dbNodeById = useMemo(() => buildNodeById(dbData), [dbData]);
     const dbDefaultExpandedIds = useMemo(() => getAutoExpandedDBGroupIds(dbData), [dbData]);
     const fileNodeById = useMemo(() => buildNodeById(fileData), [fileData]);
+    const hasDBTables = dbData.some((node) => node.id !== 0);
+    const hasFiles = fileData.some((node) => node.id !== 0);
+    const visibleActiveTreeTab: TreeTab | null =
+      (activeTreeTab === "db" && hasDBTables) || (activeTreeTab === "files" && hasFiles)
+        ? activeTreeTab
+        : hasDBTables
+          ? "db"
+          : hasFiles
+            ? "files"
+            : null;
     const safeDbSelectedNodeIds = useMemo(
       () => dbSelectedNodeIds.filter((selectedId) => dbNodeById.has(selectedId)),
       [dbNodeById, dbSelectedNodeIds],
@@ -681,7 +697,7 @@ const PackTablesTreeView = React.memo(
       return treeTab === "db" ? dbHiddenNodeIds.has(element.id) : fileHiddenNodeIds.has(element.id);
     };
 
-    const handleContextMenu = (e: React.MouseEvent, treeTab: "db" | "files") => {
+    const handleContextMenu = (e: React.MouseEvent, treeTab: ContextMenuTreeTab) => {
       e.preventDefault();
       setContextMenu({ x: e.clientX, y: e.clientY, treeTab });
     };
@@ -725,6 +741,7 @@ const PackTablesTreeView = React.memo(
 
     const handleAddNewTable = async () => {
       setContextMenu(null);
+      setActiveTreeTab("db");
       setIsLoadingNewTableOptions(true);
       try {
         const [dbNameToDBVersions, nextDefaultTableVersions] = await Promise.all([
@@ -918,7 +935,7 @@ const PackTablesTreeView = React.memo(
     };
 
     const renderTree = (
-      treeTab: "db" | "files",
+      treeTab: TreeTab,
       data: INode[],
       selectedIds: Array<string | number>,
       setSelectedNodeIds: React.Dispatch<React.SetStateAction<Array<string | number>>>,
@@ -1037,39 +1054,61 @@ const PackTablesTreeView = React.memo(
       return <></>;
     }
 
+    const showAddNewFlowInContext = Boolean(
+      contextMenu &&
+      !isVanillaPackOpen &&
+      (contextMenu.treeTab === "empty" ||
+        (contextMenu.treeTab === "files" && hasFiles) ||
+        (contextMenu.treeTab === "db" && hasDBTables && !hasFiles)),
+    );
+    const showAddNewTableInContext = Boolean(
+      contextMenu &&
+      !isVanillaPackOpen &&
+      (contextMenu.treeTab === "empty" ||
+        (contextMenu.treeTab === "db" && hasDBTables) ||
+        (contextMenu.treeTab === "files" && hasFiles && !hasDBTables)),
+    );
+
     return (
       <div
-        onContextMenu={(e) => handleContextMenu(e, activeTreeTab)}
+        data-testid="pack-tables-tree"
+        onContextMenu={(e) => handleContextMenu(e, visibleActiveTreeTab ?? "empty")}
         className="relative select-none h-full min-h-full"
       >
-        <div className="sticky top-0 z-10 flex border-b border-gray-700 bg-gray-900/95 mb-2">
-          <button
-            type="button"
-            onClick={() => setActiveTreeTab("db")}
-            className={
-              "px-3 py-2 text-xs font-medium border-b-2 " +
-              (activeTreeTab === "db"
-                ? "text-white border-blue-500 bg-gray-800/80"
-                : "text-gray-400 border-transparent hover:text-white hover:bg-gray-800/60")
-            }
-          >
-            DB Tables
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTreeTab("files")}
-            className={
-              "px-3 py-2 text-xs font-medium border-b-2 " +
-              (activeTreeTab === "files"
-                ? "text-white border-blue-500 bg-gray-800/80"
-                : "text-gray-400 border-transparent hover:text-white hover:bg-gray-800/60")
-            }
-          >
-            Files
-          </button>
-        </div>
+        {(hasDBTables || hasFiles) && (
+          <div className="sticky top-0 z-10 flex border-b border-gray-700 bg-gray-900/95 mb-2">
+            {hasDBTables && (
+              <button
+                type="button"
+                onClick={() => setActiveTreeTab("db")}
+                className={
+                  "px-3 py-2 text-xs font-medium border-b-2 " +
+                  (visibleActiveTreeTab === "db"
+                    ? "text-white border-blue-500 bg-gray-800/80"
+                    : "text-gray-400 border-transparent hover:text-white hover:bg-gray-800/60")
+                }
+              >
+                DB Tables
+              </button>
+            )}
+            {hasFiles && (
+              <button
+                type="button"
+                onClick={() => setActiveTreeTab("files")}
+                className={
+                  "px-3 py-2 text-xs font-medium border-b-2 " +
+                  (visibleActiveTreeTab === "files"
+                    ? "text-white border-blue-500 bg-gray-800/80"
+                    : "text-gray-400 border-transparent hover:text-white hover:bg-gray-800/60")
+                }
+              >
+                Files
+              </button>
+            )}
+          </div>
+        )}
 
-        {activeTreeTab === "db"
+        {visibleActiveTreeTab === "db"
           ? renderTree(
               "db",
               dbData,
@@ -1079,14 +1118,16 @@ const PackTablesTreeView = React.memo(
               onDBTreeSelect,
               dbDefaultExpandedIds,
             )
-          : renderTree(
-              "files",
-              fileData,
-              safeFileSelectedNodeIds,
-              setFileSelectedNodeIds,
-              fileNodeById,
-              onFileTreeSelect,
-            )}
+          : visibleActiveTreeTab === "files"
+            ? renderTree(
+                "files",
+                fileData,
+                safeFileSelectedNodeIds,
+                setFileSelectedNodeIds,
+                fileNodeById,
+                onFileTreeSelect,
+              )
+            : null}
 
         {/* Context Menu */}
         {contextMenu && (
@@ -1095,7 +1136,7 @@ const PackTablesTreeView = React.memo(
             className="fixed bg-gray-800 border border-gray-600 rounded shadow-lg z-50 min-w-[150px]"
             style={{ top: contextMenu.y, left: contextMenu.x }}
           >
-            {!isVanillaPackOpen && contextMenu.treeTab === "files" && (
+            {showAddNewFlowInContext && (
               <button
                 onClick={handleAddNewFlow}
                 className="w-full text-left px-4 py-2 hover:bg-gray-700 text-white text-sm"
@@ -1103,7 +1144,7 @@ const PackTablesTreeView = React.memo(
                 Add New Flow
               </button>
             )}
-            {!isVanillaPackOpen && contextMenu.treeTab === "db" && (
+            {showAddNewTableInContext && (
               <button
                 onClick={handleAddNewTable}
                 disabled={isLoadingNewTableOptions}
