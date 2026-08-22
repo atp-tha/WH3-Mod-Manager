@@ -74,4 +74,53 @@ describe("ModDropdownOptions", () => {
 
     expect(forceResubscribeMods).toHaveBeenCalledWith([workshopMod]);
   });
+
+  it("shows only actions valid for every selected mod and applies shared actions to all of them", () => {
+    const dataMod = createMod({
+      name: "data.pack",
+      path: "/game/data/data.pack",
+      isInData: true,
+      sourceId: "data",
+      sourceKind: "data",
+    });
+    const workshopMod = createMod({
+      name: "workshop.pack",
+      path: "/workshop/456/workshop.pack",
+      workshopId: "456",
+    });
+    const openFolderInExplorer = vi.fn();
+    window.api = {
+      ...window.api,
+      openFolderInExplorer,
+    } as NonNullable<Window["api"]>;
+    const store = configureStore({
+      reducer: { app: appReducer },
+      preloadedState: {
+        app: {
+          ...initialState,
+          allMods: [dataMod, workshopMod],
+        },
+      },
+    });
+
+    render(
+      <Provider store={store}>
+        <localizationContext.Provider value={enTranslation}>
+          <ModDropdownOptions mods={[dataMod, workshopMod]} selectedMods={[dataMod, workshopMod]} />
+        </localizationContext.Provider>
+      </Provider>,
+    );
+
+    expect(screen.getByText(enTranslation.showInExplorer)).toBeInTheDocument();
+    expect(screen.queryByText(enTranslation.goToWorkshopPage)).not.toBeInTheDocument();
+    expect(screen.queryByText(enTranslation.renamePackedFiles)).not.toBeInTheDocument();
+    expect(screen.queryByText(enTranslation.copyModToData)).not.toBeInTheDocument();
+    expect(screen.queryByText(enTranslation.updateMod)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByText(enTranslation.showInExplorer));
+
+    expect(openFolderInExplorer).toHaveBeenCalledTimes(2);
+    expect(openFolderInExplorer).toHaveBeenNthCalledWith(1, dataMod.path);
+    expect(openFolderInExplorer).toHaveBeenNthCalledWith(2, workshopMod.path);
+  });
 });

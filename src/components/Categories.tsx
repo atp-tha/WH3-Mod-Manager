@@ -41,7 +41,7 @@ type CategorySelectType = {
   label: string;
 };
 
-type ContextMenuSelection = { kind: "none" } | { kind: "many" } | { kind: "one"; mod: Mod };
+type ContextMenuSelection = { kind: "none" } | { kind: "many"; mods: Mod[] } | { kind: "one"; mod: Mod };
 
 type CategoryGroup = {
   category: string;
@@ -313,37 +313,6 @@ const Categories = memo(() => {
 
     return selectedMods;
   }, [modByPath]);
-
-  const getSelectedModsPreview = useCallback(
-    (maxMods: number): { mods: Mod[]; isTruncated: boolean } => {
-      const api = gridRef.current?.api;
-      if (!api) return { mods: [], isTruncated: false };
-
-      const selectedMods: Mod[] = [];
-      const seenPaths = new Set<string>();
-
-      for (const node of api.getSelectedNodes()) {
-        const row = node.data;
-        if (!row || isCategoryRow(row)) continue;
-        if (seenPaths.has(row.path)) continue;
-
-        const mod = modByPath.get(row.path);
-        if (!mod) continue;
-
-        seenPaths.add(row.path);
-        selectedMods.push(mod);
-        if (selectedMods.length >= maxMods) {
-          const totalSelectedModCount = api
-            .getSelectedNodes()
-            .filter((selectedNode) => selectedNode.data && !isCategoryRow(selectedNode.data)).length;
-          return { mods: selectedMods, isTruncated: totalSelectedModCount > maxMods };
-        }
-      }
-
-      return { mods: selectedMods, isTruncated: false };
-    },
-    [modByPath],
-  );
 
   const clearSelection = useCallback(() => {
     gridRef.current?.api?.deselectAll();
@@ -643,18 +612,18 @@ const Categories = memo(() => {
 
       contextMenuAnchorRef.current = { x: event.clientX, y: event.clientY };
 
-      const preview = getSelectedModsPreview(2);
+      const selectedMods = getSelectedMods();
       const selection =
-        preview.mods.length === 0
+        selectedMods.length === 0
           ? ({ kind: "none" } as const)
-          : preview.mods.length === 1 && !preview.isTruncated
-            ? ({ kind: "one", mod: preview.mods[0] } as const)
-            : ({ kind: "many" } as const);
+          : selectedMods.length === 1
+            ? ({ kind: "one", mod: selectedMods[0] } as const)
+            : ({ kind: "many", mods: selectedMods } as const);
 
       setContextMenuSelection(selection);
       setIsContextMenuOpen(true);
     },
-    [getSelectedModsPreview],
+    [getSelectedMods],
   );
 
   const handleToggleEnabled = useCallback(
@@ -1073,39 +1042,50 @@ const Categories = memo(() => {
             </li>
           </ul>
           {contextMenuSelection.kind === "many" && (
-            <div>
-              <ul className="py-1 text-sm text-gray-700 dark:text-gray-200" aria-labelledby="dropdownDefault">
-                <li>
-                  <a
-                    onClick={() => {
-                      const selectedMods = getSelectedMods();
-                      dispatch(setAreModsEnabled(selectedMods.map((mod) => ({ mod, isEnabled: true }))));
-                      setIsContextMenuOpen(false);
-                    }}
-                    href="#"
-                    className="block py-2 px-4 hover:bg-gray-100 dark:hover:bg-gray-600 dark:hover:text-white"
-                  >
-                    {localized.enableAll}
-                  </a>
-                </li>
-                <li>
-                  <a
-                    onClick={() => {
-                      const selectedMods = getSelectedMods();
-                      dispatch(setAreModsEnabled(selectedMods.map((mod) => ({ mod, isEnabled: false }))));
-                      setIsContextMenuOpen(false);
-                    }}
-                    href="#"
-                    className="block py-2 px-4 hover:bg-gray-100 dark:hover:bg-gray-600 dark:hover:text-white"
-                  >
-                    {localized.disableAll}
-                  </a>
-                </li>
-              </ul>
-            </div>
+            <>
+              <div>
+                <ul className="py-1 text-sm text-gray-700 dark:text-gray-200" aria-labelledby="dropdownDefault">
+                  <li>
+                    <a
+                      onClick={() => {
+                        dispatch(setAreModsEnabled(contextMenuSelection.mods.map((mod) => ({ mod, isEnabled: true }))));
+                        setIsContextMenuOpen(false);
+                      }}
+                      href="#"
+                      className="block py-2 px-4 hover:bg-gray-100 dark:hover:bg-gray-600 dark:hover:text-white"
+                    >
+                      {localized.enableAll}
+                    </a>
+                  </li>
+                  <li>
+                    <a
+                      onClick={() => {
+                        dispatch(
+                          setAreModsEnabled(contextMenuSelection.mods.map((mod) => ({ mod, isEnabled: false }))),
+                        );
+                        setIsContextMenuOpen(false);
+                      }}
+                      href="#"
+                      className="block py-2 px-4 hover:bg-gray-100 dark:hover:bg-gray-600 dark:hover:text-white"
+                    >
+                      {localized.disableAll}
+                    </a>
+                  </li>
+                </ul>
+              </div>
+              <ModDropdownOptions
+                mods={mods}
+                selectedMods={contextMenuSelection.mods}
+                onAction={() => setIsContextMenuOpen(false)}
+              />
+            </>
           )}
           {contextMenuSelection.kind === "one" && contextMenuSelection.mod && (
-            <ModDropdownOptions mod={contextMenuSelection.mod} mods={mods} />
+            <ModDropdownOptions
+              mod={contextMenuSelection.mod}
+              mods={mods}
+              onAction={() => setIsContextMenuOpen(false)}
+            />
           )}
         </div>
       </FloatingOverlay>

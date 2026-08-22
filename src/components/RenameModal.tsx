@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { Modal } from "../flowbite";
 import { useAppSelector } from "../hooks";
 import { useLocalizations } from "../localizationContext";
@@ -7,6 +7,7 @@ interface RenameModalProps {
   show: boolean;
   onClose: () => void;
   mod: Mod;
+  mods?: Mod[];
 }
 
 interface PreviewItem {
@@ -14,7 +15,23 @@ interface PreviewItem {
   newName: string;
 }
 
-const RenameModal: React.FC<RenameModalProps> = ({ show, onClose, mod }) => {
+// Helper function to extract the base filename from a packed file path
+const getBaseFilename = (filePath: string): string => {
+  const parts = filePath.split("\\");
+  return parts[parts.length - 1];
+};
+
+// Helper function to replace the base filename in a packed file path
+const replaceBaseFilename = (filePath: string, newBasename: string): string => {
+  const parts = filePath.split("\\");
+  parts[parts.length - 1] = newBasename;
+  return parts.join("\\");
+};
+
+// Helper function to escape special regex characters for literal string matching
+const escapeRegExp = (string: string): string => string.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const RenameModal: React.FC<RenameModalProps> = ({ show, onClose, mod, mods }) => {
   const [searchRegex, setSearchRegex] = useState("");
   const [replaceText, setReplaceText] = useState("");
   const [pathFilter, setPathFilter] = useState("");
@@ -25,21 +42,9 @@ const RenameModal: React.FC<RenameModalProps> = ({ show, onClose, mod }) => {
 
   const isDev = useAppSelector((state) => state.app.isDev);
   const localizations = useLocalizations();
+  const targetMods = useMemo(() => (mods && mods.length > 0 ? mods : [mod]), [mod, mods]);
 
-  // Helper function to extract the base filename from a packed file path
-  const getBaseFilename = (filePath: string): string => {
-    const parts = filePath.split("\\");
-    return parts[parts.length - 1];
-  };
-
-  // Helper function to replace the base filename in a packed file path
-  const replaceBaseFilename = (filePath: string, newBasename: string): string => {
-    const parts = filePath.split("\\");
-    parts[parts.length - 1] = newBasename;
-    return parts.join("\\");
-  };
-
-  const generatePreview = () => {
+  const generatePreview = useCallback(async () => {
     try {
       if (!searchRegex) {
         setPreviewData([]);
@@ -53,19 +58,16 @@ const RenameModal: React.FC<RenameModalProps> = ({ show, onClose, mod }) => {
       }
       setRegexError("");
 
-      // Get pack files to preview
-      window.api
-        ?.getPackFilesList(mod.path)
-        .then((files: string[]) => {
+      const previews = await Promise.all(
+        targetMods.map(async (targetMod) => {
+          const files = (await window.api?.getPackFilesList(targetMod.path)) ?? [];
           const preview: PreviewItem[] = [];
 
           for (const fileName of files) {
             // Check path filter first (if provided)
             if (pathFilter.trim()) {
               const filePath = fileName.substring(0, fileName.lastIndexOf("\\"));
-              if (!filePath.includes(pathFilter.trim())) {
-                continue; // Skip files that don't match path filter
-              }
+              if (!filePath.includes(pathFilter.trim())) continue;
             }
 
             const baseFilename = getBaseFilename(fileName);
@@ -80,12 +82,9 @@ const RenameModal: React.FC<RenameModalProps> = ({ show, onClose, mod }) => {
                 newBaseFilename = baseFilename.replace(regex, replaceText);
                 shouldInclude = newBaseFilename !== baseFilename;
               }
-            } else {
-              // Simple string replacement
-              if (baseFilename.includes(searchRegex)) {
-                newBaseFilename = baseFilename.replace(new RegExp(escapeRegExp(searchRegex), "g"), replaceText);
-                shouldInclude = newBaseFilename !== baseFilename;
-              }
+            } else if (baseFilename.includes(searchRegex)) {
+              newBaseFilename = baseFilename.replace(new RegExp(escapeRegExp(searchRegex), "g"), replaceText);
+              shouldInclude = newBaseFilename !== baseFilename;
             }
 
             if (shouldInclude) {
@@ -97,24 +96,17 @@ const RenameModal: React.FC<RenameModalProps> = ({ show, onClose, mod }) => {
             }
           }
 
-          setPreviewData(preview);
-        })
-        .catch((error: any) => {
-          console.error("Failed to get pack files list:", error);
-          setPreviewData([]);
-        });
+          return preview;
+        }),
+      );
+      setPreviewData(previews.flat());
     } catch (error) {
       if (useRegex) {
         setRegexError(localizations.invalidRegularExpression);
       }
       setPreviewData([]);
     }
-  };
-
-  // Helper function to escape special regex characters for literal string matching
-  const escapeRegExp = (string: string): string => {
-    return string.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  };
+  }, [localizations.invalidRegularExpression, pathFilter, replaceText, searchRegex, targetMods, useRegex]);
 
   const handleRename = async () => {
     if (!searchRegex) return;
@@ -122,7 +114,11 @@ const RenameModal: React.FC<RenameModalProps> = ({ show, onClose, mod }) => {
 
     setIsRenaming(true);
     try {
-      await window.api?.renamePackedFiles(mod.path, searchRegex, replaceText, useRegex, isDev, pathFilter);
+      await Promise.all(
+        targetMods.map((targetMod) =>
+          window.api?.renamePackedFiles(targetMod.path, searchRegex, replaceText, useRegex, isDev, pathFilter),
+        ),
+      );
 
       // Refresh the mod data or show success message
       console.log("Rename operation completed successfully");
@@ -150,16 +146,17 @@ const RenameModal: React.FC<RenameModalProps> = ({ show, onClose, mod }) => {
   useEffect(() => {
     // Debounce the preview generation
     const timer = setTimeout(() => {
-      generatePreview();
+      void generatePreview();
     }, 300);
 
     return () => clearTimeout(timer);
-  }, [searchRegex, replaceText, pathFilter, useRegex, mod.path]);
+  }, [generatePreview]);
 
   return (
     <Modal show={show} onClose={onClose} size="4xl" position="center">
       <Modal.Header>
         {localizations.renamePackFiles} - {mod.name}
+        {targetMods.length > 1 && ` (+${targetMods.length - 1})`}
       </Modal.Header>
       <Modal.Body>
         <div className="space-y-4">

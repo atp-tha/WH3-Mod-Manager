@@ -1,5 +1,5 @@
 import { Tooltip } from "flowbite-react";
-import React, { memo, useCallback, useContext, useState } from "react";
+import React, { memo, useCallback, useContext, useMemo, useState } from "react";
 import {
   setCurrentModToUpload,
   setIsModTagPickerOpen,
@@ -32,6 +32,10 @@ import { isWorkshopMod } from "../modSources";
 type ModDropdownOptionsProps = {
   mod?: Mod;
   mods: Mod[];
+  /** The mods the menu acts on. Defaults to the single `mod` used by the regular mod list. */
+  selectedMods?: Mod[];
+  /** Called after an action that can be completed immediately. */
+  onAction?: () => void;
 };
 
 const openInExplorer = (mod: Mod) => {
@@ -74,6 +78,43 @@ const ModDropdownOptions = memo((props: ModDropdownOptionsProps) => {
   const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
 
   const localized: Record<string, string> = useContext(localizationContext);
+  const { onAction } = props;
+
+  const selectedMods = useMemo(
+    () => props.selectedMods ?? (props.mod ? [props.mod] : []),
+    [props.mod, props.selectedMods],
+  );
+  const primaryMod = selectedMods[0];
+  const allSelected = useCallback(
+    (predicate: (mod: Mod) => boolean) => selectedMods.length > 0 && selectedMods.every(predicate),
+    [selectedMods],
+  );
+  const runForSelectedMods = useCallback(
+    (action: (mod: Mod) => void) => {
+      selectedMods.forEach(action);
+      onAction?.();
+    },
+    [onAction, selectedMods],
+  );
+  const hasWorkshopMod = useCallback(
+    (mod: Mod) => isWorkshopMod(mod) || allMods.some((iterMod) => iterMod.name === mod.name && isWorkshopMod(iterMod)),
+    [allMods],
+  );
+  const hasWorkshopModForEverySelection = allSelected(hasWorkshopMod);
+  const isUpdateable = useCallback(
+    (mod: Mod) =>
+      mod.isInData && (isDev || allMods.some((iterMod) => iterMod.name === mod.name && isWorkshopMod(iterMod))),
+    [allMods, isDev],
+  );
+  const canUpdateEverySelection = allSelected(isUpdateable);
+  const canRenameEverySelection = allSelected((mod) => mod.isInData);
+  const canCopyEverySelectionToData = allSelected((mod) => !mod.isInData);
+  const canReMergeEverySelection = allSelected((mod) => !!mod.mergedModsData);
+  const canDeleteDataEverySelection = allSelected((mod) => mod.isInData);
+  const canDeleteMergedEverySelection = canReMergeEverySelection;
+  const canDeleteEverySelection = allSelected((mod) => mod.isInData || !!mod.mergedModsData);
+  const canDeleteMixedSelection =
+    canDeleteEverySelection && !canDeleteDataEverySelection && !canDeleteMergedEverySelection;
 
   const onGoToWorkshopPageClick = useCallback(
     (mod: Mod) => {
@@ -115,7 +156,7 @@ const ModDropdownOptions = memo((props: ModDropdownOptionsProps) => {
       dispatch(setCurrentModToUpload(mod));
       dispatch(setIsModTagPickerOpen(true));
     },
-    [allMods],
+    [dispatch],
   );
   const fakeUpdatePack = useCallback(
     (mod: Mod) => {
@@ -126,7 +167,7 @@ const ModDropdownOptions = memo((props: ModDropdownOptionsProps) => {
 
       window.api?.fakeUpdatePack(mod);
     },
-    [allMods],
+    [allMods, isDev],
   );
   const forceModDownload = useCallback(
     (mod: Mod) => {
@@ -140,31 +181,39 @@ const ModDropdownOptions = memo((props: ModDropdownOptionsProps) => {
     [allMods],
   );
   const forceResubscribe = useCallback(
-    (mod: Mod) => {
-      const workshopMod = isWorkshopMod(mod)
-        ? mod
-        : allMods.find((iterMod) => isWorkshopMod(iterMod) && iterMod.name == mod.name);
-      if (!workshopMod) return;
-
-      window.api?.forceResubscribeMods([workshopMod]);
+    (modsToResubscribe: Mod[]) => {
+      const workshopMods = modsToResubscribe
+        .map((mod) =>
+          isWorkshopMod(mod) ? mod : allMods.find((iterMod) => isWorkshopMod(iterMod) && iterMod.name === mod.name),
+        )
+        .filter((mod): mod is Mod => !!mod);
+      if (workshopMods.length > 0) window.api?.forceResubscribeMods(workshopMods);
     },
     [allMods],
   );
-  const reMerge = (mod: Mod) => {
-    if (!mod) return;
-    if (!mod.mergedModsData) return;
+  const reMerge = useCallback(
+    (mod: Mod) => {
+      if (!mod) return;
+      if (!mod.mergedModsData) return;
 
-    const modsToMerge = mod.mergedModsData
-      .map((mod) => allMods.find((iterMod) => iterMod.path == mod.path))
-      .filter((mod) => mod) as Mod[];
-    window.api?.reMerge(mod, modsToMerge);
-  };
+      const modsToMerge = mod.mergedModsData
+        .map((mod) => allMods.find((iterMod) => iterMod.path == mod.path))
+        .filter((mod) => mod) as Mod[];
+      window.api?.reMerge(mod, modsToMerge);
+    },
+    [allMods],
+  );
 
   return (
-    (props.mod == null && <></>) || (
+    (primaryMod == null && <></>) || (
       <>
-        {props.mod && (
-          <RenameModal show={isRenameModalOpen} onClose={() => setIsRenameModalOpen(false)} mod={props.mod} />
+        {primaryMod && (
+          <RenameModal
+            show={isRenameModalOpen}
+            onClose={() => setIsRenameModalOpen(false)}
+            mod={primaryMod}
+            mods={selectedMods}
+          />
         )}
 
         <Modal onClose={() => setIsDeleteConfirmOpen(false)} show={isDeleteConfirmOpen} size="md" position="center">
@@ -174,7 +223,10 @@ const ModDropdownOptions = memo((props: ModDropdownOptionsProps) => {
               {localized.deleteModConfirmMessage || "Are you sure you want to delete this mod from the data folder?"}
               <br />
               <br />
-              <span className="font-semibold text-gray-900 dark:text-white">{props.mod?.name}</span>
+              <span className="font-semibold text-gray-900 dark:text-white">
+                {primaryMod?.name}
+                {selectedMods.length > 1 && ` (+${selectedMods.length - 1})`}
+              </span>
               <br />
               <br />
               <span className="text-red-600 font-semibold">
@@ -192,9 +244,10 @@ const ModDropdownOptions = memo((props: ModDropdownOptionsProps) => {
             <button
               className="px-4 py-2 bg-red-600 text-white font-medium text-sm rounded hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500"
               onClick={() => {
-                if (props.mod) {
-                  deletePack(props.mod);
+                if (primaryMod) {
+                  selectedMods.forEach(deletePack);
                   setIsDeleteConfirmOpen(false);
+                  onAction?.();
                 }
               }}
             >
@@ -205,48 +258,45 @@ const ModDropdownOptions = memo((props: ModDropdownOptionsProps) => {
 
         <div>
           <ul className="py-1 text-sm text-gray-700 dark:text-gray-200" aria-labelledby="dropdownDefault">
-            {props.mod &&
-              (isWorkshopMod(props.mod) ||
-                allMods.some((iterMod) => iterMod.name == props.mod?.name && isWorkshopMod(iterMod))) && (
-                <>
-                  <li>
-                    <a
-                      href="#"
-                      onClick={() => {
-                        if (props.mod) {
-                          onGoToWorkshopPageClick(props.mod);
-                        }
-                      }}
-                      className={"block py-2 px-4 hover:bg-gray-100 dark:hover:bg-gray-600 dark:hover:text-white"}
-                    >
-                      <span className="flex items-center gap-2">
-                        <FaExternalLinkAlt className="w-5 h-5"></FaExternalLinkAlt>
-                        {localized.goToWorkshopPage}
-                      </span>
-                    </a>
-                  </li>
-                  <li>
-                    <a
-                      href="#"
-                      onClick={() => {
-                        if (props.mod) {
-                          onOpenInSteam(props.mod);
-                        }
-                      }}
-                      className={"block py-2 px-4 hover:bg-gray-100 dark:hover:bg-gray-600 dark:hover:text-white"}
-                    >
-                      <span className="flex items-center gap-2">
-                        <FaSteam className="w-5 h-5"></FaSteam>
-                        {localized.openInSteam}
-                      </span>
-                    </a>
-                  </li>
-                </>
-              )}
+            {hasWorkshopModForEverySelection && (
+              <>
+                <li>
+                  <a
+                    href="#"
+                    onClick={() => {
+                      runForSelectedMods(onGoToWorkshopPageClick);
+                    }}
+                    className={"block py-2 px-4 hover:bg-gray-100 dark:hover:bg-gray-600 dark:hover:text-white"}
+                  >
+                    <span className="flex items-center gap-2">
+                      <FaExternalLinkAlt className="w-5 h-5"></FaExternalLinkAlt>
+                      {localized.goToWorkshopPage}
+                    </span>
+                  </a>
+                </li>
+                <li>
+                  <a
+                    href="#"
+                    onClick={() => {
+                      runForSelectedMods(onOpenInSteam);
+                    }}
+                    className={"block py-2 px-4 hover:bg-gray-100 dark:hover:bg-gray-600 dark:hover:text-white"}
+                  >
+                    <span className="flex items-center gap-2">
+                      <FaSteam className="w-5 h-5"></FaSteam>
+                      {localized.openInSteam}
+                    </span>
+                  </a>
+                </li>
+              </>
+            )}
             <li>
               <a
                 onClick={() => {
-                  if (props.mod) dispatch(toggleAlwaysEnabledMods([props.mod.name]));
+                  if (selectedMods.length > 0) {
+                    dispatch(toggleAlwaysEnabledMods(selectedMods.map((mod) => mod.name)));
+                    onAction?.();
+                  }
                 }}
                 href="#"
                 className="block py-2 px-4 hover:bg-gray-100 dark:hover:bg-gray-600 dark:hover:text-white"
@@ -266,7 +316,10 @@ const ModDropdownOptions = memo((props: ModDropdownOptionsProps) => {
             <li>
               <a
                 onClick={() => {
-                  if (props.mod) dispatch(toggleAlwaysHiddenMods([props.mod.name]));
+                  if (selectedMods.length > 0) {
+                    dispatch(toggleAlwaysHiddenMods(selectedMods.map((mod) => mod.name)));
+                    onAction?.();
+                  }
                 }}
                 href="#"
                 className="block py-2 px-4 hover:bg-gray-100 dark:hover:bg-gray-600 dark:hover:text-white"
@@ -286,7 +339,7 @@ const ModDropdownOptions = memo((props: ModDropdownOptionsProps) => {
             <li>
               <a
                 onClick={() => {
-                  if (props.mod) openInExplorer(props.mod);
+                  runForSelectedMods(openInExplorer);
                 }}
                 href="#"
                 className="block py-2 px-4 hover:bg-gray-100 dark:hover:bg-gray-600 dark:hover:text-white"
@@ -300,7 +353,7 @@ const ModDropdownOptions = memo((props: ModDropdownOptionsProps) => {
             <li>
               <a
                 onClick={() => {
-                  if (props.mod) openInRPFM(props.mod);
+                  runForSelectedMods(openInRPFM);
                 }}
                 href="#"
                 className="block py-2 px-4 hover:bg-gray-100 dark:hover:bg-gray-600 dark:hover:text-white"
@@ -314,7 +367,7 @@ const ModDropdownOptions = memo((props: ModDropdownOptionsProps) => {
             <li>
               <a
                 onClick={() => {
-                  if (props.mod) openInViewer(props.mod);
+                  runForSelectedMods(openInViewer);
                 }}
                 href="#"
                 className="block py-2 px-4 hover:bg-gray-100 dark:hover:bg-gray-600 dark:hover:text-white"
@@ -325,7 +378,7 @@ const ModDropdownOptions = memo((props: ModDropdownOptionsProps) => {
                 </span>
               </a>
             </li>
-            {props.mod?.isInData && (
+            {canRenameEverySelection && (
               <li>
                 <a
                   onClick={() => setIsRenameModalOpen(true)}
@@ -342,7 +395,7 @@ const ModDropdownOptions = memo((props: ModDropdownOptionsProps) => {
             <li>
               <a
                 onClick={() => {
-                  if (props.mod) putPathInClipboard(props.mod);
+                  runForSelectedMods(putPathInClipboard);
                 }}
                 href="#"
                 className="block py-2 px-4 hover:bg-gray-100 dark:hover:bg-gray-600 dark:hover:text-white"
@@ -353,11 +406,11 @@ const ModDropdownOptions = memo((props: ModDropdownOptionsProps) => {
                 </span>
               </a>
             </li>
-            {!props.mod?.isInData && (
+            {canCopyEverySelectionToData && (
               <li>
                 <a
                   onClick={() => {
-                    if (props.mod) copyModToData(props.mod);
+                    runForSelectedMods(copyModToData);
                   }}
                   href="#"
                   className="block py-2 px-4 hover:bg-gray-100 dark:hover:bg-gray-600 dark:hover:text-white"
@@ -389,55 +442,54 @@ const ModDropdownOptions = memo((props: ModDropdownOptionsProps) => {
                   </a>
                 </li>
               )} */}
-            {props.mod?.isInData &&
-              (allMods.some((iterMod) => iterMod.name == props.mod?.name && isWorkshopMod(iterMod)) || isDev) && (
-                <>
-                  <li>
-                    <a
-                      onClick={() => {
-                        if (props.mod) updateMod(props.mod);
-                      }}
-                      href="#"
-                      className="block py-2 px-4 hover:bg-gray-100 dark:hover:bg-gray-600 dark:hover:text-white"
+            {canUpdateEverySelection && (
+              <>
+                <li>
+                  <a
+                    onClick={() => {
+                      runForSelectedMods(updateMod);
+                    }}
+                    href="#"
+                    className="block py-2 px-4 hover:bg-gray-100 dark:hover:bg-gray-600 dark:hover:text-white"
+                  >
+                    <Tooltip
+                      placement="right"
+                      style="light"
+                      content={<div className="min-w-[10rem]">{localized.updateModTooltip}</div>}
                     >
-                      <Tooltip
-                        placement="right"
-                        style="light"
-                        content={<div className="min-w-[10rem]">{localized.updateModTooltip}</div>}
-                      >
-                        <span className="flex items-center gap-2">
-                          <FaSync className="w-5 h-5"></FaSync>
-                          {localized.updateMod}
-                        </span>
-                      </Tooltip>
-                    </a>
-                  </li>
-                  <li>
-                    <a
-                      onClick={() => {
-                        if (props.mod) fakeUpdatePack(props.mod);
-                      }}
-                      href="#"
-                      className="block py-2 px-4 hover:bg-gray-100 dark:hover:bg-gray-600 dark:hover:text-white"
+                      <span className="flex items-center gap-2">
+                        <FaSync className="w-5 h-5"></FaSync>
+                        {localized.updateMod}
+                      </span>
+                    </Tooltip>
+                  </a>
+                </li>
+                <li>
+                  <a
+                    onClick={() => {
+                      runForSelectedMods(fakeUpdatePack);
+                    }}
+                    href="#"
+                    className="block py-2 px-4 hover:bg-gray-100 dark:hover:bg-gray-600 dark:hover:text-white"
+                  >
+                    <Tooltip
+                      placement="right"
+                      style="light"
+                      content={<div className="min-w-[10rem]">{localized.fakeUpdatePackTooltip}</div>}
                     >
-                      <Tooltip
-                        placement="right"
-                        style="light"
-                        content={<div className="min-w-[10rem]">{localized.fakeUpdatePackTooltip}</div>}
-                      >
-                        <span className="flex items-center gap-2">
-                          <FaClock className="w-5 h-5"></FaClock>
-                          {localized.fakeUpdatePack}
-                        </span>
-                      </Tooltip>
-                    </a>
-                  </li>
-                </>
-              )}
+                      <span className="flex items-center gap-2">
+                        <FaClock className="w-5 h-5"></FaClock>
+                        {localized.fakeUpdatePack}
+                      </span>
+                    </Tooltip>
+                  </a>
+                </li>
+              </>
+            )}
             <li>
               <a
                 onClick={() => {
-                  if (props.mod) makePackBackup(props.mod);
+                  runForSelectedMods(makePackBackup);
                 }}
                 href="#"
                 className="block py-2 px-4 hover:bg-gray-100 dark:hover:bg-gray-600 dark:hover:text-white"
@@ -454,12 +506,11 @@ const ModDropdownOptions = memo((props: ModDropdownOptionsProps) => {
                 </Tooltip>
               </a>
             </li>
-            {((!!props.mod && isWorkshopMod(props.mod)) ||
-              allMods.find((iterMod) => isWorkshopMod(iterMod) && iterMod.name == props.mod?.name)) && (
+            {hasWorkshopModForEverySelection && (
               <li>
                 <a
                   onClick={() => {
-                    if (props.mod) forceModDownload(props.mod);
+                    runForSelectedMods(forceModDownload);
                   }}
                   href="#"
                   className="block py-2 px-4 hover:bg-gray-100 dark:hover:bg-gray-600 dark:hover:text-white"
@@ -477,12 +528,12 @@ const ModDropdownOptions = memo((props: ModDropdownOptionsProps) => {
                 </a>
               </li>
             )}
-            {((!!props.mod && isWorkshopMod(props.mod)) ||
-              allMods.find((iterMod) => isWorkshopMod(iterMod) && iterMod.name == props.mod?.name)) && (
+            {hasWorkshopModForEverySelection && (
               <li>
                 <a
                   onClick={() => {
-                    if (props.mod) forceResubscribe(props.mod);
+                    forceResubscribe(selectedMods);
+                    onAction?.();
                   }}
                   href="#"
                   className="block py-2 px-4 hover:bg-gray-100 dark:hover:bg-gray-600 dark:hover:text-white"
@@ -505,12 +556,11 @@ const ModDropdownOptions = memo((props: ModDropdownOptionsProps) => {
                 </a>
               </li>
             )}
-            {((!!props.mod && isWorkshopMod(props.mod)) ||
-              allMods.find((iterMod) => isWorkshopMod(iterMod) && iterMod.name == props.mod?.name)) && (
+            {hasWorkshopModForEverySelection && (
               <li>
                 <a
                   onClick={() => {
-                    if (props.mod) unsubscribe(props.mod, allMods);
+                    runForSelectedMods((mod) => unsubscribe(mod, allMods));
                   }}
                   href="#"
                   className="block py-2 px-4 hover:bg-gray-100 dark:hover:bg-gray-600 dark:hover:text-white"
@@ -528,11 +578,11 @@ const ModDropdownOptions = memo((props: ModDropdownOptionsProps) => {
                 </a>
               </li>
             )}
-            {props.mod?.mergedModsData && (
+            {canReMergeEverySelection && (
               <li>
                 <a
                   onClick={() => {
-                    if (props.mod) reMerge(props.mod);
+                    runForSelectedMods(reMerge);
                   }}
                   href="#"
                   className="block py-2 px-4 hover:bg-gray-100 dark:hover:bg-gray-600 dark:hover:text-white"
@@ -547,7 +597,7 @@ const ModDropdownOptions = memo((props: ModDropdownOptionsProps) => {
                 </a>
               </li>
             )}
-            {props.mod?.isInData && (
+            {canDeleteDataEverySelection && (
               <li>
                 <a
                   onClick={() => {
@@ -573,7 +623,7 @@ const ModDropdownOptions = memo((props: ModDropdownOptionsProps) => {
                 </a>
               </li>
             )}
-            {props.mod?.mergedModsData && (
+            {canDeleteMergedEverySelection && (
               <li>
                 <a
                   onClick={() => {
@@ -587,6 +637,28 @@ const ModDropdownOptions = memo((props: ModDropdownOptionsProps) => {
                     content={
                       <div className="min-w-[10rem]">{localized.deleteModTooltip || "Delete this merged mod"}</div>
                     }
+                    style="light"
+                  >
+                    <span className="flex items-center gap-2 text-red-600 dark:text-red-400">
+                      <FaTrash className="w-5 h-5"></FaTrash>
+                      {localized.deleteMod || "Delete Mod"}
+                    </span>
+                  </Tooltip>
+                </a>
+              </li>
+            )}
+            {canDeleteMixedSelection && (
+              <li>
+                <a
+                  onClick={() => {
+                    setIsDeleteConfirmOpen(true);
+                  }}
+                  href="#"
+                  className="block py-2 px-4 hover:bg-gray-100 dark:hover:bg-gray-600 dark:hover:text-white"
+                >
+                  <Tooltip
+                    placement="right"
+                    content={<div className="min-w-[10rem]">{localized.deleteModTooltip || "Delete this mod"}</div>}
                     style="light"
                   >
                     <span className="flex items-center gap-2 text-red-600 dark:text-red-400">
