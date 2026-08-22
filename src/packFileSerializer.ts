@@ -25,7 +25,6 @@ import appData from "./appData";
 import { format } from "date-fns";
 import { Blob } from "buffer";
 import * as fsExtra from "fs-extra";
-import { Worker } from "node:worker_threads";
 import { compareModNames } from "./modSortingHelpers";
 import { getDBName, getDBPackedFilePath, parseDBTablePath, resolveParsedDBVersion } from "./utility/packFileHelpers";
 import { groupPackedFilesIntoReadRuns } from "./utility/packedFileReadRuns";
@@ -3370,18 +3369,6 @@ export const readPack = async (
     dependencyPacks,
   } as Pack;
 };
-export const readPackWithWorker = async (modPath: string, skipParsingTables = false): Promise<Pack> => {
-  return new Promise<Pack>((resolve, reject) => {
-    const worker = new Worker(nodePath.join(__dirname, "readPacksWorker.js"), {
-      workerData: { mods: [modPath] },
-    });
-    worker.on("message", resolve);
-    worker.on("error", reject);
-    worker.on("exit", (code: number) => {
-      if (code !== 0) reject(new Error(`Stopped with  ${code} exit code`));
-    });
-  });
-};
 // Helper function to extract the base filename from a packed file path
 const getBaseFilename = (filePath: string): string => {
   const parts = filePath.split("\\");
@@ -3734,16 +3721,6 @@ export const readDataFromPacks = async (mods: Mod[]) => {
   // mods = mods.filter((mod) => mod.name != "data.pack");
   // mods = mods.filter((mod) => mod.name === "merged-11-10-2022-15-22.pack");
   toRead = [...mods];
-  // return (
-  //   await new Promise<{ newPacksData: Pack[] }>((resolve, reject) => {
-  //     const worker = new Worker(path.join(__dirname, "readPacksWorker.js"), { workerData: { mods, schema } });
-  //     worker.on("message", resolve);
-  //     worker.on("error", reject);
-  //     worker.on("exit", (code) => {
-  //       if (code !== 0) reject(new Error(`Stopped with  ${code} exit code`));
-  //     });
-  //   })
-  // ).newPacksData;
   try {
     const packFieldsPromises = mods.map((mod) => {
       return readPack(mod.path);

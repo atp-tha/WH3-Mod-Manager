@@ -65,7 +65,6 @@ module.exports = {
         { from: "./temp/sub.js", to: "sub.js" },
         { from: "./locales/**/*" },
         { from: "./steamworks/**/*", to: "../" },
-        { from: "./temp/readPacksWorker.js", to: "readPacksWorker.js" },
         { from: "./schema/**/*", to: "../schema/[name][ext]" },
         { from: "./node_modules/binary-file", to: "../node_modules/binary-file" },
         { from: "./node_modules/denodeify", to: "../node_modules/denodeify" },
