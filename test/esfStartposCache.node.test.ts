@@ -4,10 +4,7 @@ import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import appData from "../src/appData";
-import {
-  clearStartposRegionSlotTemplatesCache,
-  loadStartposRegionSlotTemplates,
-} from "../src/esfMap/loader";
+import { clearStartposRegionSlotTemplatesCache, loadStartposRegionSlotTemplates } from "../src/esfMap/loader";
 
 const mocked = vi.hoisted(() => ({
   readFromExistingPack: vi.fn(),
@@ -61,9 +58,11 @@ describe("startpos-derived Buildings inputs", () => {
     }));
     mocked.parseEsfDocument.mockReturnValue({});
     mocked.openEsfBuffer.mockImplementation((buffer: Buffer) => ({ buffer }));
-    mocked.extractStartposRegionSlotTemplates.mockImplementation((_buffer: Buffer, _document: unknown, campaign: string) => [
-      { campaign, region: "region", slotTemplate: "template", slotType: "slot" },
-    ]);
+    mocked.extractStartposRegionSlotTemplates.mockImplementation(
+      (_buffer: Buffer, _document: unknown, campaign: string) => [
+        { campaign, region: "region", slotTemplate: "template", slotType: "slot" },
+      ],
+    );
     appData.currentGame = "wh3";
   });
 
@@ -74,10 +73,7 @@ describe("startpos-derived Buildings inputs", () => {
 
     const modPath = path.join(dataFolder, "mod.pack");
     await fs.promises.writeFile(modPath, "pack");
-    const startposFiles = [
-      "campaigns\\wh3_main_chaos\\startpos.esf",
-      "campaigns\\wh3_main_combi\\startpos.esf",
-    ];
+    const startposFiles = ["campaigns\\wh3_main_chaos\\startpos.esf", "campaigns\\wh3_main_combi\\startpos.esf"];
     appData.packsData = [
       {
         name: "mod.pack",

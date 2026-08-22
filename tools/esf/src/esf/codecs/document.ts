@@ -62,7 +62,7 @@ function buildStringTableNode(stringTable: EsfStringEntry[]): EsfNode {
  */
 export function buildEsfDocument(
   buffer: Buffer,
-  parseStringTables: (buffer: Buffer, recordNamesOffset: number) => CaabStringTables
+  parseStringTables: (buffer: Buffer, recordNamesOffset: number) => CaabStringTables,
 ): EsfDocument {
   const rawHeader = readCaabHeader(buffer);
   const tables = parseStringTables(buffer, rawHeader.recordNamesOffset);

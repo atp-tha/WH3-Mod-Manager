@@ -65,7 +65,7 @@ function findUnusedOutgoing(
   used: Uint8Array,
   edges: number[],
   currentDir: number,
-  stride: number
+  stride: number,
 ): number {
   if (!outgoing || outgoing.length === 0) {
     return -1;
@@ -256,7 +256,7 @@ export function extractRegionPolygons(
     RegionAreasGrid,
     "width" | "height" | "areaIds" | "uniqueAreas" | "areaClassKeys" | "areaClassCounts" | "areaClassHex"
   >,
-  options?: BuildPolygonOptions
+  options?: BuildPolygonOptions,
 ): RegionPolygonsResult {
   const width = grid.width;
   const height = grid.height;
@@ -358,7 +358,7 @@ export function extractRegionPolygons(
     }
 
     const tracedLoops = traceLoopsForArea(edges, stride, minLoopArea).sort(
-      (left, right) => Math.abs(right.signedArea) - Math.abs(left.signedArea)
+      (left, right) => Math.abs(right.signedArea) - Math.abs(left.signedArea),
     );
 
     if (tracedLoops.length === 0) {

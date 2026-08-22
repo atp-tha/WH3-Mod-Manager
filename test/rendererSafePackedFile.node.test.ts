@@ -44,8 +44,8 @@ describe("renderer-safe packed files", () => {
       start_pos: 100,
     } as PackedFile;
 
-    expect(
-      preparePackedFileForViewer({ name: "example.pack", path: "K:\\mods\\example.pack" }, indexedFile),
-    ).toBe(indexedFile);
+    expect(preparePackedFileForViewer({ name: "example.pack", path: "K:\\mods\\example.pack" }, indexedFile)).toBe(
+      indexedFile,
+    );
   });
 });

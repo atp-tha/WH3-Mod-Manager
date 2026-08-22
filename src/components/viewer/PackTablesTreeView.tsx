@@ -718,11 +718,7 @@ const PackTablesTreeView = React.memo(
 
     const packPathKey = (value: string) => value.replaceAll("/", "\\").toLowerCase();
 
-    const handleContextMenu = (
-      e: React.MouseEvent,
-      treeTab: ContextMenuTreeTab,
-      target?: TreeContextTarget,
-    ) => {
+    const handleContextMenu = (e: React.MouseEvent, treeTab: ContextMenuTreeTab, target?: TreeContextTarget) => {
       e.preventDefault();
       setContextMenu({ x: e.clientX, y: e.clientY, treeTab, target });
     };
@@ -1074,9 +1070,7 @@ const PackTablesTreeView = React.memo(
                   handleContextMenu(
                     e,
                     treeTab,
-                    selection && filePath
-                      ? { kind: "db", packPath, filePath, selection }
-                      : undefined,
+                    selection && filePath ? { kind: "db", packPath, filePath, selection } : undefined,
                   );
                   return;
                 }

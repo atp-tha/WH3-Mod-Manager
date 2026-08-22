@@ -365,11 +365,13 @@ if (!gotTheLock) {
       await fetch(`https://api.github.com/repos/Shazbot/WH3-Mod-Manager/releases/latest`)
         .then((res) => res.json())
         .then((body) => {
-          const zipAssets = (body.assets as Array<{
-            name?: string;
-            content_type: string;
-            browser_download_url: string;
-          }>).filter(
+          const zipAssets = (
+            body.assets as Array<{
+              name?: string;
+              content_type: string;
+              browser_download_url: string;
+            }>
+          ).filter(
             (asset) =>
               asset.content_type === "application/x-zip-compressed" ||
               asset.content_type === "application/zip" ||

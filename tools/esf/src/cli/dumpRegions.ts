@@ -111,7 +111,7 @@ function emptyRow(regionIndex: number, key: string): RegionRow {
  */
 function buildRegionRows(
   buffer: Buffer,
-  includeNonRegion: boolean
+  includeNonRegion: boolean,
 ): { rows: RegionRow[]; source: RegionSource | null } {
   const document = parseEsfDocument(buffer);
   const options = { includeNonRegion };
@@ -121,7 +121,7 @@ function buildRegionRows(
     // REGION_KEYS only covers regions in a UI theatre, so it is a subset of
     // REGION_DATA; join on the key and leave world coordinates null otherwise.
     const worldByKey = new Map(
-      extractMapPointsWithTheatreBounds(buffer, document, options).points.map((point) => [point.key, point])
+      extractMapPointsWithTheatreBounds(buffer, document, options).points.map((point) => [point.key, point]),
     );
 
     const rows = centers.map((center) => {
@@ -186,7 +186,7 @@ function main(): void {
   if (rows.length === 0 || !source) {
     throw new Error(
       `No region records found in ${absolutePath}. Expected either a campaign map's ` +
-        "map_data.esf (REGION_DATA/REGION_KEYS) or a startpos.esf (REGIONS_ARRAY)."
+        "map_data.esf (REGION_DATA/REGION_KEYS) or a startpos.esf (REGIONS_ARRAY).",
     );
   }
 
@@ -206,8 +206,8 @@ function main(): void {
           regions: limited,
         },
         null,
-        2
-      )
+        2,
+      ),
     );
   } else {
     console.log(`file: ${absolutePath}`);

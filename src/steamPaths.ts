@@ -13,10 +13,7 @@ const uniquePaths = (paths: string[]) => [...new Set(paths)];
  * Returns the conventional Steam roots used by native, Flatpak, and Snap installs.
  * The caller still needs to verify that a candidate exists.
  */
-export const getSteamInstallCandidates = (
-  platform = process.platform,
-  homeDirectory = os.homedir(),
-): string[] => {
+export const getSteamInstallCandidates = (platform = process.platform, homeDirectory = os.homedir()): string[] => {
   if (platform === "linux") {
     return uniquePaths([
       nodePath.join(homeDirectory, ".steam", "steam"),

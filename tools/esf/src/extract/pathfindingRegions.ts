@@ -32,9 +32,7 @@ export function parsePathfindingRegionKeys(buffer: Buffer): PathfindingRegionLis
     offset += 4;
     const end = offset + length;
     if (end > buffer.length) {
-      throw new Error(
-        `Invalid pathfinding.ppd file: region key ${index} length ${length} exceeds file bounds.`
-      );
+      throw new Error(`Invalid pathfinding.ppd file: region key ${index} length ${length} exceeds file bounds.`);
     }
     regionKeys.push(buffer.toString("utf8", offset, end));
     offset = end;

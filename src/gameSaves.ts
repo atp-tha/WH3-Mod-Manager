@@ -23,8 +23,7 @@ export const getSavesFolderPath = () => {
 
     const compatDataPrefix = getCompatDataPrefixSync(steamId, steamAppsFolder);
     appDataPath =
-      compatDataPrefix ??
-      path.join(homeDir, ".local", "share", "Steam", "steamapps", "compatdata", steamId, "pfx");
+      compatDataPrefix ?? path.join(homeDir, ".local", "share", "Steam", "steamapps", "compatdata", steamId, "pfx");
     appDataPath = path.join(appDataPath, "drive_c", "users", "steamuser", "AppData", "Roaming");
   }
 

@@ -34,9 +34,7 @@ function checkMapData(buffer: Buffer, document: ReturnType<typeof parseEsfDocume
   const centerKeys = new Set(centers.map((region) => region.key));
   const orphans = keyPoints.filter((point) => !centerKeys.has(point.key));
   if (orphans.length > 0) {
-    throw new Error(
-      `REGION_KEYS contained ${orphans.length} keys missing from REGION_DATA, e.g. ${orphans[0].key}.`
-    );
+    throw new Error(`REGION_KEYS contained ${orphans.length} keys missing from REGION_DATA, e.g. ${orphans[0].key}.`);
   }
 
   console.log(`source=map_data`);
@@ -68,9 +66,7 @@ function checkStartpos(buffer: Buffer, document: ReturnType<typeof parseEsfDocum
 
   const withoutOwner = regions.filter((region) => !region.ownerFaction);
   if (withoutOwner.length > 0) {
-    throw new Error(
-      `${withoutOwner.length} startpos regions had no owning faction, e.g. ${withoutOwner[0].key}.`
-    );
+    throw new Error(`${withoutOwner.length} startpos regions had no owning faction, e.g. ${withoutOwner[0].key}.`);
   }
 
   console.log(`source=startpos`);
@@ -111,7 +107,7 @@ function main(): void {
 
   throw new Error(
     "No region records extracted. Expected a campaign map's map_data.esf (REGION_DATA/REGION_KEYS) " +
-      "or a startpos.esf (REGIONS_ARRAY)."
+      "or a startpos.esf (REGIONS_ARRAY).",
   );
 }
 

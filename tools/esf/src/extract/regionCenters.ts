@@ -47,7 +47,7 @@ function shouldReplaceAreaCandidate(
   bestType: number | null,
   bestWeight: number,
   nextType: number | null,
-  nextWeight: number
+  nextWeight: number,
 ): boolean {
   if (bestType === null) {
     return true;
@@ -67,7 +67,7 @@ function shouldReplaceAreaCandidate(
 export function extractRegionCenters(
   buffer: Buffer,
   document: EsfDocument,
-  options?: { includeNonRegion?: boolean }
+  options?: { includeNonRegion?: boolean },
 ): RegionCenterPoint[] {
   if (!document.metadata) {
     return [];
@@ -118,15 +118,16 @@ export function extractRegionCenters(
           if (values.length >= 7) {
             const centerX = values[values.length - 2];
             const centerY = values[values.length - 1];
-            const candidateWeight =
-              Number.isFinite(currentRegion.currentAreaWeight) ? currentRegion.currentAreaWeight : values[0];
+            const candidateWeight = Number.isFinite(currentRegion.currentAreaWeight)
+              ? currentRegion.currentAreaWeight
+              : values[0];
 
             if (
               shouldReplaceAreaCandidate(
                 currentRegion.bestAreaType,
                 currentRegion.bestAreaWeight,
                 currentRegion.currentAreaType,
-                candidateWeight
+                candidateWeight,
               )
             ) {
               currentRegion.bestAreaType = currentRegion.currentAreaType;
@@ -191,11 +192,7 @@ export function extractRegionCenters(
           return;
         }
 
-        if (
-          currentRecord === "REGION_AREA_DATA" &&
-          value.kind === "value" &&
-          value.type === "u16"
-        ) {
+        if (currentRecord === "REGION_AREA_DATA" && value.kind === "value" && value.type === "u16") {
           currentRegion.currentAreaU16.push(Number(value.value));
           return;
         }
@@ -209,7 +206,7 @@ export function extractRegionCenters(
           currentRegion.currentAreaWeight = Number(value.value);
         }
       },
-    }
+    },
   );
 
   points.sort((left, right) => left.id - right.id);

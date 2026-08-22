@@ -1,9 +1,4 @@
-import {
-  parseCaabStringTables,
-  parseCbabStringTables,
-  readCaabHeader,
-  walkCaabNodes,
-} from "../esf/codecs/caabBinary";
+import { parseCaabStringTables, parseCbabStringTables, readCaabHeader, walkCaabNodes } from "../esf/codecs/caabBinary";
 
 const CODEC_CBAB = 0x0000abcb;
 
@@ -93,7 +88,7 @@ function findHexMapPayload(buffer: Buffer): HexMapPayload {
           payloadOffset = value.value.payloadOffset;
         }
       },
-    }
+    },
   );
 
   if (width === null || height === null || !payload || payloadOffset === null) {
@@ -113,7 +108,7 @@ export function extractRegionAreasGrid(buffer: Buffer): RegionAreasGrid {
   const expectedBytes = hexMap.width * hexMap.height * 6;
   if (hexMap.payload.length !== expectedBytes) {
     throw new Error(
-      `Unexpected HEX_MAP_DATA payload size ${hexMap.payload.length}; expected ${expectedBytes} for ${hexMap.width}x${hexMap.height}x6.`
+      `Unexpected HEX_MAP_DATA payload size ${hexMap.payload.length}; expected ${expectedBytes} for ${hexMap.width}x${hexMap.height}x6.`,
     );
   }
 

@@ -259,11 +259,7 @@ function colorFromIndex(index: number): [number, number, number] {
     return p;
   };
 
-  return [
-    Math.round(hueToRgb(h + 1 / 3) * 255),
-    Math.round(hueToRgb(h) * 255),
-    Math.round(hueToRgb(h - 1 / 3) * 255),
-  ];
+  return [Math.round(hueToRgb(h + 1 / 3) * 255), Math.round(hueToRgb(h) * 255), Math.round(hueToRgb(h - 1 / 3) * 255)];
 }
 
 function toBase64(bytes: Uint8Array): string {
@@ -288,7 +284,7 @@ function buildMarkers(
   points: Array<{ id: number; key: string; x: number; y: number; gridSpace?: boolean }>,
   grid: { width: number; height: number; areaIds: Uint16Array },
   componentIds: Uint32Array,
-  flipY: boolean
+  flipY: boolean,
 ): PointMarker[] {
   if (points.length === 0) {
     return [];
@@ -351,7 +347,7 @@ function buildLookupAreaPoints(
   grid: { width: number; height: number; areaIds: Uint16Array; areaClassCounts: Uint32Array },
   componentIds: Uint32Array,
   regionKeysByAreaId: string[] | null,
-  includeNonRegion: boolean
+  includeNonRegion: boolean,
 ): PointMarker[] {
   const areaCount = grid.areaClassCounts.length;
   const sumX = new Float64Array(areaCount);
@@ -438,7 +434,7 @@ function buildLookupMarkersFromTheatrePoints(
   points: Array<{ id: number; key: string; x: number; y: number }>,
   theatreBounds: TheatreBounds,
   grid: { width: number; height: number; areaIds: Uint16Array },
-  componentIds: Uint32Array
+  componentIds: Uint32Array,
 ): PointMarker[] {
   const spanX = theatreBounds.maxX - theatreBounds.minX;
   const spanY = theatreBounds.maxY - theatreBounds.minY;
@@ -471,7 +467,7 @@ function buildLookupMarkersFromTheatrePoints(
 function buildMarkerPartitionGrid(
   baseGrid: Pick<PolygonGridInput, "width" | "height">,
   componentIds: Uint32Array,
-  markers: PointMarker[]
+  markers: PointMarker[],
 ): PolygonGridInput {
   const width = baseGrid.width;
   const height = baseGrid.height;
@@ -480,9 +476,7 @@ function buildMarkerPartitionGrid(
   // Cells store the owning marker's index, so a marker index must never be able
   // to collide with the "unassigned" sentinel.
   if (markers.length >= unassignedAreaId) {
-    throw new Error(
-      `Too many markers to partition (${markers.length}); the limit is ${unassignedAreaId - 1}.`
-    );
+    throw new Error(`Too many markers to partition (${markers.length}); the limit is ${unassignedAreaId - 1}.`);
   }
   const areaIds = new Uint16Array(totalCells);
   areaIds.fill(unassignedAreaId);
@@ -632,7 +626,7 @@ function buildHtml(
   markers: PointMarker[],
   displayWidth: number,
   splitByMarkers: boolean,
-  displayFlipY: boolean
+  displayFlipY: boolean,
 ): string {
   const displayHeight = Math.max(400, Math.round((displayWidth * grid.height) / grid.width));
 
@@ -653,8 +647,8 @@ function buildHtml(
       new Uint8Array(
         polygonData.componentIds.buffer,
         polygonData.componentIds.byteOffset,
-        polygonData.componentIds.byteLength
-      )
+        polygonData.componentIds.byteLength,
+      ),
     ),
     areas: polygonData.areas.map((area) => ({
       componentId: area.componentId,
@@ -1185,7 +1179,7 @@ function main(): void {
   const resolvedLookupPath = resolveLookupPath(options.mapDataPath, options.lookupPath);
   if (options.sourceMode === "lookup" && !resolvedLookupPath) {
     throw new Error(
-      "Lookup source requested but no lookup TGA file was found. Pass --lookup <path-to-*_lookup_minimap.tga>."
+      "Lookup source requested but no lookup TGA file was found. Pass --lookup <path-to-*_lookup_minimap.tga>.",
     );
   }
 
@@ -1228,7 +1222,7 @@ function main(): void {
             keyPoints,
             keyPointData.theatreBounds,
             sourceGrid,
-            sourcePolygons.componentIds
+            sourcePolygons.componentIds,
           )
         : [];
 
@@ -1246,7 +1240,7 @@ function main(): void {
         sourceGrid,
         sourcePolygons.componentIds,
         regionKeysByAreaId,
-        options.includeNonRegion
+        options.includeNonRegion,
       );
     }
   } else {
@@ -1288,7 +1282,7 @@ function main(): void {
     markers,
     options.width,
     splitApplied,
-    displayFlipY
+    displayFlipY,
   );
 
   fs.mkdirSync(path.dirname(options.outPath), { recursive: true });
@@ -1306,8 +1300,8 @@ function main(): void {
   if (sourceKind === "lookup" && keyPointData.theatreBounds) {
     console.log(
       `theatreBounds=${keyPointData.theatreBounds.minX.toFixed(3)},${keyPointData.theatreBounds.minY.toFixed(
-        3
-      )} -> ${keyPointData.theatreBounds.maxX.toFixed(3)},${keyPointData.theatreBounds.maxY.toFixed(3)}`
+        3,
+      )} -> ${keyPointData.theatreBounds.maxX.toFixed(3)},${keyPointData.theatreBounds.maxY.toFixed(3)}`,
     );
   }
   if (sourceKind === "lookup" && pathfindingRegionCount !== null) {

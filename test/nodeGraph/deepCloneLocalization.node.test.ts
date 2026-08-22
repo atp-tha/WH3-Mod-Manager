@@ -123,9 +123,7 @@ describe("Deep Clone localization lookup", () => {
       },
     });
 
-    expect(getVanillaLocLookup).toHaveBeenCalledWith([
-      path.join(gameFolder as string, "local_en.pack"),
-    ]);
+    expect(getVanillaLocLookup).toHaveBeenCalledWith([path.join(gameFolder as string, "local_en.pack")]);
     expect(result.success).toBe(true);
 
     const locTable = (result.data as any).tables.find((table: any) => table.name === "deepclone_loc");

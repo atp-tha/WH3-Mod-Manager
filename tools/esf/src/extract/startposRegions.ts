@@ -44,7 +44,7 @@ function newRegionState(): RegionWalkState {
 export function extractStartposRegions(
   buffer: Buffer,
   document: EsfDocument,
-  options?: { includeNonRegion?: boolean }
+  options?: { includeNonRegion?: boolean },
 ): StartposRegion[] {
   if (!document.metadata) {
     return [];
@@ -87,8 +87,7 @@ export function extractStartposRegions(
 
         // The settlement level key is the entry that is not the
         // "settlement:<region>" self-reference.
-        const settlementKey =
-          state.settlementStrings.find((text) => !text.startsWith("settlement:")) ?? null;
+        const settlementKey = state.settlementStrings.find((text) => !text.startsWith("settlement:")) ?? null;
 
         regions.push({
           regionIndex: state.regionIndex,
@@ -125,7 +124,7 @@ export function extractStartposRegions(
           }
         }
       },
-    }
+    },
   );
 
   regions.sort((left, right) => left.regionIndex - right.regionIndex);

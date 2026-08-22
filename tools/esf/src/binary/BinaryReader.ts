@@ -27,7 +27,7 @@ export class BinaryReader {
   private assertReadable(offset: number, length: number): void {
     if (offset < 0 || length < 0 || offset + length > this.buffer.length) {
       throw new Error(
-        `Out-of-bounds read at offset ${offset} for ${length} bytes (buffer length ${this.buffer.length})`
+        `Out-of-bounds read at offset ${offset} for ${length} bytes (buffer length ${this.buffer.length})`,
       );
     }
   }

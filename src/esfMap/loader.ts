@@ -44,9 +44,7 @@ type FileIdentity = readonly [number, number];
 
 /** The derived rows are cheap to reuse, but must be invalidated when any source input changes. */
 const STARTPOS_REGION_SLOT_TEMPLATE_CACHE_VERSION = 1;
-let cachedStartposRegionSlotTemplates:
-  | { signature: string; rows: StartposRegionSlotTemplateRow[] }
-  | undefined;
+let cachedStartposRegionSlotTemplates: { signature: string; rows: StartposRegionSlotTemplateRow[] } | undefined;
 const pendingStartposRegionSlotTemplates = new Map<string, Promise<StartposRegionSlotTemplateRow[]>>();
 
 type EsfAssetKind = "map" | "startpos" | "lookup" | "pathfinding" | "background" | "background-text";
@@ -442,9 +440,7 @@ const readCampaignStartposCandidates = async (
  * campaign. Vanilla startpos files are loose under `data/campaigns`; enabled-mod startpos files
  * are packed and follow the same campaign identity selection as the map tab.
  */
-export async function loadStartposRegionSlotTemplates(
-  enabledMods: Mod[],
-): Promise<StartposRegionSlotTemplateRow[]> {
+export async function loadStartposRegionSlotTemplates(enabledMods: Mod[]): Promise<StartposRegionSlotTemplateRow[]> {
   if (appData.currentGame !== "wh3") return [];
   const dataFolder = appData.gamesToGameFolderPaths.wh3.dataFolder;
   if (!dataFolder) return [];

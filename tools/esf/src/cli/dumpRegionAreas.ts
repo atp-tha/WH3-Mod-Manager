@@ -70,7 +70,7 @@ function parseArgs(argv: string[]): CliOptions {
 function buildClassRows(
   areaClassKeys: Uint32Array,
   areaClassCounts: Uint32Array,
-  areaClassHex: string[]
+  areaClassHex: string[],
 ): RegionAreaClassRow[] {
   const rows: RegionAreaClassRow[] = [];
   for (let areaId = 0; areaId < areaClassKeys.length; areaId += 1) {
@@ -78,9 +78,7 @@ function buildClassRows(
     rows.push({
       areaId,
       classKey,
-      classKeyHex: areaClassHex[areaId]
-        ? `0x${areaClassHex[areaId]}`
-        : `0x${classKey.toString(16).padStart(8, "0")}`,
+      classKeyHex: areaClassHex[areaId] ? `0x${areaClassHex[areaId]}` : `0x${classKey.toString(16).padStart(8, "0")}`,
       pixelCount: areaClassCounts[areaId] ?? 0,
     });
   }
@@ -133,9 +131,7 @@ function main(): void {
       encoding: "u16-base64-row-major",
       width: grid.width,
       height: grid.height,
-      areaIdsBase64: toBase64(
-        new Uint8Array(grid.areaIds.buffer, grid.areaIds.byteOffset, grid.areaIds.byteLength)
-      ),
+      areaIdsBase64: toBase64(new Uint8Array(grid.areaIds.buffer, grid.areaIds.byteOffset, grid.areaIds.byteLength)),
     };
   }
 

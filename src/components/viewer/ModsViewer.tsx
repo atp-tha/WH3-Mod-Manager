@@ -3,11 +3,7 @@ import { useStore } from "react-redux";
 import { useAppDispatch, useAppSelector } from "../../hooks";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faChevronDown, faFile, faMagnifyingGlass, faXmark } from "@fortawesome/free-solid-svg-icons";
-import PackTablesTreeView, {
-  CopyIntoSource,
-  PackTablesTreeViewHandle,
-  ViewerPackTarget,
-} from "./PackTablesTreeView";
+import PackTablesTreeView, { CopyIntoSource, PackTablesTreeViewHandle, ViewerPackTarget } from "./PackTablesTreeView";
 import PackFileView from "./PackFileView";
 import PackTablesTableView from "./PackTablesTableView";
 import { Resizable } from "re-resizable";
@@ -861,9 +857,7 @@ const ModsViewer = memo(() => {
         .map((packTab) => ({
           packPath: packTab.packPath,
           label:
-            packsDataByPath[packTab.packPath]?.packName ??
-            getPackNameFromPath(packTab.packPath) ??
-            packTab.packPath,
+            packsDataByPath[packTab.packPath]?.packName ?? getPackNameFromPath(packTab.packPath) ?? packTab.packPath,
         })),
     [packTabs, packsDataByPath],
   );

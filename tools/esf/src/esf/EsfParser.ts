@@ -29,11 +29,9 @@ export function parseEsfDocument(buffer: Buffer): EsfDocument {
   }
 
   throw new Error(
-    `Unsupported ESF codec id 0x${codecId
-      .toString(16)
-      .padStart(8, "0")}. Supported: 0x${ABCA_CODEC_ID
-      .toString(16)
-      .padStart(8, "0")} (CAAB), 0x${ABCB_CODEC_ID.toString(16).padStart(8, "0")} (CBAB).`
+    `Unsupported ESF codec id 0x${codecId.toString(16).padStart(8, "0")}. Supported: 0x${ABCA_CODEC_ID.toString(
+      16,
+    ).padStart(8, "0")} (CAAB), 0x${ABCB_CODEC_ID.toString(16).padStart(8, "0")} (CBAB).`,
   );
 }
 

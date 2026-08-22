@@ -64,13 +64,13 @@ Both a campaign map's `map_data.esf` and a `startpos.esf` are accepted. The
 layout is detected from the records present, not from the filename, so a
 decompressed startpos dump works too:
 
-| input | source | fields |
-| --- | --- | --- |
-| `map_data.esf` | `REGION_DATA` + `REGION_KEYS` | region index, grid centre, world coordinates |
-| `startpos.esf` | `REGIONS_ARRAY` | region index, owning faction, subculture, settlement key |
+| input          | source                        | fields                                                   |
+| -------------- | ----------------------------- | -------------------------------------------------------- |
+| `map_data.esf` | `REGION_DATA` + `REGION_KEYS` | region index, grid centre, world coordinates             |
+| `startpos.esf` | `REGIONS_ARRAY`               | region index, owning faction, subculture, settlement key |
 
-The two carry different data: a map holds region *geometry*, a startpos holds
-campaign-start *ownership*. Fields that do not apply to the detected source are
+The two carry different data: a map holds region _geometry_, a startpos holds
+campaign-start _ownership_. Fields that do not apply to the detected source are
 reported as `-` (or `null` in `--json`).
 
 ## Compressed startpos files

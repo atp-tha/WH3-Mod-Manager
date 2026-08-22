@@ -94,8 +94,7 @@ const WORKSHOP_UPDATE_POLL_INTERVAL_MS = 1000;
 const WORKSHOP_UPDATE_RETRY_AFTER_MS = 30_000;
 const WORKSHOP_UPDATE_INACTIVITY_TIMEOUT_MS = 5 * 60_000;
 
-const sublogPath =
-  process.env.WHMM_SUBLOG_PATH || nodePath.join(os.tmpdir(), "wh3-mod-manager", "sublog.txt");
+const sublogPath = process.env.WHMM_SUBLOG_PATH || nodePath.join(os.tmpdir(), "wh3-mod-manager", "sublog.txt");
 
 const appendSublog = (message: string) => {
   try {

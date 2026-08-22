@@ -6738,11 +6738,10 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
         unitToPermissionFactions,
         factionToSubculture,
         subcultureToCulture,
-      } =
-        mergeVisualsTableContributions(
-          toTableContributions(tablePathsInMergeOrder),
-          toTableContributions([...dbPriorityMods.map((mod) => mod.path), dbPackPath]),
-        );
+      } = mergeVisualsTableContributions(
+        toTableContributions(tablePathsInMergeOrder),
+        toTableContributions([...dbPriorityMods.map((mod) => mod.path), dbPackPath]),
+      );
       // Mods only. They were merged after the game's locs and so overrode them; checking them
       // first and falling through to the cache keeps that precedence.
       const modLocalizedNames = mergeVisualsLocContributions(
@@ -7074,8 +7073,7 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
           targetPackedFiles.some((targetFile) => {
             const targetDBTable = parseDBTablePath(targetFile.name);
             return (
-              destinationDBTable &&
-              targetDBTable?.dbName.toLowerCase() === destinationDBTable.dbName.toLowerCase()
+              destinationDBTable && targetDBTable?.dbName.toLowerCase() === destinationDBTable.dbName.toLowerCase()
             );
           })
         ) {
@@ -7360,9 +7358,7 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
       // `allMods` is the disk-scan catalog and its `isEnabled` flags are not changed when the
       // renderer toggles a mod. Use the live enabled list for this field instead, otherwise the
       // viewer's enabled-mods picker is empty even while the manager has enabled mods.
-      const enabledModPaths = new Set(
-        appData.enabledMods.map((mod) => nodePath.resolve(mod.path).toLowerCase()),
-      );
+      const enabledModPaths = new Set(appData.enabledMods.map((mod) => nodePath.resolve(mod.path).toLowerCase()));
       const seenPaths = new Set<string>();
       const packs = mods
         .filter((mod) => !mod.isDeleted && !!mod.path)

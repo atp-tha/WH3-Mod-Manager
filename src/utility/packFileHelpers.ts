@@ -261,8 +261,7 @@ export const releaseParsedTables = (packs: readonly Pack[], tablePathPrefixes: r
     // packed file path rather than the table prefix, and forgetting an entry whose rows are still
     // parsed only costs a re-read, where keeping one whose rows are gone loses them silently.
     pack.readTables = pack.readTables.filter(
-      (readTable) =>
-        !tablePathPrefixes.some((prefix) => readTable.startsWith(prefix) || prefix.startsWith(readTable)),
+      (readTable) => !tablePathPrefixes.some((prefix) => readTable.startsWith(prefix) || prefix.startsWith(readTable)),
     );
     if (released > 0) {
       console.log("releaseParsedTables: dropped", released, "parsed tables from", pack.name);

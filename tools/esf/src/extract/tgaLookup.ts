@@ -58,7 +58,7 @@ export function extractLookupGridFromTga(buffer: Buffer): TgaLookupGrid {
 
   if (dataOffset + expectedBytes > buffer.length) {
     throw new Error(
-      `Truncated TGA indexed data: need ${expectedBytes} bytes at ${dataOffset}, file has ${buffer.length - dataOffset}.`
+      `Truncated TGA indexed data: need ${expectedBytes} bytes at ${dataOffset}, file has ${buffer.length - dataOffset}.`,
     );
   }
 
@@ -72,8 +72,7 @@ export function extractLookupGridFromTga(buffer: Buffer): TgaLookupGrid {
 
     for (let col = 0; col < width; col += 1) {
       const sourceOffset = sourceRowOffset + col * pixelBytes;
-      const paletteIndex =
-        pixelDepth === 8 ? buffer[sourceOffset] : readU16LE(buffer, sourceOffset);
+      const paletteIndex = pixelDepth === 8 ? buffer[sourceOffset] : readU16LE(buffer, sourceOffset);
       // The area id is the palette slot itself rather than a colour lookup, so
       // the raw index is used as-is; colorMapFirstIndex (18 in shipped files) is
       // intentionally not subtracted.

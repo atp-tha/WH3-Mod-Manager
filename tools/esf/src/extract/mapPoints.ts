@@ -34,7 +34,7 @@ function isRegionKey(key: string): boolean {
 export function extractMapPointsWithTheatreBounds(
   buffer: Buffer,
   document: EsfDocument,
-  options?: { includeNonRegion?: boolean }
+  options?: { includeNonRegion?: boolean },
 ): MapPointExtractionResult {
   if (!document.metadata) {
     return {
@@ -138,7 +138,7 @@ export function extractMapPointsWithTheatreBounds(
           pendingAscii = null;
         }
       },
-    }
+    },
   );
 
   const bestTheatre = theatreSelection.best;
@@ -161,7 +161,7 @@ export function extractMapPointsWithTheatreBounds(
 export function extractMapPoints(
   buffer: Buffer,
   document: EsfDocument,
-  options?: { includeNonRegion?: boolean }
+  options?: { includeNonRegion?: boolean },
 ): MapPoint[] {
   return extractMapPointsWithTheatreBounds(buffer, document, options).points;
 }

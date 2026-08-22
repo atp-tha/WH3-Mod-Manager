@@ -1,15 +1,6 @@
 export type EsfScalar = boolean | number | string | Buffer;
 
-export type EsfValueType =
-  | "bool"
-  | "i32"
-  | "u32"
-  | "i64"
-  | "u64"
-  | "f32"
-  | "f64"
-  | "string"
-  | "bytes";
+export type EsfValueType = "bool" | "i32" | "u32" | "i64" | "u64" | "f32" | "f64" | "string" | "bytes";
 
 export interface EsfValue {
   type: EsfValueType;
