@@ -77,7 +77,7 @@ const initialState = {
   startArgs: [],
   currentTab: "mods",
   hiddenMainWindowTabs: [],
-  isVisualsSortByCultureEnabled: false,
+  isVisualsSortByCultureEnabled: true,
   isVisualsHideDuplicatesEnabled: true,
   mapCampaignName: "wh3_main_combi",
   mapSelectedRegion: undefined,
