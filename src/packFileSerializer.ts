@@ -906,6 +906,33 @@ export const getPackViewData = (pack: Pack, table?: DBTable | string, getLocs?: 
   }
   return result;
 };
+
+/**
+ * Adds the schema and amended fields the table viewer needs to a packed DB file.
+ *
+ * A file taken from a pack index has no schemaFields at all. It must be read from the pack before
+ * it is prepared; otherwise preparing it here would turn it into a perfectly valid-looking empty
+ * table. An explicitly read empty table is allowed through with `allowEmptyParsed`.
+ */
+export const preparePackedFileForViewer = (
+  sourcePack: Pick<Pack, "name" | "path">,
+  packedFile: PackedFile | undefined,
+  allowEmptyParsed = false,
+): PackedFile | undefined => {
+  if (!packedFile || (packedFile.schemaFields !== undefined && packedFile.tableSchema !== undefined)) {
+    return packedFile;
+  }
+  if (!allowEmptyParsed && packedFile.schemaFields === undefined) return packedFile;
+
+  const packedFileForView = { ...packedFile };
+  const packForView = {
+    ...sourcePack,
+    packedFiles: [packedFileForView],
+  } as Pack;
+  const packViewData = getPackViewData(packForView, packedFileForView.name);
+  return packViewData?.packedFiles?.[packedFileForView.name] ?? packedFileForView;
+};
+
 const createScriptLoggingData = (pack_files: PackedFile[]) => {
   pack_files.push({
     name: "script\\enable_console_logging",

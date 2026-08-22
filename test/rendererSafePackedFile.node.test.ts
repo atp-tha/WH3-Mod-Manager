@@ -1,8 +1,10 @@
 import { findNonSerializableValue } from "@reduxjs/toolkit";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("@mongodb-js/zstd", () => ({ decompress: vi.fn() }));
 
 import type { PackedFile } from "../src/packFileTypes";
-import { serializePackFileDataToBuffer } from "../src/packFileSerializer";
+import { preparePackedFileForViewer, serializePackFileDataToBuffer } from "../src/packFileSerializer";
 import { toRendererSafePackedFile } from "../src/utility/rendererSafePackedFile";
 
 describe("renderer-safe packed files", () => {
@@ -33,5 +35,17 @@ describe("renderer-safe packed files", () => {
       serializePackFileDataToBuffer({ ...packedFile, buffer: undefined }),
     );
     expect(Buffer.isBuffer(packedFile.schemaFields?.[0].fields[0].val)).toBe(true);
+  });
+
+  it("does not prepare an index-only DB descriptor as an empty table", () => {
+    const indexedFile = {
+      name: "db\\example_tables\\clone_",
+      file_size: 20,
+      start_pos: 100,
+    } as PackedFile;
+
+    expect(
+      preparePackedFileForViewer({ name: "example.pack", path: "K:\\mods\\example.pack" }, indexedFile),
+    ).toBe(indexedFile);
   });
 });

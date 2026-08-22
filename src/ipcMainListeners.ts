@@ -219,6 +219,7 @@ import {
   getPacksInSave,
   getPacksTableData,
   getPackViewData,
+  preparePackedFileForViewer,
   mergeMods,
   readFromExistingPack,
   readPack,
@@ -7045,19 +7046,20 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
           sourcePackedFile = findPackedFileInList(sourcePack.packedFiles, normalizedFilePath);
         }
 
-        // The pack index stores raw DB fields, while the viewer needs the amended fields and schema
-        // that getPackViewData normally adds before sending a table to the renderer. A table copied
-        // straight from an index-only source would otherwise be listed in the destination tree but
-        // have nothing for PackTablesTableView to render.
-        const makeViewerReadyDBFile = (packedFile: PackedFile | undefined): PackedFile | undefined => {
-          if (!isDBFile || !packedFile || (packedFile.schemaFields && packedFile.tableSchema)) return packedFile;
-
-          const packForView = {
-            ...(sourcePack ?? { name: nodePath.basename(sourcePackPath), path: sourcePackPath }),
-            packedFiles: [packedFile],
-          } as Pack;
-          const packViewData = getPackViewData(packForView, packedFile.name, isLocPackedFilePath(packedFile.name));
-          return packViewData?.packedFiles?.[packedFile.name] ?? packedFile;
+        // The pack index stores only DB file descriptors, while the viewer needs the amended fields
+        // and schema that getPackViewData normally adds before sending a table to the renderer. A
+        // table copied straight from an index-only source would otherwise be listed in the
+        // destination tree but have nothing for PackTablesTableView to render.
+        const makeViewerReadyDBFile = (
+          packedFile: PackedFile | undefined,
+          allowEmptyParsed = false,
+        ): PackedFile | undefined => {
+          if (!isDBFile || !packedFile) return packedFile;
+          return preparePackedFileForViewer(
+            sourcePack ?? { name: nodePath.basename(sourcePackPath), path: sourcePackPath },
+            packedFile,
+            allowEmptyParsed,
+          );
         };
 
         sourcePackedFile = makeViewerReadyDBFile(sourcePackedFile);
@@ -7093,7 +7095,7 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
               : { skipParsingTables: true, filesToRead: [normalizedFilePath] },
           );
           sourcePackedFile = findPackedFileInList(sourceRead.packedFiles, normalizedFilePath);
-          sourcePackedFile = makeViewerReadyDBFile(sourcePackedFile);
+          sourcePackedFile = makeViewerReadyDBFile(sourcePackedFile, true);
           sourceBuffer = sourcePackedFile?.buffer;
         }
 
