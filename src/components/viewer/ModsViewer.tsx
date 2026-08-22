@@ -71,6 +71,8 @@ const TOOLBAR_ICON_ONLY_SIDEBAR_WIDTH = 300;
 const hasDBSelectionTarget = (selection?: DBTableSelection): selection is DBTableSelection =>
   Boolean(selection?.packPath && selection.dbName && selection.dbSubname);
 
+const getPackFileName = (packPath: string) => packPath.split(/[\\/]/).pop() ?? packPath;
+
 const ModsViewer = memo(() => {
   const dispatch = useAppDispatch();
   const viewerStore = useStore<RootState>();
@@ -89,6 +91,7 @@ const ModsViewer = memo(() => {
   const startArgs = useAppSelector((state) => state.app.startArgs);
   const packsDataByPath = useAppSelector((state) => state.app.packsData);
   const unsavedPacksDataByPath = useAppSelector((state) => state.app.unsavedPacksData);
+  const dbPackName = gameToPackWithDBTablesName[currentGame] || "db.pack";
   const selectCurrentPackData = useMemo(makeSelectCurrentPackData, []);
   const selectCurrentPackUnsavedFiles = useMemo(makeSelectCurrentPackUnsavedFiles, []);
 
@@ -121,6 +124,10 @@ const ModsViewer = memo(() => {
   );
   const openTabs = activePackTab?.openTabs ?? EMPTY_TABS;
   const activeTabId = activePackTab?.activeTabId ?? null;
+  const isDBPackOpen = packTabs.some((packTab) => {
+    const packName = packsDataByPath[packTab.packPath]?.packName ?? getPackFileName(packTab.packPath);
+    return packName.toLowerCase() === dbPackName.toLowerCase();
+  });
   const setOpenTabs = useCallback((action: React.SetStateAction<ViewerTab[]>) => {
     const targetPackPath = activePackPathRef.current;
     if (!targetPackPath) return;
@@ -941,6 +948,12 @@ const ModsViewer = memo(() => {
     treeViewRefs.current[activePackPath ?? ""]?.openNewFlowDialog();
   };
 
+  const handleOpenDBPack = () => {
+    if (isDBPackOpen) return;
+    setIsFileMenuOpen(false);
+    window.api?.requestOpenModInViewer(dbPackName);
+  };
+
   const handleNewPackConfirm = useCallback(async () => {
     if (!newPackName.trim()) {
       showDialog("Please enter a pack name", { title: "Missing Name" });
@@ -1381,6 +1394,18 @@ const ModsViewer = memo(() => {
                           className="block w-full whitespace-nowrap px-3 py-2 text-left text-sm text-gray-200 hover:bg-gray-700"
                         >
                           Add New Flow
+                        </button>
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={handleOpenDBPack}
+                          disabled={isDBPackOpen}
+                          className={
+                            "block w-full whitespace-nowrap px-3 py-2 text-left text-sm " +
+                            (isDBPackOpen ? "cursor-not-allowed text-gray-500" : "text-gray-200 hover:bg-gray-700")
+                          }
+                        >
+                          open db.pack
                         </button>
                       </div>
                     )}

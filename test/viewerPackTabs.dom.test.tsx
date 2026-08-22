@@ -289,6 +289,46 @@ describe("multiple pack viewer tabs", () => {
     expect(screen.getByText("Create New Pack")).toBeInTheDocument();
   });
 
+  it("opens the DB pack from the File menu and disables it once open", async () => {
+    const user = userEvent.setup();
+    const requestOpenModInViewer = vi.fn();
+    const dbPackPath = "C:\\game\\data\\db.pack";
+    window.api = {
+      requestOpenModInViewer,
+      setViewerActivePack: vi.fn(),
+    } as unknown as NonNullable<Window["api"]>;
+
+    const store = configureStore({
+      reducer: { app: appReducer },
+      preloadedState: {
+        app: {
+          ...initialState,
+          isFeaturesForModdersEnabled: true,
+          packsData: { [dbPackPath]: pack(dbPackPath, "db.pack") },
+        },
+      },
+    });
+
+    render(
+      <Provider store={store}>
+        <LocalizationContext.Provider value={{ filter: "Filter" }}>
+          <ModsViewer />
+        </LocalizationContext.Provider>
+      </Provider>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "File", exact: true }));
+    const openDBPack = screen.getByRole("menuitem", { name: "open db.pack", exact: true });
+    expect(openDBPack).not.toBeDisabled();
+    await user.click(openDBPack);
+    expect(requestOpenModInViewer).toHaveBeenCalledWith("db.pack");
+
+    store.dispatch(requestOpenPackTab(dbPackPath));
+    await waitFor(() => expect(screen.getByRole("button", { name: "db.pack", exact: true })).toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: "File", exact: true }));
+    expect(screen.getByRole("menuitem", { name: "open db.pack", exact: true })).toBeDisabled();
+  });
+
   it("asks before overwriting an existing destination file during copy", async () => {
     const user = userEvent.setup();
     const packA = "A:\\mods\\copy-source.pack";
