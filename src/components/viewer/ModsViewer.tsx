@@ -3,7 +3,11 @@ import { useStore } from "react-redux";
 import { useAppDispatch, useAppSelector } from "../../hooks";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faXmark } from "@fortawesome/free-solid-svg-icons";
-import PackTablesTreeView, { PackTablesTreeViewHandle } from "./PackTablesTreeView";
+import PackTablesTreeView, {
+  CopyIntoSource,
+  PackTablesTreeViewHandle,
+  ViewerPackTarget,
+} from "./PackTablesTreeView";
 import PackFileView from "./PackFileView";
 import PackTablesTableView from "./PackTablesTableView";
 import { Resizable } from "re-resizable";
@@ -430,6 +434,70 @@ const ModsViewer = memo(() => {
       openOrActivateTab(buildPackedFileTabCandidate(selection.filePath, selection.packPath), options);
     },
     [buildPackedFileTabCandidate, openOrActivateTab],
+  );
+
+  const handleCopyInto = useCallback(
+    async (source: CopyIntoSource, targetPackPath: string, openAfterCopy: boolean) => {
+      try {
+        const result = await window.api?.copyPackedFileToPack(source.packPath, source.filePath, targetPackPath);
+        if (!result?.success) {
+          showDialog(`Failed to copy ${source.filePath}: ${result?.error || "Unknown error"}`, {
+            title: "Copy Failed",
+          });
+          return;
+        }
+
+        if (!openAfterCopy) return;
+
+        const copiedPackPath = result.targetPackPath || targetPackPath;
+        const targetWasAlreadyOpen = packTabs.some((packTab) => packTab.packPath === copiedPackPath);
+        if (!targetWasAlreadyOpen && !copiedPackPath.startsWith("memory://")) {
+          // This asks the main process to load the destination's file index and register its viewer
+          // tab. The local tab is opened immediately below so the copied file can be selected in the
+          // same interaction, even while that index is still arriving.
+          window.api?.requestOpenModInViewer(copiedPackPath);
+        }
+        openOrActivatePackTab(copiedPackPath);
+
+        if (source.kind === "db" && source.dbSelection) {
+          handleOpenDBTable({
+            ...source.dbSelection,
+            packPath: copiedPackPath,
+          });
+        } else if (source.filePath.startsWith("whmmflows\\")) {
+          handleOpenFlowFile({ flowFile: source.filePath, packPath: copiedPackPath });
+        } else {
+          handleOpenPackedFile({ filePath: source.filePath, packPath: copiedPackPath });
+        }
+      } catch (error) {
+        console.error("Error copying packed file into another pack:", error);
+        showDialog(`Failed to copy ${source.filePath}: ${error instanceof Error ? error.message : "Unknown error"}`, {
+          title: "Copy Failed",
+        });
+      }
+    },
+    [
+      handleOpenDBTable,
+      handleOpenFlowFile,
+      handleOpenPackedFile,
+      openOrActivatePackTab,
+      packTabs,
+      showDialog,
+    ],
+  );
+
+  const getOtherOpenPacks = useCallback(
+    (sourcePackPath: string): ViewerPackTarget[] =>
+      packTabs
+        .filter((packTab) => packTab.packPath !== sourcePackPath)
+        .map((packTab) => ({
+          packPath: packTab.packPath,
+          label:
+            packsDataByPath[packTab.packPath]?.packName ??
+            getPackNameFromPath(packTab.packPath) ??
+            packTab.packPath,
+        })),
+    [packTabs, packsDataByPath],
   );
 
   const handleCloseTab = useCallback((tabId: string) => {
@@ -1310,6 +1378,8 @@ const ModsViewer = memo(() => {
                           preferredTab={preferredTreeTabByPackPath[packTab.packPath] ?? "db"}
                           tableFilter={dbTableFilter}
                           showDialog={showDialog}
+                          otherOpenPacks={getOtherOpenPacks(packTab.packPath)}
+                          onCopyInto={handleCopyInto}
                           onOpenDBTable={handleOpenDBTable}
                           onOpenFlowFile={handleOpenFlowFile}
                           onOpenPackedFile={handleOpenPackedFile}

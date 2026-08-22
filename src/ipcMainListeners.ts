@@ -4,6 +4,7 @@ import {
   findUnparsedTablePrefixes,
   getDBPackedFilePath,
   isLocPackedFilePath,
+  parseDBTablePath,
   parseLiveDBTablePath,
   releaseParsedTables,
 } from "./utility/packFileHelpers";
@@ -655,6 +656,10 @@ const findPackedFileCaseInsensitive = (pack: Pack, fileName: string) => {
   const exactIndex = bs(pack.packedFiles, fileName, (a: PackedFile, b: string) => collator.compare(a.name, b));
   if (exactIndex >= 0) return pack.packedFiles[exactIndex];
   return pack.packedFiles.find((packedFile) => normalizePackFilePathKey(packedFile.name) === normalizedTarget);
+};
+const findPackedFileInList = (packedFiles: PackedFile[], fileName: string) => {
+  const normalizedTarget = normalizePackFilePathKey(fileName);
+  return packedFiles.find((packedFile) => normalizePackFilePathKey(packedFile.name) === normalizedTarget);
 };
 const getOrLoadPackFromAppData = async (packPath: string) => {
   let stat: { size: number; mtimeMs: number } | undefined;
@@ -5032,6 +5037,7 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
         mods = mods.filter((mod) => !isWorkshopMod(mod) || appData.subscribedModIds.includes(mod.workshopId));
       }
       console.log("after subscription filter:", mods.length);
+      appData.allMods = mods;
       mainWindow?.webContents.send("modsPopulated", mods);
       await afterModsPopulated?.();
       const packHeadersToSend: PackHeaderData[] = [];
@@ -6891,9 +6897,133 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
       }
     },
   );
+  ipcMain.handle(
+    "copyPackedFileToPack",
+    async (_event, sourcePackPath: string, filePath: string, targetPackPath: string) => {
+      try {
+        if (!sourcePackPath || !filePath || !targetPackPath) {
+          return { success: false, error: "A source pack, file, and target pack are required" };
+        }
+
+        const packPathKey = (packPath: string) =>
+          packPath.startsWith("memory://") ? packPath.toLowerCase() : nodePath.resolve(packPath).toLowerCase();
+        if (packPathKey(sourcePackPath) === packPathKey(targetPackPath)) {
+          return { success: false, error: "The destination must be a different pack" };
+        }
+
+        const normalizedFilePath = normalizePackFilePath(filePath);
+        const isDBFile = parseDBTablePath(normalizedFilePath) != undefined;
+        const sourceUnsavedFiles = appData.unsavedPacksData[sourcePackPath] || [];
+        let sourcePackedFile = findPackedFileInList(sourceUnsavedFiles, normalizedFilePath);
+        const sourcePack = appData.packsData.find(
+          (pack) => pack.path === sourcePackPath || packPathKey(pack.path) === packPathKey(sourcePackPath),
+        );
+        if (!sourcePackedFile && sourcePack) {
+          sourcePackedFile = findPackedFileInList(sourcePack.packedFiles, normalizedFilePath);
+        }
+
+        let sourceBuffer = sourcePackedFile?.buffer;
+        if (!sourceBuffer && sourcePackedFile?.text != null) {
+          sourceBuffer = Buffer.from(sourcePackedFile.text, "utf8");
+        }
+        // Parsed DB files carry their current edited row data even when the raw payload was not
+        // retained. Serializing that view preserves edits made in the source pack.
+        if (!sourceBuffer && sourcePackedFile?.schemaFields && sourcePackedFile.tableSchema) {
+          sourceBuffer = serializePackFileDataToBuffer({
+            name: sourcePackedFile.name,
+            schemaFields: sourcePackedFile.schemaFields,
+            tableSchema: sourcePackedFile.tableSchema,
+            version: sourcePackedFile.version,
+          });
+        }
+
+        if (!sourceBuffer) {
+          if (sourcePackPath.startsWith("memory://")) {
+            return { success: false, error: `The source file "${normalizedFilePath}" has no saved payload` };
+          }
+
+          const sourceRead = await readPack(
+            sourcePackPath,
+            isDBFile
+              ? { tablesToRead: [normalizedFilePath], filesToRead: [normalizedFilePath] }
+              : { skipParsingTables: true, filesToRead: [normalizedFilePath] },
+          );
+          sourcePackedFile = findPackedFileInList(sourceRead.packedFiles, normalizedFilePath);
+          sourceBuffer = sourcePackedFile?.buffer;
+        }
+
+        if (!sourcePackedFile || !sourceBuffer) {
+          return { success: false, error: `Could not read "${normalizedFilePath}" from the source pack` };
+        }
+
+        const copiedFileName = normalizePackFilePath(sourcePackedFile.name || normalizedFilePath);
+        const copiedFile: PackedFile = {
+          ...sourcePackedFile,
+          name: copiedFileName,
+          file_size: sourceBuffer.length,
+          start_pos: -1,
+          is_compressed: false,
+          buffer: sourceBuffer,
+        };
+        if (
+          getPackedFileViewerKind(copiedFileName) === "text" ||
+          copiedFileName.toLowerCase().startsWith("whmmflows\\")
+        ) {
+          copiedFile.text = decodePackedFileText(copiedFile);
+        }
+
+        const targetUnsavedFiles = appData.unsavedPacksData[targetPackPath] || [];
+        const existingTargetIndex = targetUnsavedFiles.findIndex(
+          (targetFile) => normalizePackFilePathKey(targetFile.name) === normalizePackFilePathKey(copiedFileName),
+        );
+        if (existingTargetIndex >= 0) {
+          targetUnsavedFiles.splice(existingTargetIndex, 1, copiedFile);
+        } else {
+          targetUnsavedFiles.push(copiedFile);
+        }
+        appData.unsavedPacksData[targetPackPath] = targetUnsavedFiles;
+        mainWindow?.webContents.send("setUnsavedPacksData", targetPackPath, targetUnsavedFiles);
+        windows.viewerWindow?.webContents.send("setUnsavedPacksData", targetPackPath, targetUnsavedFiles);
+
+        return { success: true, targetPackPath, filePath: copiedFileName };
+      } catch (error) {
+        console.error("Error copying packed file to pack:", error);
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : "Failed to copy packed file",
+        };
+      }
+    },
+  );
   ipcMain.handle("readFileFromPack", async (event, packPath: string, fileName: string) => {
     try {
       console.log("readFileFromPack:", packPath, fileName);
+      const unsavedFile = findPackedFileInList(appData.unsavedPacksData[packPath] || [], fileName);
+      if (unsavedFile) {
+        const viewerKind = getPackedFileViewerKind(fileName);
+        if (!viewerKind) {
+          return {
+            success: false,
+            error: "Unsupported file type",
+          };
+        }
+        const unsavedBuffer =
+          unsavedFile.buffer || (unsavedFile.text != null ? Buffer.from(unsavedFile.text, "utf8") : undefined);
+        if (!unsavedBuffer) {
+          return {
+            success: false,
+            error: "File has no readable content",
+          };
+        }
+        if (viewerKind === "image") {
+          return {
+            success: true,
+            base64: unsavedBuffer.toString("base64"),
+            mimeType: getPackedFileMimeType(fileName),
+          };
+        }
+        return { success: true, text: decodePackedFileText(unsavedFile) };
+      }
       // Read the pack with the specific file
       const pack = await readPack(packPath, { filesToRead: [fileName] });
       // Find the file
@@ -6987,6 +7117,46 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
       return {
         success: false,
         error: error instanceof Error ? error.message : "Failed to get flow files from pack",
+      };
+    }
+  });
+  ipcMain.handle("getViewerPackCatalog", async () => {
+    try {
+      // `allMods` is kept in sync when the main window refreshes its mod list. The fallback also
+      // makes the picker useful during the short window where the viewer was opened before that
+      // first refresh completed.
+      const mods =
+        appData.allMods.length > 0
+          ? appData.allMods
+          : await getMods((message) => mainWindow?.webContents.send("handleLog", message));
+      const seenPaths = new Set<string>();
+      const packs = mods
+        .filter((mod) => !mod.isDeleted && !!mod.path)
+        .filter((mod) => {
+          const pathKey = nodePath.resolve(mod.path).toLowerCase();
+          if (seenPaths.has(pathKey)) return false;
+          seenPaths.add(pathKey);
+          return true;
+        })
+        .map((mod) => ({
+          path: mod.path,
+          name: mod.name,
+          humanName: mod.humanName,
+          isEnabled: !!mod.isEnabled,
+          isInData: !!mod.isInData,
+        }))
+        .toSorted((first, second) => {
+          const firstLabel = first.humanName?.trim() || first.name;
+          const secondLabel = second.humanName?.trim() || second.name;
+          return firstLabel.localeCompare(secondLabel) || first.name.localeCompare(second.name);
+        });
+
+      return { success: true, packs };
+    } catch (error) {
+      console.error("Error getting viewer pack catalog:", error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : "Failed to load mod packs",
       };
     }
   });

@@ -365,6 +365,27 @@ const api = {
   getListOfPacksInSave: (saveName: string): Promise<string[]> => ipcRenderer.invoke("getListOfPacksInSave", saveName),
 
   getPackFilesList: (packPath: string): Promise<string[]> => ipcRenderer.invoke("getPackFilesList", packPath),
+  getViewerPackCatalog: (): Promise<{
+    success: boolean;
+    packs?: Array<{
+      path: string;
+      name: string;
+      humanName?: string;
+      isEnabled: boolean;
+      isInData: boolean;
+    }>;
+    error?: string;
+  }> => ipcRenderer.invoke("getViewerPackCatalog"),
+  copyPackedFileToPack: (
+    sourcePackPath: string,
+    filePath: string,
+    targetPackPath: string,
+  ): Promise<{
+    success: boolean;
+    targetPackPath?: string;
+    filePath?: string;
+    error?: string;
+  }> => ipcRenderer.invoke("copyPackedFileToPack", sourcePackPath, filePath, targetPackPath),
   getPackRowsForSave: (packPath: string, tableNames: string[], includeLocs: boolean): Promise<PackRowsForSave> =>
     ipcRenderer.invoke("getPackRowsForSave", packPath, tableNames, includeLocs),
   renamePackedFiles: (
