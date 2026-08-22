@@ -7155,6 +7155,12 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
         appData.allMods.length > 0
           ? appData.allMods
           : await getMods((message) => mainWindow?.webContents.send("handleLog", message));
+      // `allMods` is the disk-scan catalog and its `isEnabled` flags are not changed when the
+      // renderer toggles a mod. Use the live enabled list for this field instead, otherwise the
+      // viewer's enabled-mods picker is empty even while the manager has enabled mods.
+      const enabledModPaths = new Set(
+        appData.enabledMods.map((mod) => nodePath.resolve(mod.path).toLowerCase()),
+      );
       const seenPaths = new Set<string>();
       const packs = mods
         .filter((mod) => !mod.isDeleted && !!mod.path)
@@ -7168,7 +7174,7 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
           path: mod.path,
           name: mod.name,
           humanName: mod.humanName,
-          isEnabled: !!mod.isEnabled,
+          isEnabled: enabledModPaths.has(nodePath.resolve(mod.path).toLowerCase()),
           isInData: !!mod.isInData,
         }))
         .toSorted((first, second) => {
