@@ -347,12 +347,12 @@ const VisualsTab = memo(() => {
   };
 
   const toggleCultureGroupCollapsed = (cultureKey: string) => {
-    setCollapsedCultureGroups((prev) => ({ ...prev, [cultureKey]: !prev[cultureKey] }));
+    setCollapsedCultureGroups((prev) => ({ ...prev, [cultureKey]: !(prev[cultureKey] ?? true) }));
   };
 
   const toggleCasteGroupCollapsed = (cultureKey: string, casteKey: string) => {
     const groupKey = `${cultureKey}|${casteKey}`;
-    setCollapsedCasteGroups((prev) => ({ ...prev, [groupKey]: !prev[groupKey] }));
+    setCollapsedCasteGroups((prev) => ({ ...prev, [groupKey]: !(prev[groupKey] ?? true) }));
   };
 
   const activeTab = tabs.find((tab) => tab.id === activeTabId) || null;
@@ -663,7 +663,7 @@ const VisualsTab = memo(() => {
   const renderCultureGroupedUnits = () =>
     cultureGroupedUnits.flatMap((culture) => {
       const cultureUnitCount = culture.castes.reduce((count, caste) => count + caste.units.length, 0);
-      const isCultureCollapsed = !!collapsedCultureGroups[culture.key];
+      const isCultureCollapsed = collapsedCultureGroups[culture.key] ?? true;
       const rows: React.ReactNode[] = [
         <button
           key={`culture:${culture.key}`}
@@ -683,7 +683,7 @@ const VisualsTab = memo(() => {
 
       for (const caste of culture.castes) {
         const casteGroupKey = `${culture.key}|${caste.key}`;
-        const isCasteCollapsed = !!collapsedCasteGroups[casteGroupKey];
+        const isCasteCollapsed = collapsedCasteGroups[casteGroupKey] ?? true;
         rows.push(
           <button
             key={`culture:${culture.key}|caste:${caste.key}`}
