@@ -74,6 +74,12 @@ const bool = (row: Record<string, string>, column: string, fallback = false) => 
 };
 const optional = (value: string) => (value === "" ? undefined : value);
 
+/** Resolves a localisation value, including the game's `{{tr:...}}` replacement tokens. */
+export const resolveAncillaryText = (getLoc: AncillariesGetLoc, key: string) => {
+  const localized = getLoc(key);
+  return resolveTextReplacements(localized, getLoc) || localized;
+};
+
 /**
  * Collapses rows by their composite key, keeping the last one.
  *
@@ -95,9 +101,9 @@ export const dedupeRowsByKey = (
 };
 
 const localize = (getLoc: AncillariesGetLoc, key: string) => {
-  const localized = getLoc(key);
+  const localized = resolveAncillaryText(getLoc, key);
   if (!localized) return undefined;
-  return stripLocImgTags(resolveTextReplacements(localized, getLoc) || localized) || undefined;
+  return stripLocImgTags(localized) || undefined;
 };
 
 export const ancillaryNameLocKey = (key: string) => `ancillaries_onscreen_name_${key}`;

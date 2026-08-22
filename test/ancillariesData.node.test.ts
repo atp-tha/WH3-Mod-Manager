@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { ANCILLARY_TABLES, buildAncillariesData, dedupeRowsByKey } from "../src/ancillariesData/data";
+import {
+  ANCILLARY_TABLES,
+  buildAncillariesData,
+  dedupeRowsByKey,
+  resolveAncillaryText,
+} from "../src/ancillariesData/data";
 import type { AncillariesTableRows } from "../src/ancillariesData/types";
 
 const emptyTables = (): AncillariesTableRows =>
@@ -52,6 +57,16 @@ const fixtureTables = (): AncillariesTableRows => {
 };
 
 describe("buildAncillariesData", () => {
+  it("resolves {{tr:...}} tokens in ancillary flavour text", () => {
+    const getFlavourLoc = (key: string) =>
+      ({
+        ancillaries_colour_text_anc_sword: "A {{tr:shared_flavour}}.",
+        ui_text_replacements_localised_text_shared_flavour: "shared phrase",
+      })[key];
+
+    expect(resolveAncillaryText(getFlavourLoc, "ancillaries_colour_text_anc_sword")).toBe("A shared phrase.");
+  });
+
   it("resolves {{tr:...}} tokens in a category or subcategory name", () => {
     const tables = fixtureTables();
     tables.ancillaries_categories_tables.push({ category: "banner", icon_name: "", sort_order: "3" });

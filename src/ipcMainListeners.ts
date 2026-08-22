@@ -79,6 +79,7 @@ import {
   buildAncillariesData,
   categoryIconPath,
   createAncillariesLocLookup,
+  resolveAncillaryText,
 } from "./ancillariesData/data";
 import { validateNewRows as validateAncillariesNewRows } from "./ancillariesData/validate";
 import {
@@ -4763,8 +4764,8 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
     return {
       ...summary,
       iconUrl: ancillaryIconUrl(built, summary.iconPath),
-      explanation: getLoc(`ancillaries_explanation_text_${key}`),
-      colourText: getLoc(`ancillaries_colour_text_${key}`),
+      explanation: resolveAncillaryText(getLoc, `ancillaries_explanation_text_${key}`),
+      colourText: resolveAncillaryText(getLoc, `ancillaries_colour_text_${key}`),
       categoryName: category?.localizedName || summary.category,
       subcategoryName: subcategory?.localizedName,
       effects: markPendingEffects(data.effectsByAncillary[key] ?? [], pendingEdits).map((effect) => ({
