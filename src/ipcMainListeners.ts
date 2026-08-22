@@ -117,6 +117,7 @@ import type {
 } from "./ancillariesData/types";
 import { clearEsfMapMemoryCache, loadEsfMapDiskCache, saveEsfMapDiskCache } from "./esfMap/cache";
 import { getVanillaStartposFilePaths, loadEsfMapData, loadStartposRegionSlotTemplates } from "./esfMap/loader";
+import { addClimateDataToEsfMap } from "./esfMap/climates";
 import { addFactionDataToEsfMap, factionFlagPath } from "./esfMap/factions";
 import { addSettlementTypeDataToEsfMap } from "./esfMap/settlementTypes";
 import type { EsfMapResponse } from "./esfMap/types";
@@ -3467,7 +3468,7 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
     return createHash("sha256")
       .update(
         JSON.stringify({
-          feature: 3,
+          feature: 4,
           game: appData.currentGame,
           dataFolder: dataFolder ?? null,
           currentLanguage: appData.currentLanguage ?? null,
@@ -3498,7 +3499,8 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
           const registeredPath = registeredIconPath(flagPath);
           return registeredPath ? iconAssetUrl(buildings.iconGeneration, registeredPath) : undefined;
         });
-        return addSettlementTypeDataToEsfMap(withFactions, buildings.data);
+        const withClimates = addClimateDataToEsfMap(withFactions, buildings.data);
+        return addSettlementTypeDataToEsfMap(withClimates, buildings.data);
       };
       if (cachedEsfMapData?.signature === signature) {
         return { success: true, map: decorate(cachedEsfMapData.data) };
@@ -3640,6 +3642,7 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
     "cultures_subcultures_name_",
     "factions_screen_name_",
     "settlement_types_name_",
+    "settlement_climate_types_ui_name_",
     "effects_description_",
     "ui_text_replacements_localised_text_",
   ];
@@ -3762,6 +3765,10 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
       const key = (row.key ?? "").trim();
       if (key) recordWithReplacements(`settlement_types_name_${key}`);
     }
+    for (const row of tables.settlement_climate_types_tables ?? []) {
+      const key = (row.type ?? "").trim();
+      if (key) recordWithReplacements(`settlement_climate_types_ui_name_${key}`);
+    }
     for (const row of tables.effects_tables ?? []) {
       const key = (row.effect ?? "").trim();
       if (key) recordWithReplacements(`effects_description_${key}`);
@@ -3803,7 +3810,7 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
       }),
     );
     const signatureInputs: BuildingsVanillaSignatureInputs = {
-      feature: 1,
+      feature: 2,
       game: appData.currentGame,
       schema: getVisualsSchemaHash(appData.currentGame),
       identities,
@@ -3910,7 +3917,7 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
     const signature = createHash("sha256")
       .update(
         JSON.stringify({
-          feature: 1,
+          feature: 2,
           game: appData.currentGame,
           vanilla: vanilla.signature,
           mods: orderedEnabledMods.map((mod) => ({

@@ -64,6 +64,8 @@ export const BUILDINGS_TABLES = [
   "start_pos_regions_tables",
   "start_pos_settlements_tables",
   "start_pos_region_foreign_slots_tables",
+  "campaign_map_settlements_tables",
+  "settlement_climate_types_tables",
   "building_chain_availability_set_ids_tables",
   "building_chain_availability_sets_tables",
   "building_chain_availabilities_tables",
@@ -121,6 +123,8 @@ export const BUILDINGS_TABLE_KEY_COLUMNS: Record<string, string[]> = {
   start_pos_regions_tables: ["region", "campaign"],
   start_pos_settlements_tables: ["settlement_id", "region"],
   start_pos_region_foreign_slots_tables: ["campaign", "faction", "region", "slot_set"],
+  campaign_map_settlements_tables: ["settlement_id"],
+  settlement_climate_types_tables: ["type"],
   building_chain_availability_set_ids_tables: ["id"],
   building_chain_availability_sets_tables: ["building_chain", "id"],
   building_chain_availabilities_tables: ["id"],
@@ -568,6 +572,28 @@ export const buildBuildingsData = (tables: BuildingsTableRows, getLoc: Buildings
     (settlementTypeBindings[chain] ||= []).push({ chain, settlementType, exclude: bool(row, "exclude") });
   }
 
+  // --- settlement climates --------------------------------------------------
+  // The map table identifies a settlement, while start_pos_settlements joins that settlement to a
+  // campaign region. Keep the table's effective rows here; the map decorator performs that second
+  // join because the extracted ESF marker has the region and settlement-level key, not the DB row id.
+  const campaignMapSettlementClimates: Record<string, string> = {};
+  for (const row of rowsOf("campaign_map_settlements_tables")) {
+    const settlementId = str(row, "settlement_id");
+    const climateType = str(row, "climate_type");
+    if (settlementId && climateType) campaignMapSettlementClimates[settlementId] = climateType;
+  }
+  const climateNames = new Map<string, string>();
+  for (const row of rowsOf("settlement_climate_types_tables")) {
+    const key = str(row, "type");
+    if (!key) continue;
+    climateNames.set(key, localize(getLoc, `settlement_climate_types_ui_name_${key}`) || key);
+  }
+  const climates: BuildingsOption[] = [...new Set(Object.values(campaignMapSettlementClimates))]
+    .map((key) => ({ key, localizedName: climateNames.get(key) || key }))
+    .sort(
+      (first, second) => first.localizedName.localeCompare(second.localizedName) || first.key.localeCompare(second.key),
+    );
+
   // --- upgrades --------------------------------------------------------------
   // `building_upgrades_junction_tables`, not `building_downgrade_junctions_tables`. The latter is
   // entirely self-referential in vanilla - every one of its ~1500 rows maps a level to itself - so
@@ -857,6 +883,7 @@ export const buildBuildingsData = (tables: BuildingsTableRows, getLoc: Buildings
     foreignRegionSlotTemplates,
     foreignSlotTemplatesByType,
     startPosSettlements,
+    campaignMapSettlementClimates,
     availabilitySetsByChain,
     availabilitiesBySetId,
     settlementTypeBindings,
@@ -872,6 +899,7 @@ export const buildBuildingsData = (tables: BuildingsTableRows, getLoc: Buildings
     subcultures,
     factions,
     settlementTypes,
+    climates,
     units,
     unitGroups,
     effects,

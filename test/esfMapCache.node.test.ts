@@ -29,6 +29,8 @@ describe("ESF map disk cache", () => {
       availableCampaigns: [{ key: "wh3_main_combi", label: "Main Combi" }],
       settlementTypes: [],
       settlementTypesByRegion: {},
+      climates: [],
+      climatesByRegion: {},
       mapDataPath: "campaign_maps\\wh3_main_combi_map_1\\map_data.esf",
       startposPath: "campaigns\\wh3_main_combi\\startpos.esf",
       lookupPath: "campaign_maps\\wh3_main_combi_map_1\\wh3_main_combi_lookup.tga",

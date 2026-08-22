@@ -430,6 +430,8 @@ export function buildEsfMapData(
     lookupPath: paths.lookupPath,
     settlementTypes: [],
     settlementTypesByRegion: {},
+    climates: [],
+    climatesByRegion: {},
     backgroundImage: null,
     backgroundTextImage: null,
     startposWasCompressed: ownershipData.wasCompressed,

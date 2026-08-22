@@ -12,7 +12,7 @@ type EsfMapTabProps = {
 const MAP_AREA_OPACITY = 0.36;
 const FACTION_FLAG_SIZE = 20;
 
-type MapView = "regions" | "factions";
+type MapView = "regions" | "factions" | "climate";
 
 const displayYFromVertex = (height: number, y: number, displayFlipY: boolean) => (displayFlipY ? height - y : y);
 const displayYFromCell = (height: number, y: number, displayFlipY: boolean) => (displayFlipY ? height - 1 - y : y);
@@ -99,6 +99,8 @@ const EsfMapTab = memo(({ isActive = true }: EsfMapTabProps) => {
   const [selectedMarkerId, setSelectedMarkerId] = useState<number>();
   const [selectedSettlementType, setSelectedSettlementType] = useState("");
   const [mapView, setMapView] = useState<MapView>("regions");
+  /** undefined follows region selection, null explicitly shows every climate, and a string filters to one climate. */
+  const [climateSelectionKey, setClimateSelectionKey] = useState<string | null>();
   const [filter, setFilter] = useState("");
   const [zoom, setZoom] = useState(1);
   const [isDraggingMap, setIsDraggingMap] = useState(false);
@@ -126,6 +128,7 @@ const EsfMapTab = memo(({ isActive = true }: EsfMapTabProps) => {
         setMap(response.map);
         setCampaignOptions(response.map.availableCampaigns);
         setSelectedSettlementType("");
+        setClimateSelectionKey(undefined);
         if (response.map.campaignKey !== mapCampaignName) dispatch(setMapCampaignName(response.map.campaignKey));
       })
       .catch((reason) => {
@@ -158,6 +161,13 @@ const EsfMapTab = memo(({ isActive = true }: EsfMapTabProps) => {
     [map, selectedMarkerId],
   );
   const selectedMarkerFactionKey = factionKey(selectedMarker?.ownerFaction);
+  const selectedMarkerClimateKey = selectedMarker
+    ? map?.climatesByRegion[selectedMarker.key]?.toLowerCase()
+    : undefined;
+  const selectedClimateForSidebar =
+    climateSelectionKey === undefined ? selectedMarkerClimateKey : climateSelectionKey?.toLowerCase();
+  const isAllClimateSelected =
+    climateSelectionKey === null || (climateSelectionKey === undefined && !selectedMarkerClimateKey);
 
   const factionsByKey = useMemo(
     () => new Map((map?.factions ?? []).map((faction) => [faction.key.toLowerCase(), faction])),
@@ -170,6 +180,20 @@ const EsfMapTab = memo(({ isActive = true }: EsfMapTabProps) => {
     if (!query) return map.factions;
     return map.factions.filter((faction) =>
       [faction.key, faction.label].some((value) => value.toLowerCase().includes(query)),
+    );
+  }, [filter, map]);
+
+  const climateByKey = useMemo(
+    () => new Map((map?.climates ?? []).map((climate) => [climate.key.toLowerCase(), climate] as const)),
+    [map],
+  );
+
+  const filteredClimates = useMemo(() => {
+    if (!map) return [];
+    const query = filter.trim().toLowerCase();
+    if (!query) return map.climates;
+    return map.climates.filter((climate) =>
+      [climate.key, climate.label].some((value) => value.toLowerCase().includes(query)),
     );
   }, [filter, map]);
 
@@ -229,6 +253,7 @@ const EsfMapTab = memo(({ isActive = true }: EsfMapTabProps) => {
         ? undefined
         : map.markers.find((marker) => marker.key.toLowerCase() === selectedRegion)?.id,
     );
+    setClimateSelectionKey(undefined);
   }, [map, mapSelectedRegion]);
 
   useEffect(() => {
@@ -237,7 +262,7 @@ const EsfMapTab = memo(({ isActive = true }: EsfMapTabProps) => {
         ? selectedMarkerId === undefined
           ? undefined
           : `region:${selectedMarkerId}`
-        : selectedMarkerFactionKey
+        : mapView === "factions" && selectedMarkerFactionKey
           ? `faction:${selectedMarkerFactionKey}`
           : undefined;
     if (!itemKey) return;
@@ -260,6 +285,11 @@ const EsfMapTab = memo(({ isActive = true }: EsfMapTabProps) => {
     const selected =
       selectedMarkerId === undefined ? undefined : map.markers.find((marker) => marker.id === selectedMarkerId);
     const selectedFactionKey = factionKey(selected?.ownerFaction);
+    const selectedRegionClimateKey = selected ? map.climatesByRegion[selected.key]?.toLowerCase() : undefined;
+    const climateFilterKey =
+      climateSelectionKey === null
+        ? undefined
+        : (climateSelectionKey?.toLowerCase() ?? (selected ? (selectedRegionClimateKey ?? null) : undefined));
 
     const drawMap = (
       backgroundImage: HTMLImageElement | undefined,
@@ -283,6 +313,24 @@ const EsfMapTab = memo(({ isActive = true }: EsfMapTabProps) => {
         }
       }
 
+      if (mapView === "climate") {
+        for (const area of map.areas) {
+          if (!regionMatchesSettlementType(area.regionKey)) continue;
+          const climateKey = area.regionKey ? map.climatesByRegion[area.regionKey]?.toLowerCase() : undefined;
+          if (
+            !climateKey ||
+            climateFilterKey === null ||
+            (climateFilterKey !== undefined && climateKey !== climateFilterKey)
+          )
+            continue;
+          const climate = climateByKey.get(climateKey);
+          if (!climate) continue;
+          drawAreaPath(context, area, map.height, map.displayFlipY);
+          context.fillStyle = `rgba(${climate.colour[0]}, ${climate.colour[1]}, ${climate.colour[2]}, ${MAP_AREA_OPACITY})`;
+          context.fill("evenodd");
+        }
+      }
+
       if (mapView === "factions" && selectedFactionKey) {
         for (const area of map.areas) {
           if (!regionMatchesSettlementType(area.regionKey) || factionKey(area.ownerFaction) !== selectedFactionKey)
@@ -294,7 +342,11 @@ const EsfMapTab = memo(({ isActive = true }: EsfMapTabProps) => {
           context.fill("evenodd");
           context.stroke();
         }
-      } else if (mapView === "regions" && selected && regionMatchesSettlementType(selected.key)) {
+      } else if (
+        (mapView === "regions" || mapView === "climate") &&
+        selected &&
+        regionMatchesSettlementType(selected.key)
+      ) {
         const selectedAreaIds = new Set(
           map.areas.filter((area) => area.regionKey === selected.key).map((area) => area.componentId),
         );
@@ -388,7 +440,7 @@ const EsfMapTab = memo(({ isActive = true }: EsfMapTabProps) => {
     return () => {
       cancelled = true;
     };
-  }, [factionsByKey, map, mapView, selectedMarkerId, selectedSettlementType, zoom]);
+  }, [climateByKey, climateSelectionKey, factionsByKey, map, mapView, selectedMarkerId, selectedSettlementType, zoom]);
 
   useEffect(() => {
     const anchor = mapZoomAnchorRef.current;
@@ -449,6 +501,7 @@ const EsfMapTab = memo(({ isActive = true }: EsfMapTabProps) => {
   }, [map, zoomAtPointer]);
 
   const selectMapMarker = (marker: EsfMapMarker | undefined, center = false) => {
+    setClimateSelectionKey(undefined);
     setSelectedMarkerId(marker?.id);
     if (marker && map) {
       dispatch(selectMapRegion({ campaign: map.campaignKey, region: marker.key }));
@@ -564,7 +617,7 @@ const EsfMapTab = memo(({ isActive = true }: EsfMapTabProps) => {
           role="tablist"
           aria-label={mapText("mapView", "Map view")}
         >
-          {(["regions", "factions"] as const).map((view) => (
+          {(["regions", "factions", "climate"] as const).map((view) => (
             <button
               key={view}
               type="button"
@@ -575,7 +628,11 @@ const EsfMapTab = memo(({ isActive = true }: EsfMapTabProps) => {
                 mapView === view ? "bg-blue-800 text-gray-100" : "text-gray-400 hover:bg-gray-800 hover:text-gray-200"
               }`}
             >
-              {view === "regions" ? mapText("mapRegions", "Regions") : mapText("mapFactions", "Factions")}
+              {view === "regions"
+                ? mapText("mapRegions", "Regions")
+                : view === "factions"
+                  ? mapText("mapFactions", "Factions")
+                  : mapText("mapClimate", "Climate")}
             </button>
           ))}
         </div>
@@ -678,9 +735,13 @@ const EsfMapTab = memo(({ isActive = true }: EsfMapTabProps) => {
                 ? mapMessage("mapFactionSummary", "{{count}} factions · flags at settlements", {
                     count: map.factions.length,
                   })
-                : map.startposWasCompressed
-                  ? mapText("mapCompressedStartpos", "Compressed startpos decoded")
-                  : mapText("mapStartposLoaded", "Startpos loaded")}
+                : mapView === "climate"
+                  ? mapMessage("mapClimateSummary", "{{count}} climates · colours at settlements", {
+                      count: map.climates.length,
+                    })
+                  : map.startposWasCompressed
+                    ? mapText("mapCompressedStartpos", "Compressed startpos decoded")
+                    : mapText("mapStartposLoaded", "Startpos loaded")}
               <div className="mt-1 truncate text-[0.75rem] text-gray-400" title={map.startposPath}>
                 {map.startposPath}
               </div>
@@ -695,6 +756,13 @@ const EsfMapTab = memo(({ isActive = true }: EsfMapTabProps) => {
                 {selectedMarker.settlementKey && (
                   <div className="text-[0.8125rem] text-gray-400">{selectedMarker.settlementKey}</div>
                 )}
+                {map.climatesByRegion[selectedMarker.key] && (
+                  <div className="text-[0.8125rem] text-gray-400">
+                    {mapText("mapClimate", "Climate")}:{" "}
+                    {climateByKey.get(map.climatesByRegion[selectedMarker.key]!.toLowerCase())?.label ??
+                      map.climatesByRegion[selectedMarker.key]}
+                  </div>
+                )}
               </div>
             )}
             <div className="border-b border-gray-800 p-2">
@@ -704,76 +772,157 @@ const EsfMapTab = memo(({ isActive = true }: EsfMapTabProps) => {
                 placeholder={
                   mapView === "factions"
                     ? mapText("mapFilterFactions", "Filter factions…")
-                    : mapText("mapFilterRegions", "Filter regions…")
+                    : mapView === "climate"
+                      ? mapText("mapFilterClimates", "Filter climates…")
+                      : mapText("mapFilterRegions", "Filter regions…")
                 }
                 className="w-full rounded border border-gray-700 bg-gray-950 px-2 py-1.5 text-sm text-gray-200 outline-none focus:border-blue-500"
               />
             </div>
             <div className="min-h-0 flex-1 overflow-auto p-2">
-              {mapView === "regions"
-                ? filteredMarkers.map((marker) => (
-                    <button
-                      key={`${marker.id}-${marker.key}`}
-                      type="button"
-                      ref={(element) => {
-                        const key = `region:${marker.id}`;
-                        if (element) mapListItemRefs.current.set(key, element);
-                        else mapListItemRefs.current.delete(key);
+              {mapView === "regions" ? (
+                filteredMarkers.map((marker) => (
+                  <button
+                    key={`${marker.id}-${marker.key}`}
+                    type="button"
+                    ref={(element) => {
+                      const key = `region:${marker.id}`;
+                      if (element) mapListItemRefs.current.set(key, element);
+                      else mapListItemRefs.current.delete(key);
+                    }}
+                    onClick={() => selectMapMarker(marker, true)}
+                    className={`mb-1 block w-full rounded border px-2 py-1.5 text-left text-sm ${
+                      selectedMarkerId === marker.id
+                        ? "border-blue-500 bg-blue-950/60 text-gray-100"
+                        : "border-transparent bg-gray-950/60 text-gray-300 hover:border-gray-600"
+                    }`}
+                  >
+                    <span className="block truncate">{marker.key}</span>
+                    <span className="block truncate text-[0.8125rem] text-gray-400">
+                      {marker.ownerFaction ?? mapText("mapUnowned", "Unowned")}
+                    </span>
+                  </button>
+                ))
+              ) : mapView === "climate" ? (
+                <>
+                  <button
+                    type="button"
+                    aria-pressed={isAllClimateSelected}
+                    ref={(element) => {
+                      const key = "climate:all";
+                      if (element) mapListItemRefs.current.set(key, element);
+                      else mapListItemRefs.current.delete(key);
+                    }}
+                    onClick={() => setClimateSelectionKey(null)}
+                    className={`mb-1 flex w-full items-center gap-2 rounded border px-2 py-1.5 text-left text-sm ${
+                      isAllClimateSelected
+                        ? "border-blue-500 bg-blue-950/60 text-gray-100"
+                        : "border-transparent bg-gray-950/60 text-gray-300 hover:border-gray-600"
+                    }`}
+                  >
+                    <span
+                      className="h-3 w-3 shrink-0 rounded-sm border border-white/40"
+                      style={{
+                        background: "conic-gradient(#ef4444, #eab308, #22c55e, #06b6d4, #3b82f6, #a855f7, #ef4444)",
                       }}
-                      onClick={() => selectMapMarker(marker, true)}
-                      className={`mb-1 block w-full rounded border px-2 py-1.5 text-left text-sm ${
-                        selectedMarkerId === marker.id
-                          ? "border-blue-500 bg-blue-950/60 text-gray-100"
-                          : "border-transparent bg-gray-950/60 text-gray-300 hover:border-gray-600"
-                      }`}
-                    >
-                      <span className="block truncate">{marker.key}</span>
+                    />
+                    <span className="min-w-0">
+                      <span className="block truncate">{mapText("mapAllClimates", "All climates")}</span>
                       <span className="block truncate text-[0.8125rem] text-gray-400">
-                        {marker.ownerFaction ?? mapText("mapUnowned", "Unowned")}
+                        {mapMessage("mapAllClimateSummary", "{{count}} climates", {
+                          count: map.climates.length,
+                        })}
                       </span>
-                    </button>
-                  ))
-                : filteredFactions.map((faction) => {
-                    const isSelected = factionKey(selectedMarker?.ownerFaction) === faction.key.toLowerCase();
+                    </span>
+                  </button>
+                  {filteredClimates.map((climate) => {
+                    const isSelected = !isAllClimateSelected && selectedClimateForSidebar === climate.key.toLowerCase();
                     return (
                       <button
-                        key={faction.key}
+                        key={climate.key}
                         type="button"
+                        aria-pressed={isSelected}
                         ref={(element) => {
-                          const key = `faction:${faction.key.toLowerCase()}`;
+                          const key = `climate:${climate.key.toLowerCase()}`;
                           if (element) mapListItemRefs.current.set(key, element);
                           else mapListItemRefs.current.delete(key);
                         }}
-                        onClick={() => selectMapFaction(faction.key.toLowerCase())}
+                        onClick={() => setClimateSelectionKey(climate.key)}
                         className={`mb-1 flex w-full items-center gap-2 rounded border px-2 py-1.5 text-left text-sm ${
                           isSelected
                             ? "border-blue-500 bg-blue-950/60 text-gray-100"
                             : "border-transparent bg-gray-950/60 text-gray-300 hover:border-gray-600"
                         }`}
                       >
-                        {faction.flagUrl ? (
-                          <img src={faction.flagUrl} alt="" className="h-6 w-6 shrink-0 object-contain" />
-                        ) : (
-                          <span className="h-2 w-2 shrink-0 rounded-full bg-gray-500" />
-                        )}
+                        <span
+                          className="h-3 w-3 shrink-0 rounded-sm border border-white/40"
+                          style={{
+                            backgroundColor: `rgb(${climate.colour[0]}, ${climate.colour[1]}, ${climate.colour[2]})`,
+                          }}
+                        />
                         <span className="min-w-0">
-                          <span className="block truncate">{faction.label}</span>
+                          <span className="block truncate">{climate.label}</span>
                           <span className="block truncate text-[0.8125rem] text-gray-400">
                             {mapMessage(
-                              faction.regionCount === 1 ? "mapFactionRegionOne" : "mapFactionRegionOther",
-                              faction.regionCount === 1 ? "{{count}} region · {{key}}" : "{{count}} regions · {{key}}",
-                              { count: faction.regionCount, key: faction.key },
+                              climate.regionCount === 1 ? "mapClimateRegionOne" : "mapClimateRegionOther",
+                              climate.regionCount === 1 ? "{{count}} region · {{key}}" : "{{count}} regions · {{key}}",
+                              { count: climate.regionCount, key: climate.key },
                             )}
                           </span>
                         </span>
                       </button>
                     );
                   })}
-              {(mapView === "regions" ? filteredMarkers.length : filteredFactions.length) === 0 && (
+                </>
+              ) : (
+                filteredFactions.map((faction) => {
+                  const isSelected = factionKey(selectedMarker?.ownerFaction) === faction.key.toLowerCase();
+                  return (
+                    <button
+                      key={faction.key}
+                      type="button"
+                      ref={(element) => {
+                        const key = `faction:${faction.key.toLowerCase()}`;
+                        if (element) mapListItemRefs.current.set(key, element);
+                        else mapListItemRefs.current.delete(key);
+                      }}
+                      onClick={() => selectMapFaction(faction.key.toLowerCase())}
+                      className={`mb-1 flex w-full items-center gap-2 rounded border px-2 py-1.5 text-left text-sm ${
+                        isSelected
+                          ? "border-blue-500 bg-blue-950/60 text-gray-100"
+                          : "border-transparent bg-gray-950/60 text-gray-300 hover:border-gray-600"
+                      }`}
+                    >
+                      {faction.flagUrl ? (
+                        <img src={faction.flagUrl} alt="" className="h-6 w-6 shrink-0 object-contain" />
+                      ) : (
+                        <span className="h-2 w-2 shrink-0 rounded-full bg-gray-500" />
+                      )}
+                      <span className="min-w-0">
+                        <span className="block truncate">{faction.label}</span>
+                        <span className="block truncate text-[0.8125rem] text-gray-400">
+                          {mapMessage(
+                            faction.regionCount === 1 ? "mapFactionRegionOne" : "mapFactionRegionOther",
+                            faction.regionCount === 1 ? "{{count}} region · {{key}}" : "{{count}} regions · {{key}}",
+                            { count: faction.regionCount, key: faction.key },
+                          )}
+                        </span>
+                      </span>
+                    </button>
+                  );
+                })
+              )}
+              {(mapView === "regions"
+                ? filteredMarkers.length
+                : mapView === "climate"
+                  ? filteredClimates.length
+                  : filteredFactions.length) === 0 && (
                 <div className="px-2 py-3 text-sm text-gray-400">
                   {mapView === "factions"
                     ? mapText("mapNoMatchingFactions", "No matching factions.")
-                    : mapText("mapNoMatchingRegions", "No matching regions.")}
+                    : mapView === "climate"
+                      ? mapText("mapNoMatchingClimates", "No matching climates.")
+                      : mapText("mapNoMatchingRegions", "No matching regions.")}
                 </div>
               )}
             </div>

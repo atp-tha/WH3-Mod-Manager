@@ -240,6 +240,8 @@ export interface BuiltBuildingsData {
   foreignSlotTemplatesByType: Record<string, ForeignSlotTemplate[]>;
   /** Keyed `campaign|region`. */
   startPosSettlements: Record<string, StartPosSettlement[]>;
+  /** Effective `campaign_map_settlements_tables` rows, keyed by settlement id. */
+  campaignMapSettlementClimates: Record<string, string>;
   availabilitySetsByChain: Record<string, string[]>;
   availabilitiesBySetId: Record<string, AvailabilityRow[]>;
   settlementTypeBindings: Record<string, SettlementTypeBinding[]>;
@@ -258,6 +260,8 @@ export interface BuiltBuildingsData {
   subcultures: Array<BuildingsOption & { culture: string }>;
   factions: BuildingsFactionOption[];
   settlementTypes: BuildingsOption[];
+  /** Settlement climates referenced by the campaign map settlement table. */
+  climates: BuildingsOption[];
   /** Every `main_units` key, named through its land unit. The recruitment picker's options. */
   units: BuildingsOption[];
   /** Every `armed_citizenry_unit_groups` key. The garrison picker's options. */

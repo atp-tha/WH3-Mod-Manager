@@ -42,6 +42,13 @@ export interface EsfMapSettlementTypeOption {
   label: string;
 }
 
+export interface EsfMapClimateOption {
+  key: string;
+  label: string;
+  colour: EsfMapColour;
+  regionCount: number;
+}
+
 export type EsfMapGridSource = "lookup" | "region-areas";
 
 export interface EsfMapImage {
@@ -55,6 +62,8 @@ export interface EsfMapPayload {
   availableCampaigns: EsfMapCampaignOption[];
   settlementTypes: EsfMapSettlementTypeOption[];
   settlementTypesByRegion: Record<string, string[]>;
+  climates: EsfMapClimateOption[];
+  climatesByRegion: Record<string, string | null>;
   mapDataPath: string;
   startposPath: string;
   lookupPath: string | null;
