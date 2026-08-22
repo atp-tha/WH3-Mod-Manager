@@ -2,7 +2,7 @@ import React, { memo, useCallback, useContext, useEffect, useLayoutEffect, useMe
 import { useStore } from "react-redux";
 import { useAppDispatch, useAppSelector } from "../../hooks";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { faChevronDown, faFile, faXmark } from "@fortawesome/free-solid-svg-icons";
+import { faChevronDown, faFile, faMagnifyingGlass, faXmark } from "@fortawesome/free-solid-svg-icons";
 import PackTablesTreeView, {
   CopyIntoSource,
   PackTablesTreeViewHandle,
@@ -40,6 +40,8 @@ import {
 import { clearPackDataStoreForPack } from "./packDataStore";
 import { clearPreparedTableForPack } from "./tablePrepCache";
 import { getDefaultSaveAsPackName, getPackFileInventory, getPreferredTreeTab, hasLoadedDBTable } from "./viewerHelpers";
+import GlobalSearchPanel from "./GlobalSearchPanel";
+import type { GlobalSearchDbResult, GlobalSearchResult } from "@/src/globalSearch/types";
 
 type ViewerTabKind = "db" | "flow" | "file";
 
@@ -250,6 +252,14 @@ const ModsViewer = memo(() => {
   const fileMenuRef = useRef<HTMLDivElement>(null);
   const fileMenuButtonRef = useRef<HTMLButtonElement>(null);
   const [isSidebarNarrow, setIsSidebarNarrow] = useState(false);
+  const [isGlobalSearchOpen, setIsGlobalSearchOpen] = useState(false);
+  /**
+   * A result whose pack the viewer has not loaded yet, held until it arrives.
+   *
+   * Opening a tab is not enough for such a pack: the content pane shows "Loading pack…" until
+   * packsData carries it, and only requestOpenModInViewer makes main read and push it.
+   */
+  const pendingSearchNavigationRef = useRef<{ packPath: string; apply: () => void } | null>(null);
   const saveAsPackNameInputRef = useRef<HTMLInputElement>(null);
   const newPackNameInputRef = useRef<HTMLInputElement>(null);
   const copyTableNameInputRef = useRef<HTMLInputElement>(null);
@@ -523,6 +533,75 @@ const ModsViewer = memo(() => {
       openOrActivateTab(buildPackedFileTabCandidate(selection.filePath, selection.packPath), options);
     },
     [buildPackedFileTabCandidate, openOrActivateTab],
+  );
+
+  const isPackLoaded = useCallback(
+    (packPath: string) =>
+      Object.keys(packsDataByPath).some((loadedPath) => copyPackPathKey(loadedPath) === copyPackPathKey(packPath)),
+    [packsDataByPath],
+  );
+
+  /** Applies a selection now when its pack is loaded, or asks main for the pack and applies it then. */
+  const navigateToPack = useCallback(
+    (packPath: string, apply: () => void) => {
+      if (isPackLoaded(packPath)) {
+        apply();
+        return;
+      }
+      pendingSearchNavigationRef.current = { packPath, apply };
+      window.api?.requestOpenModInViewer(packPath);
+    },
+    [isPackLoaded],
+  );
+
+  useEffect(() => {
+    const pending = pendingSearchNavigationRef.current;
+    if (!pending || !isPackLoaded(pending.packPath)) return;
+    pendingSearchNavigationRef.current = null;
+    pending.apply();
+  }, [isPackLoaded, packsDataByPath]);
+
+  const handleOpenGlobalSearchDbResult = useCallback(
+    (result: GlobalSearchDbResult) => {
+      navigateToPack(result.packPath, () =>
+        handleOpenDBTable({
+          packPath: result.packPath,
+          dbName: result.dbName,
+          dbSubname: result.dbSubname,
+          dbFolder: result.dbFolder,
+        }),
+      );
+    },
+    [handleOpenDBTable, navigateToPack],
+  );
+
+  const handleOpenGlobalSearchFileResult = useCallback(
+    (result: Exclude<GlobalSearchResult, GlobalSearchDbResult>) => {
+      navigateToPack(result.packPath, () =>
+        handleOpenPackedFile({ packPath: result.packPath, filePath: result.filePath }),
+      );
+    },
+    [handleOpenPackedFile, navigateToPack],
+  );
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      // Ctrl/Cmd+Shift+F, the search-across-files chord every editor uses.
+      if (!(event.ctrlKey || event.metaKey) || !event.shiftKey || event.key.toLowerCase() !== "f") return;
+      event.preventDefault();
+      setIsGlobalSearchOpen(true);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
+  const globalSearchOpenPacks = useMemo(
+    () =>
+      packTabs.map((packTab) => ({
+        packPath: packTab.packPath,
+        label: packsDataByPath[packTab.packPath]?.packName ?? getPackNameFromPath(packTab.packPath) ?? packTab.packPath,
+      })),
+    [packTabs, packsDataByPath],
   );
 
   const getTargetPackFileNames = useCallback(
@@ -1732,6 +1811,22 @@ const ModsViewer = memo(() => {
                 })}
               </div>
 
+              <div className="flex shrink-0 items-center ml-2">
+                <button
+                  type="button"
+                  onClick={() => setIsGlobalSearchOpen((isPanelOpen) => !isPanelOpen)}
+                  title={`${localized.globalSearch || "Global search"} (Ctrl+Shift+F)`}
+                  aria-label={localized.globalSearch || "Global search"}
+                  aria-pressed={isGlobalSearchOpen}
+                  className={
+                    "px-3 py-2 rounded-lg text-white font-medium shadow-lg transition-colors duration-200 flex items-center gap-2 " +
+                    (isGlobalSearchOpen ? "bg-blue-700 hover:bg-blue-600" : "bg-gray-700 hover:bg-gray-600")
+                  }
+                >
+                  <FontAwesomeIcon icon={faMagnifyingGlass} className="w-4 h-4" />
+                </button>
+              </div>
+
               {(hasUnsavedFiles || canSavePackAs) && (
                 <div className="flex gap-2 shrink-0 ml-2">
                   {hasUnsavedFiles && !activeViewerPackPath.startsWith("memory://") && (
@@ -1770,7 +1865,7 @@ const ModsViewer = memo(() => {
               )}
             </div>
 
-            <div className="flex flex-1 w-full h-full overflow-hidden">
+            <div className="flex flex-1 min-h-0 w-full h-full overflow-hidden">
               <Resizable
                 ref={sidebarResizableRef}
                 defaultSize={{
@@ -1910,6 +2005,23 @@ const ModsViewer = memo(() => {
                 </div>
               </div>
             </div>
+
+            {isGlobalSearchOpen && (
+              <Resizable
+                defaultSize={{ width: "100%", height: 280 }}
+                minHeight={140}
+                maxHeight="70%"
+                enable={{ top: true }}
+                className="shrink-0"
+              >
+                <GlobalSearchPanel
+                  openPacks={globalSearchOpenPacks}
+                  onOpenDbResult={handleOpenGlobalSearchDbResult}
+                  onOpenFileResult={handleOpenGlobalSearchFileResult}
+                  onClose={() => setIsGlobalSearchOpen(false)}
+                />
+              </Resizable>
+            )}
 
             {/* <div className="grid grid-cols-10 dark:text-gray-300">
             <div className="col-span-2 overflow-scroll h-[90vh]">

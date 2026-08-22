@@ -1588,5 +1588,22 @@
   "ancillariesSectionKey": "Key",
   "ancillariesAncillaryKey": "Ancillary key",
   "ancillariesKeyRequired": "Give the ancillary a key.",
-  "ancillariesKeyTaken": "That ancillary key already exists."
+  "ancillariesKeyTaken": "That ancillary key already exists.",
+  "globalSearch": "Global search",
+  "globalSearchQueryLabel": "Global search",
+  "globalSearchPlaceholder": "Search packs…",
+  "globalSearchCaseSensitive": "Case sensitive",
+  "globalSearchRegex": "Regex",
+  "globalSearchStop": "Stop",
+  "globalSearchClose": "Close global search",
+  "globalSearchInvalidRegex": "Not a valid regular expression yet.",
+  "globalSearchIn": "Search in",
+  "globalSearchSources": "Sources",
+  "globalSearchVanillaPacks": "Vanilla packs",
+  "globalSearchEnabledMods": "Enabled mods",
+  "globalSearchAllMods": "All mods",
+  "globalSearchOpenPacks": "Open packs",
+  "globalSearchIdle": "Pick what to search and where, then press Search.",
+  "globalSearchRunning": "Searching…",
+  "globalSearchNoMatches": "No matches."
 }

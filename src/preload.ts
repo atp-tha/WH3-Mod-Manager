@@ -18,6 +18,12 @@ import type {
 import type { BuildingsEditState } from "./buildingsData/edits";
 import type { AncillariesCatalogResponse, AncillariesDetailResponse } from "./ancillariesData/types";
 import type { AncillariesEditState } from "./ancillariesData/edits";
+import type {
+  GlobalSearchProgress,
+  GlobalSearchRequest,
+  GlobalSearchResponse,
+  GlobalSearchResultBatch,
+} from "./globalSearch/types";
 import type { EsfMapResponse } from "./esfMap/types";
 import type { PackRowsForSave } from "./utility/packRowsForSave";
 
@@ -283,6 +289,23 @@ const api = {
   searchInsidePacks: (searchTerm: string, mods: Mod[]) => ipcRenderer.send("searchInsidePacks", searchTerm, mods),
   setPackSearchResults: (callback: (event: Electron.IpcRendererEvent, packNames: string[]) => void) =>
     ipcRenderer.on("setPackSearchResults", callback),
+  runGlobalSearch: (request: GlobalSearchRequest): Promise<GlobalSearchResponse> =>
+    ipcRenderer.invoke("runGlobalSearch", request),
+  cancelGlobalSearch: () => ipcRenderer.send("cancelGlobalSearch"),
+  // The unsubscribe-returning shape, like onVanillaDbCacheBuildProgress: the panel mounts and
+  // unmounts with the viewer's bottom dock, so a plain `on` would stack listeners.
+  onGlobalSearchProgress: (callback: (event: Electron.IpcRendererEvent, progress: GlobalSearchProgress) => void) => {
+    ipcRenderer.on("setGlobalSearchProgress", callback);
+    return () => {
+      ipcRenderer.removeListener("setGlobalSearchProgress", callback);
+    };
+  },
+  onGlobalSearchResults: (callback: (event: Electron.IpcRendererEvent, batch: GlobalSearchResultBatch) => void) => {
+    ipcRenderer.on("setGlobalSearchResults", callback);
+    return () => {
+      ipcRenderer.removeListener("setGlobalSearchResults", callback);
+    };
+  },
   terminateGame: () => ipcRenderer.send("terminateGame"),
 
   setSchemaData: (
