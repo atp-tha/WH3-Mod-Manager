@@ -482,6 +482,28 @@ describe("categories view in the dual layout", () => {
     expect(getHeading(left, "Units")).toHaveAttribute("aria-expanded", "false");
   });
 
+  it("keeps category expansion state after leaving and re-entering the view", async () => {
+    renderDualLayout(
+      [withCategories(createMod("alpha", false), ["Units"]), withCategories(createMod("gamma", false), ["Graphics"])],
+      { isModListCategoryViewEnabled: true },
+    );
+
+    const { left } = getPanes();
+    await waitFor(() => expect(within(left).queryByText("Units")).toBeInTheDocument());
+
+    await act(async () => fireEvent.click(getHeading(left, "Units")));
+    await waitFor(() => expect(within(left).queryByText("alpha human name")).toBeInTheDocument());
+
+    const toggle = document.getElementById("categoryViewToggle") as HTMLButtonElement;
+    await act(async () => fireEvent.click(toggle));
+    expect(toggle).toHaveAttribute("aria-pressed", "false");
+
+    await act(async () => fireEvent.click(toggle));
+    await waitFor(() => expect(toggle).toHaveAttribute("aria-pressed", "true"));
+    expect(getLeftPaneLabels(left)).toEqual(["Graphics1/1", "Units1/1", "alpha.pack"]);
+    expect(getHeading(left, "Units")).toHaveAttribute("aria-expanded", "true");
+  });
+
   it("enables every mod of a category when its heading is right clicked, and disables them once they all are", async () => {
     const { testStore } = renderDualLayout(
       [
