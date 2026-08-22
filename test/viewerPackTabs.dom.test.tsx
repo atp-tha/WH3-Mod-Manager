@@ -249,6 +249,46 @@ describe("multiple pack viewer tabs", () => {
     await waitFor(() => expect(screen.queryByRole("button", { name: "Save As" })).not.toBeInTheDocument());
   });
 
+  it("groups new pack and new flow under the File menu", async () => {
+    const user = userEvent.setup();
+    window.api = { setViewerActivePack: vi.fn() } as unknown as NonNullable<Window["api"]>;
+    const packPath = "A:\\mods\\file-menu.pack";
+    const store = configureStore({
+      reducer: { app: appReducer },
+      preloadedState: {
+        app: {
+          ...initialState,
+          isFeaturesForModdersEnabled: true,
+          packsData: { [packPath]: pack(packPath, "File Menu") },
+        },
+      },
+    });
+
+    render(
+      <Provider store={store}>
+        <LocalizationContext.Provider value={{ filter: "Filter" }}>
+          <ModsViewer />
+        </LocalizationContext.Provider>
+      </Provider>,
+    );
+
+    const fileButton = screen.getByRole("button", { name: "File", exact: true });
+    expect(screen.queryByRole("button", { name: "New Pack", exact: true })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Add New Flow", exact: true })).not.toBeInTheDocument();
+
+    await user.click(fileButton);
+    expect(fileButton).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("menuitem", { name: "New Pack", exact: true })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Add New Flow", exact: true })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("menuitem", { name: "Add New Flow", exact: true }));
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+
+    await user.click(fileButton);
+    await user.click(screen.getByRole("menuitem", { name: "New Pack", exact: true }));
+    expect(screen.getByText("Create New Pack")).toBeInTheDocument();
+  });
+
   it("asks before overwriting an existing destination file during copy", async () => {
     const user = userEvent.setup();
     const packA = "A:\\mods\\copy-source.pack";

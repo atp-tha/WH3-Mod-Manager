@@ -2,7 +2,7 @@ import React, { memo, useCallback, useContext, useEffect, useLayoutEffect, useMe
 import { useStore } from "react-redux";
 import { useAppDispatch, useAppSelector } from "../../hooks";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { faXmark } from "@fortawesome/free-solid-svg-icons";
+import { faChevronDown, faFile, faXmark } from "@fortawesome/free-solid-svg-icons";
 import PackTablesTreeView, {
   CopyIntoSource,
   PackTablesTreeViewHandle,
@@ -65,7 +65,7 @@ type CopyOverwriteRequest = {
   filePath: string;
 };
 const EMPTY_TABS: ViewerTab[] = [];
-/** Below this the two modder buttons cannot show their labels inside the sidebar's width. */
+/** Below this the modder File button cannot show its label inside the sidebar's width. */
 const TOOLBAR_ICON_ONLY_SIDEBAR_WIDTH = 300;
 
 const hasDBSelectionTarget = (selection?: DBTableSelection): selection is DBTableSelection =>
@@ -102,6 +102,7 @@ const ModsViewer = memo(() => {
   const [isNewPackModalOpen, setIsNewPackModalOpen] = React.useState(false);
   const [newPackName, setNewPackName] = React.useState("");
   const [isNewPackProcessing, setIsNewPackProcessing] = React.useState(false);
+  const [isFileMenuOpen, setIsFileMenuOpen] = useState(false);
   const [packCloseConfirmPath, setPackCloseConfirmPath] = useState<string | null>(null);
   const [copyOverwriteRequest, setCopyOverwriteRequest] = useState<CopyOverwriteRequest | null>(null);
   const [isCopyProcessing, setIsCopyProcessing] = useState(false);
@@ -203,6 +204,8 @@ const ModsViewer = memo(() => {
   const treeScrollElementsRef = useRef<Record<string, HTMLDivElement | null>>({});
   const viewerRootRef = useRef<HTMLDivElement>(null);
   const sidebarResizableRef = useRef<Resizable>(null);
+  const fileMenuRef = useRef<HTMLDivElement>(null);
+  const fileMenuButtonRef = useRef<HTMLButtonElement>(null);
   const [isSidebarNarrow, setIsSidebarNarrow] = useState(false);
   const saveAsPackNameInputRef = useRef<HTMLInputElement>(null);
   const newPackNameInputRef = useRef<HTMLInputElement>(null);
@@ -265,6 +268,31 @@ const ModsViewer = memo(() => {
       }, 0);
     }
   }, [isNewPackModalOpen]);
+
+  useEffect(() => {
+    if (!isFileMenuOpen) return;
+
+    const dismissFileMenu = (event: MouseEvent) => {
+      if (fileMenuRef.current?.contains(event.target as Node)) return;
+      setIsFileMenuOpen(false);
+    };
+    const closeFileMenuOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setIsFileMenuOpen(false);
+      fileMenuButtonRef.current?.focus();
+    };
+
+    document.addEventListener("mousedown", dismissFileMenu, true);
+    document.addEventListener("keydown", closeFileMenuOnEscape);
+    return () => {
+      document.removeEventListener("mousedown", dismissFileMenu, true);
+      document.removeEventListener("keydown", closeFileMenuOnEscape);
+    };
+  }, [isFileMenuOpen]);
+
+  useEffect(() => {
+    if (!isFeaturesForModdersEnabled) setIsFileMenuOpen(false);
+  }, [isFeaturesForModdersEnabled]);
 
   const [dbTableFilter, setDBTableFilter] = useState("");
 
@@ -903,8 +931,14 @@ const ModsViewer = memo(() => {
 
   const handleNewPack = () => {
     if (!isFeaturesForModdersEnabled) return;
+    setIsFileMenuOpen(false);
     setNewPackName("");
     setIsNewPackModalOpen(true);
+  };
+
+  const handleAddNewFlow = () => {
+    setIsFileMenuOpen(false);
+    treeViewRefs.current[activePackPath ?? ""]?.openNewFlowDialog();
   };
 
   const handleNewPackConfirm = useCallback(async () => {
@@ -1301,41 +1335,56 @@ const ModsViewer = memo(() => {
             <div className="flex items-center py-2 pr-2 bg-gray-800 border-b border-gray-600">
               {/* Clamped to the sidebar so the strip beside it starts exactly where the table view does. */}
               <div
-                className="flex gap-2 shrink-0 overflow-hidden"
+                className="relative flex items-center shrink-0"
                 style={{ width: "var(--viewer-sidebar-width, 17%)" }}
               >
                 {isFeaturesForModdersEnabled && (
-                  <>
+                  <div ref={fileMenuRef} className="relative shrink-0">
                     <button
-                      onClick={handleNewPack}
-                      title="New Pack"
-                      aria-label="New Pack"
+                      type="button"
+                      ref={fileMenuButtonRef}
+                      onClick={() => setIsFileMenuOpen((isOpen) => !isOpen)}
+                      title="File"
+                      aria-label="File"
+                      aria-haspopup="menu"
+                      aria-expanded={isFileMenuOpen}
+                      aria-controls="mods-viewer-file-menu"
                       className={
-                        (isSidebarNarrow ? "px-2" : "px-4") +
+                        (isSidebarNarrow ? "px-2" : "px-3") +
                         " py-2 bg-purple-600 hover:bg-purple-700 text-white font-medium rounded-lg shadow-lg transition-colors duration-200 flex items-center gap-2 shrink-0"
                       }
                     >
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                      </svg>
-                      {!isSidebarNarrow && "New Pack"}
+                      <FontAwesomeIcon icon={faFile} className="w-4 h-4" />
+                      {!isSidebarNarrow && <span>File</span>}
+                      {!isSidebarNarrow && <FontAwesomeIcon icon={faChevronDown} className="w-3 h-3" />}
                     </button>
 
-                    <button
-                      onClick={() => treeViewRefs.current[activePackPath ?? ""]?.openNewFlowDialog()}
-                      title="Add New Flow"
-                      aria-label="Add New Flow"
-                      className={
-                        (isSidebarNarrow ? "px-2" : "px-4") +
-                        " py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-lg shadow-lg transition-colors duration-200 flex items-center gap-2 shrink-0"
-                      }
-                    >
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                      </svg>
-                      {!isSidebarNarrow && "Add New Flow"}
-                    </button>
-                  </>
+                    {isFileMenuOpen && (
+                      <div
+                        id="mods-viewer-file-menu"
+                        role="menu"
+                        aria-label="File"
+                        className="absolute left-0 top-full z-50 mt-1 min-w-[10rem] overflow-hidden rounded-md border border-gray-600 bg-gray-800 py-1 shadow-xl"
+                      >
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={handleNewPack}
+                          className="block w-full whitespace-nowrap px-3 py-2 text-left text-sm text-gray-200 hover:bg-gray-700"
+                        >
+                          New Pack
+                        </button>
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={handleAddNewFlow}
+                          className="block w-full whitespace-nowrap px-3 py-2 text-left text-sm text-gray-200 hover:bg-gray-700"
+                        >
+                          Add New Flow
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
 
