@@ -124,6 +124,7 @@ import type { EsfMapResponse } from "./esfMap/types";
 import { getVanillaLocalisationPackPaths as getVanillaLocalisationPackPathsFor } from "./vanillaLocCache/packs";
 import { VanillaLocCacheBuildCanceled, openOrBuildVanillaLocCache } from "./vanillaLocCache/store";
 import { runGlobalSearch, type GlobalSearchRunDeps } from "./globalSearch/run";
+import { createProgressThrottle } from "./globalSearch/progressThrottle";
 import type { GlobalSearchRequest, GlobalSearchResponse } from "./globalSearch/types";
 import {
   clearVisualsMemoryCache,
@@ -1290,9 +1291,15 @@ export const getDefaultTableVersions = async () => {
  */
 export const packReads = createPackReadRegistry();
 
-/** A pack read that is registered for its whole duration, released even when the read throws. */
+/**
+ * A pack read that is registered for its whole duration, released even when the read throws.
+ *
+ * Registering only. It deliberately does not wait for a read already in flight: callers that need
+ * that - the mod list and the global search - wait themselves, and making it implicit here once
+ * queued `readPackForCompat` and the data-pack read behind unrelated work for up to the registry's
+ * five-minute backstop.
+ */
 export const readPackRegistered = async (packPath: string, packReadingOptions: PackReadingOptions) => {
-  await packReads.waitUntilFree(packPath);
   const releaseRead = packReads.begin(packPath);
   try {
     return await readPack(packPath, packReadingOptions);
@@ -7431,14 +7438,18 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
     if (globalSearchStartLockByWebContentsId.get(webContentsId) === startLock) {
       globalSearchStartLockByWebContentsId.delete(webContentsId);
     }
-    const sendProgress = (progress: Parameters<GlobalSearchRunDeps["report"]>[0]) => {
-      if (event.sender.isDestroyed()) return;
-      try {
-        event.sender.send("setGlobalSearchProgress", progress);
-      } catch {
-        // The viewer may close between the destroyed check and send.
-      }
-    };
+    const progressThrottle = createProgressThrottle<Parameters<GlobalSearchRunDeps["report"]>[0]>({
+      isTerminal: (progress) => progress.stage === "done",
+      deliver: (progress) => {
+        if (event.sender.isDestroyed()) return;
+        try {
+          event.sender.send("setGlobalSearchProgress", progress);
+        } catch {
+          // The viewer may close between the destroyed check and send.
+        }
+      },
+    });
+    const sendProgress = (progress: Parameters<GlobalSearchRunDeps["report"]>[0]) => progressThrottle.send(progress);
     const sendResults = (batch: Parameters<GlobalSearchRunDeps["emit"]>[0]) => {
       if (event.sender.isDestroyed()) return;
       try {
@@ -7483,6 +7494,11 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
             hasUnsavedChanges: hasUnsavedChanges(mod.path),
           })),
       };
+      /** The search reads packs the viewer and mod list may also be reading, so it waits its turn. */
+      const readPackAfterInFlight = async (packPath: string, packReadingOptions: PackReadingOptions) => {
+        await packReads.waitUntilFree(packPath);
+        return readPackRegistered(packPath, packReadingOptions);
+      };
       const getVanillaLocReader = async () => {
         const dataFolder = appData.gamesToGameFolderPaths[appData.currentGame]?.dataFolder;
         if (!dataFolder) return undefined;
@@ -7495,7 +7511,7 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
             const entries: Array<readonly [string, string, string]> = [];
             for (const packPath of packPaths) {
               if (cancelState.canceled) throw new VanillaLocCacheBuildCanceled();
-              const pack = await readPackRegistered(packPath, { skipParsingTables: true, readLocs: true });
+              const pack = await readPackAfterInFlight(packPath, { skipParsingTables: true, readLocs: true });
               forEachPackLocEntry(pack, (key, value, locFileName) => {
                 entries.push([key, value, `${pack.path}\0${locFileName}`]);
               });
@@ -7525,7 +7541,7 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
         searchVanillaDb,
         getVanillaLocReader,
         forEachPackedFileBuffer: forEachPackedFileBufferRegistered,
-        readPackRegistered,
+        readPackRegistered: readPackAfterInFlight,
         forEachPackLocEntry,
         isCanceled: () => cancelState.canceled,
         report: sendProgress,
@@ -7554,6 +7570,9 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
       resolveDone(response);
       return response;
     } finally {
+      // A run that ends without a "done" report - the error path - can leave a coalesced update
+      // queued, which would land after the response the panel has already settled on.
+      progressThrottle.cancel();
       if (globalSearchCancelStateByWebContentsId.get(webContentsId) === cancelState) {
         globalSearchCancelStateByWebContentsId.delete(webContentsId);
       }

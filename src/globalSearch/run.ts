@@ -9,6 +9,7 @@ import { getSearchTargetKey, resolveSearchTargets, type GlobalSearchCatalog, typ
 import { searchPackDb, searchPackLoc, type PackLocVisitor } from "./searchDb";
 import { searchPackFiles, type PackedFileBufferVisitor } from "./searchFiles";
 import type { SearchEngineContext } from "./engineTypes";
+import { MAX_GLOBAL_SEARCH_QUERY_LENGTH } from "./types";
 import type {
   GlobalSearchDbResult,
   GlobalSearchProgress,
@@ -44,6 +45,14 @@ export interface GlobalSearchRunDeps {
 const DEFAULT_MAX_RESULTS = 5000;
 const DEFAULT_MAX_RESULTS_PER_TARGET = 1000;
 const DEFAULT_MAX_RESULTS_PER_FILE = 20;
+/**
+ * Largest packed file the scanners will read whole.
+ *
+ * Defaulted here rather than in the panel so every caller gets the guard: `forEachPackedFileBuffer`
+ * allocates the whole payload, and one oversized entry would otherwise be read into memory with
+ * nothing to stop it. A file over the limit is reported through `skippedFiles` as "tooLarge".
+ */
+const DEFAULT_MAX_FILE_BYTES = 32 * 1024 * 1024;
 
 const emptyCounts = (): Record<GlobalSearchResultKind, number> => ({ db: 0, loc: 0, text: 0, rigidModel: 0 });
 
@@ -105,6 +114,7 @@ const makeEngineContext = (
 ): SearchEngineContext => ({
   request: {
     ...state.request,
+    maxFileBytes: state.request.maxFileBytes ?? DEFAULT_MAX_FILE_BYTES,
     kinds: {
       db: target.kinds.includes("db"),
       loc: target.kinds.includes("loc"),
@@ -415,7 +425,7 @@ export const runGlobalSearch = async (
   if (request.regex && !matcher.isValidRegex) {
     return { ...baseResponse, success: false, error: "Search query is not a valid regular expression." };
   }
-  if (request.query.length > 512) {
+  if (request.query.length > MAX_GLOBAL_SEARCH_QUERY_LENGTH) {
     return { ...baseResponse, success: false, error: "Search query is too long." };
   }
 
@@ -546,4 +556,5 @@ export const DEFAULT_GLOBAL_SEARCH_LIMITS = {
   maxResults: DEFAULT_MAX_RESULTS,
   maxResultsPerTarget: DEFAULT_MAX_RESULTS_PER_TARGET,
   maxResultsPerFile: DEFAULT_MAX_RESULTS_PER_FILE,
+  maxFileBytes: DEFAULT_MAX_FILE_BYTES,
 };

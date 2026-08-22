@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { Pack, PackedFile } from "../../src/packFileTypes";
 import { runGlobalSearch, type GlobalSearchRunDeps } from "../../src/globalSearch/run";
+import { MAX_GLOBAL_SEARCH_QUERY_LENGTH } from "../../src/globalSearch/types";
 import type { GlobalSearchRequest, GlobalSearchResult } from "../../src/globalSearch/types";
 
 const makeRequest = (overrides: Partial<GlobalSearchRequest> = {}): GlobalSearchRequest => ({
@@ -80,6 +81,60 @@ describe("global search run", () => {
     expect(response.results).toHaveLength(4);
     expect(deps.emitted).toEqual(response.results);
     expect(response.results.every((result) => result.packPath && result.packLabel)).toBe(true);
+  });
+
+  it("guards file reads with a size limit even when the request omits one", async () => {
+    let seenMaxFileBytes: number | undefined;
+    const deps = makeDeps({
+      forEachPackedFileBuffer: async (_path, wanted, visit, options) => {
+        seenMaxFileBytes = options?.maxFileBytes;
+        if (wanted(textFile.name)) await visit(textFile, Buffer.from("needle"));
+      },
+    });
+
+    await runGlobalSearch(makeRequest({ kinds: { db: false, loc: false, text: true, rigidModel: false } }), {}, deps);
+
+    expect(seenMaxFileBytes).toBeGreaterThan(0);
+    expect(Number.isFinite(seenMaxFileBytes)).toBe(true);
+  });
+
+  it("honours an explicit file size limit from the request", async () => {
+    let seenMaxFileBytes: number | undefined;
+    const deps = makeDeps({
+      forEachPackedFileBuffer: async (_path, wanted, visit, options) => {
+        seenMaxFileBytes = options?.maxFileBytes;
+        if (wanted(textFile.name)) await visit(textFile, Buffer.from("needle"));
+      },
+    });
+
+    await runGlobalSearch(
+      makeRequest({ kinds: { db: false, loc: false, text: true, rigidModel: false }, maxFileBytes: 1234 }),
+      {},
+      deps,
+    );
+
+    expect(seenMaxFileBytes).toBe(1234);
+  });
+
+  it("rejects a query past the shared length limit", async () => {
+    const response = await runGlobalSearch(
+      makeRequest({ query: "n".repeat(MAX_GLOBAL_SEARCH_QUERY_LENGTH + 1) }),
+      {},
+      makeDeps(),
+    );
+
+    expect(response.success).toBe(false);
+    expect(response.error).toBe("Search query is too long.");
+  });
+
+  it("accepts a query exactly at the shared length limit", async () => {
+    const response = await runGlobalSearch(
+      makeRequest({ query: "n".repeat(MAX_GLOBAL_SEARCH_QUERY_LENGTH) }),
+      {},
+      makeDeps(),
+    );
+
+    expect(response.success).toBe(true);
   });
 
   it("reads a pack once when DB and loc are both enabled", async () => {
