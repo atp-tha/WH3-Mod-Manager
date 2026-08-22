@@ -244,6 +244,8 @@ declare global {
     hiddenMainWindowTabs: MainWindowTab[];
     /** Group the Visuals unit list by culture and then by unit caste. */
     isVisualsSortByCultureEnabled: boolean;
+    /** Hide repeated variant files in the Visuals Lord and Hero culture groups. */
+    isVisualsHideDuplicatesEnabled: boolean;
     mapCampaignName: string;
     mapSelectedRegion?: MapRegionSelection;
     isCreateSteamCollectionOpen: boolean;
@@ -353,6 +355,7 @@ declare global {
     | "technologyTreesDisplayMode"
     | "hiddenMainWindowTabs"
     | "isVisualsSortByCultureEnabled"
+    | "isVisualsHideDuplicatesEnabled"
   >;
 
   /** Everything stored for one game. Per-mod data lives in modUserData, one copy, not once per preset. */

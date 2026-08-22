@@ -141,6 +141,7 @@ describe("migrateAppConfig", () => {
 
     expect(config.currentGame).toBe("wh3");
     expect(config.isVisualsSortByCultureEnabled).toBe(false);
+    expect(config.isVisualsHideDuplicatesEnabled).toBe(true);
     expect(config.games.rome2).toEqual({
       currentPreset: { name: "", mods: [], version: 2 },
       presets: [],
@@ -151,9 +152,14 @@ describe("migrateAppConfig", () => {
   });
 
   it("preserves the Visuals culture sort option", () => {
-    const config = migrateAppConfig({ ...createLegacyConfig(), isVisualsSortByCultureEnabled: true });
+    const config = migrateAppConfig({
+      ...createLegacyConfig(),
+      isVisualsSortByCultureEnabled: true,
+      isVisualsHideDuplicatesEnabled: false,
+    });
 
     expect(config.isVisualsSortByCultureEnabled).toBe(true);
+    expect(config.isVisualsHideDuplicatesEnabled).toBe(false);
   });
 
   it("is idempotent and leaves an already-migrated config alone", () => {

@@ -78,6 +78,7 @@ const initialState = {
   currentTab: "mods",
   hiddenMainWindowTabs: [],
   isVisualsSortByCultureEnabled: false,
+  isVisualsHideDuplicatesEnabled: true,
   mapCampaignName: "wh3_main_combi",
   mapSelectedRegion: undefined,
   currentFlowFileReloadNonce: 0,

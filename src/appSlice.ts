@@ -1116,6 +1116,8 @@ const appSlice = createSlice({
       state.hiddenMainWindowTabs = (fromConfigAppState.hiddenMainWindowTabs || []).filter(isHideableMainWindowTab);
       state.isVisualsSortByCultureEnabled =
         fromConfigAppState.isVisualsSortByCultureEnabled ?? state.isVisualsSortByCultureEnabled;
+      state.isVisualsHideDuplicatesEnabled =
+        fromConfigAppState.isVisualsHideDuplicatesEnabled ?? state.isVisualsHideDuplicatesEnabled;
 
       const categoriesFromMods = new Set(state.currentPreset.mods.map((mod) => mod.categories ?? []).flat());
       if (fromConfigAppState.categories) {
@@ -1396,6 +1398,9 @@ const appSlice = createSlice({
     },
     toggleIsVisualsSortByCultureEnabled: (state: AppState) => {
       state.isVisualsSortByCultureEnabled = !state.isVisualsSortByCultureEnabled;
+    },
+    toggleIsVisualsHideDuplicatesEnabled: (state: AppState) => {
+      state.isVisualsHideDuplicatesEnabled = !state.isVisualsHideDuplicatesEnabled;
     },
     toggleIsPresetAuthorEnabled: (state: AppState) => {
       state.isPresetAuthorEnabled = !state.isPresetAuthorEnabled;
@@ -1783,6 +1788,7 @@ export const {
   toggleIsShowingDisabledModsLoadOrder,
   toggleIsModListCategoryViewEnabled,
   toggleIsVisualsSortByCultureEnabled,
+  toggleIsVisualsHideDuplicatesEnabled,
   setModListDensity,
   toggleIsPresetAuthorEnabled,
   toggleArePresetThumbnailsEnabled,

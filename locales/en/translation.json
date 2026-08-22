@@ -1090,6 +1090,7 @@
   "nodeEditorNodeReadTSVFromPackDescription": "Reads TSV file from pack using custom schema",
   "visualsTab": "Visuals",
   "visualsSortByCulture": "Sort by culture",
+  "visualsHideDuplicates": "Hide duplicates",
   "unitViewerTab": "Unit Viewer",
   "unitViewerLord": "Lord",
   "unitViewerHero": "Hero",

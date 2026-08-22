@@ -1,5 +1,5 @@
 import React, { memo, useEffect, useMemo, useRef, useState } from "react";
-import { toggleIsVisualsSortByCultureEnabled } from "../appSlice";
+import { toggleIsVisualsHideDuplicatesEnabled, toggleIsVisualsSortByCultureEnabled } from "../appSlice";
 import { useAppDispatch, useAppSelector } from "../hooks";
 import { useLocalizations } from "../localizationContext";
 import { compileVisualsUnitFilter } from "../visuals/unitFilter";
@@ -88,6 +88,8 @@ const getCasteSortOrder = (caste: string) => {
   return 2;
 };
 
+const getVariantFileKey = (path: string) => path.replace(/\//g, "\\").replace(/\\+/g, "\\").trim().toLowerCase();
+
 const formatCasteLabel = (caste: string) =>
   caste.replace(/[_-]+/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase()) || "Unknown caste";
 
@@ -96,6 +98,7 @@ const VisualsTab = memo(() => {
   const localized = useLocalizations();
   const isFeaturesForModdersEnabled = useAppSelector((state) => state.app.isFeaturesForModdersEnabled);
   const isSortByCultureEnabled = useAppSelector((state) => state.app.isVisualsSortByCultureEnabled);
+  const isHideDuplicatesEnabled = useAppSelector((state) => state.app.isVisualsHideDuplicatesEnabled);
   const currentPresetMods = useAppSelector((state) => state.app.currentPreset.mods);
   const enabledMods = useMemo(() => currentPresetMods.filter((mod) => mod.isEnabled), [currentPresetMods]);
 
@@ -336,11 +339,25 @@ const VisualsTab = memo(() => {
             .map(([casteKey, caste]) => ({
               key: casteKey,
               label: caste.label,
-              units: [...caste.units].sort(unitComparator),
+              units: (() => {
+                const sortedUnits = [...caste.units].sort(unitComparator);
+                if (!isHideDuplicatesEnabled || !["lord", "hero"].includes(casteKey.toLowerCase())) {
+                  return sortedUnits;
+                }
+
+                const seenVariantFiles = new Set<string>();
+                return sortedUnits.filter((unit) => {
+                  if (!unit.variantMeshPath) return true;
+                  const variantFileKey = getVariantFileKey(unit.variantMeshPath);
+                  if (!variantFileKey || seenVariantFiles.has(variantFileKey)) return false;
+                  seenVariantFiles.add(variantFileKey);
+                  return true;
+                });
+              })(),
             })),
         };
       });
-  }, [filteredUnits, unitComparator]);
+  }, [filteredUnits, isHideDuplicatesEnabled, unitComparator]);
 
   const toggleOriginGroupCollapsed = (label: string) => {
     setCollapsedOriginGroups((prev) => ({ ...prev, [label]: !prev[label] }));
@@ -788,6 +805,16 @@ const VisualsTab = memo(() => {
               >
                 <input type="checkbox" readOnly checked={isSortByCultureEnabled} className="pointer-events-none" />
                 {localized.visualsSortByCulture || "Sort by culture"}
+              </button>
+              <button
+                type="button"
+                role="menuitemcheckbox"
+                aria-checked={isHideDuplicatesEnabled}
+                className="flex w-full items-center gap-2 rounded px-3 py-2 text-sm text-white hover:bg-gray-700"
+                onClick={() => dispatch(toggleIsVisualsHideDuplicatesEnabled())}
+              >
+                <input type="checkbox" readOnly checked={isHideDuplicatesEnabled} className="pointer-events-none" />
+                {localized.visualsHideDuplicates || "Hide duplicates"}
               </button>
             </div>
           )}

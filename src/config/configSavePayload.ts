@@ -126,6 +126,7 @@ export function selectConfigSavePayload(appState: AppState): ConfigSavePayload {
       technologyTreesDisplayMode: appState.technologyTreesDisplayMode,
       hiddenMainWindowTabs: appState.hiddenMainWindowTabs,
       isVisualsSortByCultureEnabled: appState.isVisualsSortByCultureEnabled,
+      isVisualsHideDuplicatesEnabled: appState.isVisualsHideDuplicatesEnabled,
     },
   };
 
