@@ -121,6 +121,26 @@ describe("GlobalSearchPanel", () => {
     expect(screen.getByRole("checkbox", { name: /Vanilla packs/ })).toBeChecked();
   });
 
+  it("puts the controls in a sidebar beside the results rather than stacked above them", () => {
+    renderPanel();
+
+    const panel = screen.getByTestId("global-search-panel");
+    const results = screen.getByTestId("global-search-results");
+    const controls = screen.getByTestId("global-search-controls");
+
+    // Siblings under the panel, results first, so the controls occupy the width the short result
+    // lines leave over instead of eating the dock's height.
+    expect(results.parentElement).toBe(panel);
+    expect(controls.parentElement).toBe(panel);
+    expect(results.compareDocumentPosition(controls) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    // Every control belongs to the sidebar, not to the results column.
+    expect(controls).toContainElement(screen.getByLabelText("Global search"));
+    expect(controls).toContainElement(searchButton());
+    expect(controls).toContainElement(screen.getByRole("checkbox", { name: /Vanilla packs/ }));
+    expect(results).not.toContainElement(searchButton());
+  });
+
   it("keeps Search disabled until there is something to search for", async () => {
     renderPanel();
     expect(searchButton()).toBeDisabled();

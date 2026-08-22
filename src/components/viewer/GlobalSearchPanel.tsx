@@ -440,12 +440,48 @@ const GlobalSearchPanel = memo(({ openPacks, onOpenDbResult, onOpenFileResult, o
 
   const checkboxClass = "flex shrink-0 items-center gap-1.5 text-xs text-gray-300";
 
+  const resultsBody =
+    rows.length === 0 ? (
+      <div className="p-3 text-xs text-gray-500">
+        {!hasSearched
+          ? localized.globalSearchIdle || "Pick what to search and where, then press Search."
+          : isSearching
+            ? localized.globalSearchRunning || "Searching…"
+            : error
+              ? ""
+              : localized.globalSearchNoMatches || "No matches."}
+      </div>
+    ) : (
+      <AutoSizer>
+        {({ height, width }) => (
+          <List
+            width={width}
+            height={height}
+            rowCount={rows.length}
+            rowHeight={getRowHeight}
+            rowRenderer={renderRow}
+            overscanRowCount={12}
+          />
+        )}
+      </AutoSizer>
+    );
+
   return (
-    <div className="flex h-full flex-col border-t border-gray-600 bg-gray-800" data-testid="global-search-panel">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-2 py-2">
+    // A result line is a path and a short excerpt, so it never needs the window's full width. The
+    // controls take the space it does not, which keeps them off the top and leaves the dock's height
+    // to results - the panel is short, and rows are what the user is here to read.
+    <div className="flex h-full border-t border-gray-600 bg-gray-800" data-testid="global-search-panel">
+      <div className="min-h-0 min-w-0 flex-1" data-testid="global-search-results">
+        {resultsBody}
+      </div>
+
+      <div
+        className="flex w-1/3 min-w-[17rem] max-w-[32rem] shrink-0 flex-col gap-2 overflow-y-auto border-l border-gray-700 p-2 scrollbar scrollbar-track-gray-700 scrollbar-thumb-blue-700"
+        data-testid="global-search-controls"
+      >
         <label
           className={
-            "flex min-w-[16rem] flex-1 items-center gap-2 rounded border bg-gray-900 px-2 " +
+            "flex items-center gap-2 rounded border bg-gray-900 px-2 " +
             (isRegexValid ? "border-gray-700" : "border-amber-600")
           }
         >
@@ -460,99 +496,108 @@ const GlobalSearchPanel = memo(({ openPacks, onOpenDbResult, onOpenFileResult, o
               if (event.key === "Enter") void handleSearch();
             }}
             placeholder={localized.globalSearchPlaceholder || "Search packs…"}
-            className="w-full bg-transparent py-1.5 text-sm text-white outline-none"
+            className="w-full min-w-0 bg-transparent py-1.5 text-sm text-white outline-none"
           />
         </label>
 
-        <label className={checkboxClass}>
-          <input type="checkbox" checked={caseSensitive} onChange={(event) => setCaseSensitive(event.target.checked)} />
-          {localized.globalSearchCaseSensitive || "Case sensitive"}
-        </label>
-        <label className={checkboxClass}>
-          <input type="checkbox" checked={isRegex} onChange={(event) => setIsRegex(event.target.checked)} />
-          {localized.globalSearchRegex || "Regex"}
-        </label>
-
-        {isSearching ? (
-          <button
-            type="button"
-            onClick={handleStop}
-            className="shrink-0 rounded bg-red-700 px-4 py-1.5 text-xs font-medium uppercase text-white hover:bg-red-600"
-          >
-            {localized.globalSearchStop || "Stop"}
-          </button>
-        ) : (
-          <button
-            type="button"
-            onClick={() => void handleSearch()}
-            disabled={!canSearch}
-            className="shrink-0 rounded bg-purple-600 px-4 py-1.5 text-xs font-medium uppercase text-white hover:bg-purple-700 disabled:cursor-not-allowed disabled:bg-gray-700 disabled:text-gray-500"
-          >
-            {localized.search || "Search"}
-          </button>
+        {!isRegexValid && (
+          <div className="text-[11px] text-amber-500">
+            {localized.globalSearchInvalidRegex || "Not a valid regular expression yet."}
+          </div>
         )}
 
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label={localized.globalSearchClose || "Close global search"}
-          className="shrink-0 px-1 text-gray-400 hover:text-white"
-        >
-          <FontAwesomeIcon icon={faXmark} />
-        </button>
-      </div>
-
-      {!isRegexValid && (
-        <div className="px-2 pb-1 text-[11px] text-amber-500">
-          {localized.globalSearchInvalidRegex || "Not a valid regular expression yet."}
-        </div>
-      )}
-
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-gray-700 px-2 py-2">
-        <span className="text-[11px] uppercase tracking-wide text-gray-500">
-          {localized.globalSearchIn || "Search in"}
-        </span>
-        {GLOBAL_SEARCH_RESULT_KINDS.map((kind) => (
-          <label key={kind} className={checkboxClass}>
-            <input type="checkbox" checked={kinds[kind]} onChange={() => toggleKind(kind)} />
-            {globalSearchKindLabels[kind]}
-            {kind === "rigidModel" && <span className="text-gray-500">(slow)</span>}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          <label className={checkboxClass}>
+            <input
+              type="checkbox"
+              checked={caseSensitive}
+              onChange={(event) => setCaseSensitive(event.target.checked)}
+            />
+            {localized.globalSearchCaseSensitive || "Case sensitive"}
           </label>
-        ))}
-      </div>
+          <label className={checkboxClass}>
+            <input type="checkbox" checked={isRegex} onChange={(event) => setIsRegex(event.target.checked)} />
+            {localized.globalSearchRegex || "Regex"}
+          </label>
 
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-gray-700 px-2 py-2">
-        <span className="text-[11px] uppercase tracking-wide text-gray-500">
-          {localized.globalSearchSources || "Sources"}
-        </span>
-        <label className={checkboxClass}>
-          <input type="checkbox" checked={searchVanilla} onChange={(event) => setSearchVanilla(event.target.checked)} />
-          {localized.globalSearchVanillaPacks || "Vanilla packs"}
-        </label>
-        <label className={checkboxClass}>
-          <input
-            type="checkbox"
-            checked={includeEnabledMods || includeAllMods}
-            disabled={includeAllMods}
-            title={includeAllMods ? "Already covered by All mods" : undefined}
-            onChange={(event) => setIncludeEnabledMods(event.target.checked)}
-          />
-          {localized.globalSearchEnabledMods || "Enabled mods"}
-          {packCatalog.length > 0 && <span className="text-gray-500">({enabledModCount})</span>}
-        </label>
-        <label className={checkboxClass}>
-          <input
-            type="checkbox"
-            checked={includeAllMods}
-            onChange={(event) => setIncludeAllMods(event.target.checked)}
-          />
-          {localized.globalSearchAllMods || "All mods"}
-          {packCatalog.length > 0 && <span className="text-gray-500">({packCatalog.length})</span>}
-        </label>
+          {isSearching ? (
+            <button
+              type="button"
+              onClick={handleStop}
+              className="ml-auto shrink-0 rounded bg-red-700 px-4 py-1.5 text-xs font-medium uppercase text-white hover:bg-red-600"
+            >
+              {localized.globalSearchStop || "Stop"}
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => void handleSearch()}
+              disabled={!canSearch}
+              className="ml-auto shrink-0 rounded bg-purple-600 px-4 py-1.5 text-xs font-medium uppercase text-white hover:bg-purple-700 disabled:cursor-not-allowed disabled:bg-gray-700 disabled:text-gray-500"
+            >
+              {localized.search || "Search"}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label={localized.globalSearchClose || "Close global search"}
+            className="shrink-0 px-1 text-gray-400 hover:text-white"
+          >
+            <FontAwesomeIcon icon={faXmark} />
+          </button>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-gray-700 pt-2">
+          <span className="w-full text-[11px] uppercase tracking-wide text-gray-500">
+            {localized.globalSearchIn || "Search in"}
+          </span>
+          {GLOBAL_SEARCH_RESULT_KINDS.map((kind) => (
+            <label key={kind} className={checkboxClass}>
+              <input type="checkbox" checked={kinds[kind]} onChange={() => toggleKind(kind)} />
+              {globalSearchKindLabels[kind]}
+              {kind === "rigidModel" && <span className="text-gray-500">(slow)</span>}
+            </label>
+          ))}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-gray-700 pt-2">
+          <span className="w-full text-[11px] uppercase tracking-wide text-gray-500">
+            {localized.globalSearchSources || "Sources"}
+          </span>
+          <label className={checkboxClass}>
+            <input
+              type="checkbox"
+              checked={searchVanilla}
+              onChange={(event) => setSearchVanilla(event.target.checked)}
+            />
+            {localized.globalSearchVanillaPacks || "Vanilla packs"}
+          </label>
+          <label className={checkboxClass}>
+            <input
+              type="checkbox"
+              checked={includeEnabledMods || includeAllMods}
+              disabled={includeAllMods}
+              title={includeAllMods ? "Already covered by All mods" : undefined}
+              onChange={(event) => setIncludeEnabledMods(event.target.checked)}
+            />
+            {localized.globalSearchEnabledMods || "Enabled mods"}
+            {packCatalog.length > 0 && <span className="text-gray-500">({enabledModCount})</span>}
+          </label>
+          <label className={checkboxClass}>
+            <input
+              type="checkbox"
+              checked={includeAllMods}
+              onChange={(event) => setIncludeAllMods(event.target.checked)}
+            />
+            {localized.globalSearchAllMods || "All mods"}
+            {packCatalog.length > 0 && <span className="text-gray-500">({packCatalog.length})</span>}
+          </label>
+        </div>
 
         {openPacks.length > 0 && (
-          <>
-            <span className="text-[11px] uppercase tracking-wide text-gray-500">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-gray-700 pt-2">
+            <span className="w-full text-[11px] uppercase tracking-wide text-gray-500">
               {localized.globalSearchOpenPacks || "Open packs"}
             </span>
             {openPacks.map((pack) => (
@@ -565,72 +610,45 @@ const GlobalSearchPanel = memo(({ openPacks, onOpenDbResult, onOpenFileResult, o
                 <span className="max-w-[12rem] truncate">{pack.label}</span>
               </label>
             ))}
-          </>
-        )}
-      </div>
-
-      {(isSearching || progress) && (
-        <div className="flex items-center gap-3 border-t border-gray-700 px-2 py-1 text-xs text-gray-400">
-          {isSearching && (
-            <div
-              aria-hidden="true"
-              className="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-gray-600 border-t-blue-400"
-            />
-          )}
-          {progress && (
-            <>
-              <span className="tabular-nums">
-                {progress.targetsDone}/{progress.targetsTotal} packs
-              </span>
-              {progress.currentLabel && <span className="truncate">{progress.currentLabel}</span>}
-              {progress.filesScanned > 0 && <span className="tabular-nums">{progress.filesScanned} files</span>}
-            </>
-          )}
-          <span className="ml-auto shrink-0 tabular-nums">{results.length} matches</span>
-        </div>
-      )}
-
-      {error && <div className="border-t border-gray-700 px-2 py-2 text-xs text-red-300">{error}</div>}
-
-      {warnings.map((warning) => (
-        <div key={warning} className="border-t border-gray-700 px-2 py-1 text-[11px] text-amber-500">
-          {warning}
-        </div>
-      ))}
-
-      {(isTruncated || wasCanceled || skippedFiles.length > 0) && (
-        <div className="border-t border-gray-700 px-2 py-1 text-[11px] text-gray-400">
-          {isTruncated && <span className="mr-3">Showing the first {results.length} matches.</span>}
-          {wasCanceled && <span className="mr-3">Search stopped early.</span>}
-          {skippedFiles.length > 0 && <span>{skippedFiles.length} file(s) skipped.</span>}
-        </div>
-      )}
-
-      <div className="min-h-0 flex-1 border-t border-gray-700">
-        {rows.length === 0 ? (
-          <div className="p-3 text-xs text-gray-500">
-            {!hasSearched
-              ? localized.globalSearchIdle || "Pick what to search and where, then press Search."
-              : isSearching
-                ? localized.globalSearchRunning || "Searching…"
-                : error
-                  ? ""
-                  : localized.globalSearchNoMatches || "No matches."}
           </div>
-        ) : (
-          <AutoSizer>
-            {({ height, width }) => (
-              <List
-                width={width}
-                height={height}
-                rowCount={rows.length}
-                rowHeight={getRowHeight}
-                rowRenderer={renderRow}
-                overscanRowCount={12}
+        )}
+
+        {(isSearching || progress) && (
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-gray-700 pt-2 text-xs text-gray-400">
+            {isSearching && (
+              <div
+                aria-hidden="true"
+                className="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-gray-600 border-t-blue-400"
               />
             )}
-          </AutoSizer>
+            {progress && (
+              <>
+                <span className="tabular-nums">
+                  {progress.targetsDone}/{progress.targetsTotal} packs
+                </span>
+                {progress.filesScanned > 0 && <span className="tabular-nums">{progress.filesScanned} files</span>}
+              </>
+            )}
+            <span className="ml-auto shrink-0 tabular-nums">{results.length} matches</span>
+            {progress?.currentLabel && <span className="w-full truncate">{progress.currentLabel}</span>}
+          </div>
         )}
+
+        {error && <div className="border-t border-gray-700 pt-2 text-xs text-red-300">{error}</div>}
+
+        {(isTruncated || wasCanceled || skippedFiles.length > 0) && (
+          <div className="border-t border-gray-700 pt-2 text-[11px] text-gray-400">
+            {isTruncated && <span className="mr-3">Showing the first {results.length} matches.</span>}
+            {wasCanceled && <span className="mr-3">Search stopped early.</span>}
+            {skippedFiles.length > 0 && <span>{skippedFiles.length} file(s) skipped.</span>}
+          </div>
+        )}
+
+        {warnings.map((warning) => (
+          <div key={warning} className="border-t border-gray-700 pt-2 text-[11px] text-amber-500">
+            {warning}
+          </div>
+        ))}
       </div>
     </div>
   );
