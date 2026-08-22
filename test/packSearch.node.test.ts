@@ -52,6 +52,27 @@ describe("packFileContains", () => {
     await expect(packFileContains(packPath, searchTerm)).resolves.toBe(true);
   });
 
+  it("does not report an empty pack as containing an ordinary term", async () => {
+    const packPath = await writePack(Buffer.alloc(0), "empty.pack");
+
+    await expect(packFileContains(packPath, "greatswords")).resolves.toBe(false);
+  });
+
+  it("still matches an empty pack against a pattern that matches the empty string", async () => {
+    const packPath = await writePack(Buffer.alloc(0), "empty.pack");
+
+    await expect(packFileContains(packPath, "^$")).resolves.toBe(true);
+    await expect(packFileContains(packPath, "x*")).resolves.toBe(true);
+  });
+
+  it("treats an empty term as matching any pack, empty or not", async () => {
+    const emptyPath = await writePack(Buffer.alloc(0), "empty.pack");
+    const contentPath = await writePack("unit_key=greatswords", "content.pack");
+
+    await expect(packFileContains(emptyPath, "")).resolves.toBe(true);
+    await expect(packFileContains(contentPath, "")).resolves.toBe(true);
+  });
+
   it("reports no match when the term is absent", async () => {
     const packPath = await writePack(Buffer.alloc(4096, 0x41));
 

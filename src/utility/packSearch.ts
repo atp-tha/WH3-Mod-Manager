@@ -71,6 +71,8 @@ export const packFileContains = async (
     stream.destroy();
   }
 
-  // A non-empty file was handled by the stream above. An empty file also contains the empty term.
-  return pendingChunk === undefined;
+  // A non-empty file was handled by the stream above, which returns on the first match. An empty
+  // file yields no chunks, so no window was ever searched - but it still matches a pattern that
+  // matches the empty string, such as `^$`, which is what searching the whole file would have done.
+  return pendingChunk === undefined && matcher.test("");
 };
