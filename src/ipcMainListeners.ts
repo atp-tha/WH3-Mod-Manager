@@ -7044,6 +7044,23 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
           sourcePackedFile = findPackedFileInList(sourcePack.packedFiles, normalizedFilePath);
         }
 
+        // The pack index stores raw DB fields, while the viewer needs the amended fields and schema
+        // that getPackViewData normally adds before sending a table to the renderer. A table copied
+        // straight from an index-only source would otherwise be listed in the destination tree but
+        // have nothing for PackTablesTableView to render.
+        const makeViewerReadyDBFile = (packedFile: PackedFile | undefined): PackedFile | undefined => {
+          if (!isDBFile || !packedFile || (packedFile.schemaFields && packedFile.tableSchema)) return packedFile;
+
+          const packForView = {
+            ...(sourcePack ?? { name: nodePath.basename(sourcePackPath), path: sourcePackPath }),
+            packedFiles: [packedFile],
+          } as Pack;
+          const packViewData = getPackViewData(packForView, packedFile.name, isLocPackedFilePath(packedFile.name));
+          return packViewData?.packedFiles?.[packedFile.name] ?? packedFile;
+        };
+
+        sourcePackedFile = makeViewerReadyDBFile(sourcePackedFile);
+
         let sourceBuffer = sourcePackedFile?.buffer;
         if (!sourceBuffer && sourcePackedFile?.text != null) {
           sourceBuffer = Buffer.from(sourcePackedFile.text, "utf8");
@@ -7059,7 +7076,7 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
           });
         }
 
-        if (!sourceBuffer) {
+        if (!sourceBuffer || (isDBFile && (!sourcePackedFile?.schemaFields || !sourcePackedFile.tableSchema))) {
           if (sourcePackPath.startsWith("memory://")) {
             return { success: false, error: `The source file "${normalizedFilePath}" has no saved payload` };
           }
@@ -7067,15 +7084,23 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
           const sourceRead = await readPack(
             sourcePackPath,
             isDBFile
-              ? { tablesToRead: [normalizedFilePath], filesToRead: [normalizedFilePath] }
+              ? {
+                  tablesToRead: [normalizedFilePath],
+                  filesToRead: [normalizedFilePath],
+                  readLocs: isLocPackedFilePath(normalizedFilePath),
+                }
               : { skipParsingTables: true, filesToRead: [normalizedFilePath] },
           );
           sourcePackedFile = findPackedFileInList(sourceRead.packedFiles, normalizedFilePath);
+          sourcePackedFile = makeViewerReadyDBFile(sourcePackedFile);
           sourceBuffer = sourcePackedFile?.buffer;
         }
 
         if (!sourcePackedFile || !sourceBuffer) {
           return { success: false, error: `Could not read "${normalizedFilePath}" from the source pack` };
+        }
+        if (isDBFile && (!sourcePackedFile.schemaFields || !sourcePackedFile.tableSchema)) {
+          return { success: false, error: `Could not prepare DB table "${normalizedFilePath}" for the viewer` };
         }
 
         const copiedFileName = normalizePackFilePath(sourcePackedFile.name || normalizedFilePath);
