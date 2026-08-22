@@ -22,6 +22,7 @@ import {
 } from "@/src/appSlice";
 import NodeEditor from "../NodeEditor";
 import type { RootState } from "../../store";
+import type { PackedFile } from "@/src/packFileTypes";
 import type { ShowViewerDialog } from "./viewerDialogs";
 import { makeSelectCurrentPackData, makeSelectCurrentPackUnsavedFiles } from "./viewerSelectors";
 import {
@@ -137,6 +138,54 @@ const ModsViewer = memo(() => {
     [currentPackData, unsavedFiles],
   );
 
+  const preferredTreeTabCacheRef = useRef<
+    Record<
+      string,
+      {
+        packData: PackViewData | undefined;
+        unsavedFiles: PackedFile[] | undefined;
+        openTabs: ViewerTab[];
+        activeTabId: string | null;
+        preferredTab: "db" | "files";
+      }
+    >
+  >({});
+  // Choosing the tree's sub-tab scans a pack's whole file list, so it is cached per pack against the
+  // inputs it actually reads. A plain memo over the three maps would rescan every open pack whenever
+  // any one of them changed, which is once per table edit.
+  const preferredTreeTabByPackPath = useMemo(() => {
+    const cache = preferredTreeTabCacheRef.current;
+    const preferredTabs: Record<string, "db" | "files"> = {};
+
+    for (const packTab of packTabs) {
+      const packData = packsDataByPath[packTab.packPath];
+      const unsavedFiles = unsavedPacksDataByPath[packTab.packPath];
+      const cached = cache[packTab.packPath];
+      if (
+        cached &&
+        cached.packData === packData &&
+        cached.unsavedFiles === unsavedFiles &&
+        cached.openTabs === packTab.openTabs &&
+        cached.activeTabId === packTab.activeTabId
+      ) {
+        preferredTabs[packTab.packPath] = cached.preferredTab;
+        continue;
+      }
+
+      const preferredTab = getPreferredTreeTab(packTab, packsDataByPath, unsavedPacksDataByPath);
+      cache[packTab.packPath] = {
+        packData,
+        unsavedFiles,
+        openTabs: packTab.openTabs,
+        activeTabId: packTab.activeTabId,
+        preferredTab,
+      };
+      preferredTabs[packTab.packPath] = preferredTab;
+    }
+
+    return preferredTabs;
+  }, [packTabs, packsDataByPath, unsavedPacksDataByPath]);
+
   const treeViewRefs = useRef<Record<string, PackTablesTreeViewHandle | null>>({});
   const treeScrollTopsRef = useRef<Record<string, number>>({});
   const treeScrollElementsRef = useRef<Record<string, HTMLDivElement | null>>({});
@@ -148,6 +197,7 @@ const ModsViewer = memo(() => {
   const tabIdCounterRef = useRef(0);
   const lastActionRef = useRef<{ key: string; at: number; openedNew: boolean; tabId?: string } | null>(null);
   const lastHandledPackOpenNonceRef = useRef(0);
+  const didRunTestDBCloneRef = useRef(false);
   const lastObservedPackOpenNonceRef = useRef(0);
   const pendingPackOpenRequestsRef = useRef<PackOpenRequest[]>([]);
   const [packOpenRequestVersion, setPackOpenRequestVersion] = useState(0);
@@ -275,7 +325,12 @@ const ModsViewer = memo(() => {
 
   const openOrActivateTab = useCallback(
     (candidate: ViewerTabCandidate, options: { forceNewTab?: boolean } = {}) => {
+      // Routing to the candidate's pack first means every decision below has to read that pack's
+      // tabs, not the ones still closed over from whichever pack was active a moment ago.
       if (activePackPathRef.current !== candidate.packPath) openOrActivatePackTab(candidate.packPath);
+      const targetPackTab = packTabs.find((packTab) => packTab.packPath === candidate.packPath) ?? null;
+      const targetOpenTabs = targetPackTab?.openTabs ?? EMPTY_TABS;
+      const targetActiveTabId = targetPackTab?.activeTabId ?? null;
       const now = Date.now();
       const lastAction = lastActionRef.current;
       const actionKey = `${candidate.packPath}|${candidate.fileKey}`;
@@ -290,8 +345,8 @@ const ModsViewer = memo(() => {
       // Reuse existing tab with same fileKey instead of always creating a new one
       if (options.forceNewTab) {
         const existingTab =
-          openTabs.find((tab) => tab.fileKey === candidate.fileKey && tab.id !== activeTabId) ??
-          openTabs.find((tab) => tab.fileKey === candidate.fileKey);
+          targetOpenTabs.find((tab) => tab.fileKey === candidate.fileKey && tab.id !== targetActiveTabId) ??
+          targetOpenTabs.find((tab) => tab.fileKey === candidate.fileKey);
         if (existingTab) {
           setActiveTabId(existingTab.id);
           lastActionRef.current = { key: actionKey, at: now, openedNew: false, tabId: existingTab.id };
@@ -302,20 +357,20 @@ const ModsViewer = memo(() => {
       let openedNew = false;
       let tabToActivate: ViewerTab;
 
-      if (options.forceNewTab || !activeTabId) {
+      if (options.forceNewTab || !targetActiveTabId) {
         const newTab: ViewerTab = { id: createTabId(), ...candidate };
         openedNew = true;
         tabToActivate = newTab;
         setOpenTabs((prevTabs) => [...prevTabs, newTab]);
       } else {
-        const activeTabIndex = openTabs.findIndex((tab) => tab.id === activeTabId);
+        const activeTabIndex = targetOpenTabs.findIndex((tab) => tab.id === targetActiveTabId);
         if (activeTabIndex < 0) {
           const newTab: ViewerTab = { id: createTabId(), ...candidate };
           openedNew = true;
           tabToActivate = newTab;
           setOpenTabs((prevTabs) => [...prevTabs, newTab]);
         } else {
-          tabToActivate = { ...openTabs[activeTabIndex], ...candidate };
+          tabToActivate = { ...targetOpenTabs[activeTabIndex], ...candidate };
           setOpenTabs((prevTabs) => prevTabs.map((tab) => (tab.id === tabToActivate.id ? tabToActivate : tab)));
         }
       }
@@ -340,10 +395,9 @@ const ModsViewer = memo(() => {
       }
     },
     [
-      activeTabId,
       createTabId,
       openOrActivatePackTab,
-      openTabs,
+      packTabs,
       packsDataByPath,
       setActiveTabId,
       setOpenTabs,
@@ -378,35 +432,32 @@ const ModsViewer = memo(() => {
     [buildPackedFileTabCandidate, openOrActivateTab],
   );
 
-  const handleCloseTab = useCallback(
-    (tabId: string) => {
-      const targetPackPath = activePackPathRef.current;
-      if (!targetPackPath) return;
-      const targetPackTab = packTabs.find((packTab) => packTab.packPath === targetPackPath);
-      if (!targetPackTab) return;
-      const tabIndex = targetPackTab.openTabs.findIndex((tab) => tab.id === tabId);
-      if (tabIndex < 0) return;
+  const handleCloseTab = useCallback((tabId: string) => {
+    const targetPackPath = activePackPathRef.current;
+    if (!targetPackPath) return;
+    // Derived inside the updater so a pack opened over IPC between render and click is not clobbered.
+    setPackTabs((prevPackTabs) =>
+      prevPackTabs.map((packTab) => {
+        if (packTab.packPath !== targetPackPath) return packTab;
+        const tabIndex = packTab.openTabs.findIndex((tab) => tab.id === tabId);
+        if (tabIndex < 0) return packTab;
+        const nextOpenTabs = packTab.openTabs.filter((tab) => tab.id !== tabId);
+        const nextActiveTabId =
+          tabId === packTab.activeTabId
+            ? ((nextOpenTabs[tabIndex - 1] ?? nextOpenTabs[tabIndex])?.id ?? null)
+            : packTab.activeTabId;
+        return { ...packTab, openTabs: nextOpenTabs, activeTabId: nextActiveTabId };
+      }),
+    );
+  }, []);
 
-      const nextOpenTabs = targetPackTab.openTabs.filter((tab) => tab.id !== tabId);
-      const nextActiveTabId =
-        tabId === targetPackTab.activeTabId
-          ? ((nextOpenTabs[tabIndex - 1] ?? nextOpenTabs[tabIndex])?.id ?? null)
-          : targetPackTab.activeTabId;
-      setPackTabs((prevPackTabs) =>
-        prevPackTabs.map((packTab) =>
-          packTab.packPath === targetPackPath
-            ? { ...packTab, openTabs: nextOpenTabs, activeTabId: nextActiveTabId }
-            : packTab,
-        ),
-      );
-    },
-    [packTabs],
-  );
-
-  const hasUnsavedFiles = unsavedFiles.length > 0;
+  // With no pack tab open, activeViewerPackPath is only the Redux fallback (the game's db pack), which
+  // nobody asked to open - saving it is not on offer.
+  const hasActivePackTab = activePackPath != undefined;
+  const hasUnsavedFiles = hasActivePackTab && unsavedFiles.length > 0;
   // Save As works on any pack that exists on disk, changed or not - it saves a copy. A memory pack
   // has no file to copy, so it needs something unsaved in it before there is anything to write.
-  const canSavePackAs = !activeViewerPackPath.startsWith("memory://") || hasUnsavedFiles;
+  const canSavePackAs = hasActivePackTab && (!activeViewerPackPath.startsWith("memory://") || hasUnsavedFiles);
 
   useEffect(() => {
     if (!activePackPath) return;
@@ -532,12 +583,19 @@ const ModsViewer = memo(() => {
       return;
     }
 
+    // A selection aimed at a pack that is not in front belongs to whichever tab owns it, so it waits
+    // rather than being recorded as handled - recording it would strand the tab for good, since the
+    // key never repeats once activating that pack makes it actionable.
+    const selectionPackPath = currentFlowFileSelection
+      ? (currentFlowFilePackPath ?? currentDBTableSelection?.packPath ?? reduxFallbackPackPath)
+      : currentDBTableSelection?.packPath;
+    if (activePackPath && selectionPackPath && selectionPackPath !== activePackPath) return;
+
     lastProcessedSelectionRequestKeyRef.current = selectionRequestKey;
 
     if (currentFlowFileSelection) {
       const flowPackPath = currentFlowFilePackPath ?? currentDBTableSelection?.packPath ?? reduxFallbackPackPath;
       if (!flowPackPath) return;
-      if (activePackPath && flowPackPath !== activePackPath) return;
       const candidate = buildFlowTabCandidate(currentFlowFileSelection, flowPackPath);
       if (lastSelectionKeyRef.current === candidate.fileKey) return;
       openOrActivateTab(candidate);
@@ -545,7 +603,6 @@ const ModsViewer = memo(() => {
     }
 
     if (hasDBSelectionTarget(currentDBTableSelection)) {
-      if (activePackPath && currentDBTableSelection.packPath !== activePackPath) return;
       const candidate = buildDbTabCandidate(currentDBTableSelection);
       if (lastSelectionKeyRef.current === candidate.fileKey) return;
       openOrActivateTab(candidate);
@@ -781,16 +838,18 @@ const ModsViewer = memo(() => {
       const packIndex = packTabs.findIndex((packTab) => packTab.packPath === packPath);
       if (packIndex < 0) return;
 
-      const nextPackTabs = packTabs.filter((packTab) => packTab.packPath !== packPath);
+      // Which neighbour to fall back to is read from this render; the removal itself goes through an
+      // updater so a pack opened over IPC while the confirm dialog was up is not clobbered.
       if (activePackPathRef.current === packPath) {
-        const nextActivePack = nextPackTabs[packIndex - 1] ?? nextPackTabs[packIndex] ?? null;
-        activatePackTab(nextActivePack?.packPath ?? null);
+        const remaining = packTabs.filter((packTab) => packTab.packPath !== packPath);
+        activatePackTab((remaining[packIndex - 1] ?? remaining[packIndex])?.packPath ?? null);
       }
-      setPackTabs(nextPackTabs);
+      setPackTabs((prevPackTabs) => prevPackTabs.filter((packTab) => packTab.packPath !== packPath));
 
       clearPackDataStoreForPack(packPath);
       clearPreparedTableForPack(packPath);
       // referencesHash is global to the renderer and is refreshed by the next pack data-store update.
+      delete preferredTreeTabCacheRef.current[packPath];
       delete treeScrollTopsRef.current[packPath];
       delete treeScrollElementsRef.current[packPath];
       delete treeViewRefs.current[packPath];
@@ -870,7 +929,11 @@ const ModsViewer = memo(() => {
 
   // for testing, automatically opens db.pack main_units_tablesl
   useEffect(() => {
+    // startArgs arrives over IPC after mount, so this cannot be a mount-only effect - but it still
+    // has to fire once rather than again on every pack switch.
+    if (didRunTestDBCloneRef.current) return;
     if (startArgs.includes("-testDBClone")) {
+      didRunTestDBCloneRef.current = true;
       window.api?.getPackData(activeViewerPackPath, { dbName: "main_units_tables", dbSubname: "data__" });
       dispatch(
         selectDBTable({
@@ -1187,7 +1250,7 @@ const ModsViewer = memo(() => {
                           strokeLinecap="round"
                           strokeLinejoin="round"
                           strokeWidth={2}
-                          d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14V9a2 2 0 00-2-2h-3m-1 4l-3-3m0 0l-3 3m3-3v12"
+                          d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3-3m0 0l-3 3m3-3v12"
                         />
                       </svg>
                       Save Pack
@@ -1244,7 +1307,7 @@ const ModsViewer = memo(() => {
                             treeViewRefs.current[packTab.packPath] = handle;
                           }}
                           packPath={packTab.packPath}
-                          preferredTab={getPreferredTreeTab(packTab, packsDataByPath, unsavedPacksDataByPath)}
+                          preferredTab={preferredTreeTabByPackPath[packTab.packPath] ?? "db"}
                           tableFilter={dbTableFilter}
                           showDialog={showDialog}
                           onOpenDBTable={handleOpenDBTable}

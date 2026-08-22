@@ -193,4 +193,40 @@ describe("multiple pack viewer tabs", () => {
       expect(screen.getByRole("button", { name: "Consecutive B", exact: true })).toBeInTheDocument();
     });
   });
+
+  it("offers no save actions until a pack tab is open", async () => {
+    const user = userEvent.setup();
+    const packPath = "A:\\mods\\savegate.pack";
+    window.api = {
+      getPackData: vi.fn(),
+      savePackWithUnsavedFiles: vi.fn(),
+      savePackAsWithUnsavedFiles: vi.fn(),
+      getDataFolder: vi.fn().mockResolvedValue("C:\\data"),
+      viewerClosedPack: vi.fn(),
+      setViewerActivePack: vi.fn(),
+    } as unknown as NonNullable<Window["api"]>;
+
+    const store = configureStore({
+      reducer: { app: appReducer },
+      preloadedState: { app: { ...initialState, packsData: { [packPath]: pack(packPath, "SaveGate") } } },
+    });
+
+    render(
+      <Provider store={store}>
+        <LocalizationContext.Provider value={{ filter: "Filter" }}>
+          <ModsViewer />
+        </LocalizationContext.Provider>
+      </Provider>,
+    );
+
+    // Nothing is open, so the Redux fallback pack path must not be offered up for saving.
+    expect(screen.queryByRole("button", { name: "Save As" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save Pack" })).not.toBeInTheDocument();
+
+    store.dispatch(requestOpenPackTab(packPath));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Save As" })).toBeInTheDocument());
+
+    await user.click(screen.getByRole("button", { name: "Close SaveGate" }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Save As" })).not.toBeInTheDocument());
+  });
 });

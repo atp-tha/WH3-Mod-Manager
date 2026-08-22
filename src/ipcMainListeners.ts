@@ -9554,6 +9554,10 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
         windows.viewerWindow = undefined;
       }
       appData.isViewerReady = false;
+      // The tab list is replayed on reload, where the window survives. Closing the window is the user
+      // saying they are done, so the next viewer opens on the pack they ask for and nothing else.
+      appData.openViewerPackPaths = [];
+      appData.activeViewerPackPath = undefined;
     });
   };
   const updateViewerTitle = () => {
@@ -9660,6 +9664,9 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
     console.log("ON requestOpenModInViewer", modPath);
     if (!appData.openViewerPackPaths.includes(modPath)) {
       appData.openViewerPackPaths.push(modPath);
+      // Runs before the window exists on a cold start, so sendPackViewData can find no viewer to send
+      // or queue to. The viewerIsReady replay below re-requests every open pack, which is what covers
+      // that case - do not drop it.
       getPackData(modPath);
     }
     appData.activeViewerPackPath = modPath;
@@ -9995,6 +10002,23 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
       readMods(modsToRead, skipCollisionCheck, skipCollisionCheck);
     },
   );
+  /**
+   * Replays every open pack to a viewer that has just come up. The renderer activates whichever pack
+   * it hears about last, so the active one is sent last and the title it produces stays true.
+   */
+  const replayOpenPacksToViewer = (skipReadFor?: Set<string>) => {
+    const activePackPath = appData.activeViewerPackPath;
+    const packPathsInSendOrder = [
+      ...appData.openViewerPackPaths.filter((packPath) => packPath !== activePackPath),
+      ...appData.openViewerPackPaths.filter((packPath) => packPath === activePackPath),
+    ];
+    for (const packPath of packPathsInSendOrder) {
+      if (!skipReadFor?.has(packPath)) getPackData(packPath);
+      windows.viewerWindow?.webContents.send("openModInViewer", packPath);
+      windows.viewerWindow?.webContents.send("setUnsavedPacksData", packPath, appData.unsavedPacksData[packPath] ?? []);
+    }
+    updateViewerTitle();
+  };
   const sendQueuedDataToViewer = async () => {
     if (!appData.isViewerReady) {
       await new Promise((resolve) => setTimeout(resolve, 500));
@@ -10012,12 +10036,7 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
     );
     windows.viewerWindow?.webContents.send("setCurrentGameNaive", appData.currentGame);
     windows.viewerWindow?.webContents.send("setPacksData", appData.queuedViewerData);
-    for (const packPath of appData.openViewerPackPaths) {
-      if (!queuedPackPaths.has(packPath)) getPackData(packPath);
-      windows.viewerWindow?.webContents.send("openModInViewer", packPath);
-      windows.viewerWindow?.webContents.send("setUnsavedPacksData", packPath, appData.unsavedPacksData[packPath] ?? []);
-    }
-    updateViewerTitle();
+    replayOpenPacksToViewer(queuedPackPaths);
     windows.viewerWindow?.focus();
     appData.queuedViewerData = [];
   };
@@ -10046,16 +10065,7 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
       sendQueuedDataToViewer();
     } else {
       windows.viewerWindow?.webContents.send("setCurrentGameNaive", appData.currentGame);
-      for (const packPath of appData.openViewerPackPaths) {
-        getPackData(packPath);
-        windows.viewerWindow?.webContents.send("openModInViewer", packPath);
-        windows.viewerWindow?.webContents.send(
-          "setUnsavedPacksData",
-          packPath,
-          appData.unsavedPacksData[packPath] ?? [],
-        );
-      }
-      updateViewerTitle();
+      replayOpenPacksToViewer();
     }
   });
   const sendQueuedDataToSkills = async () => {
