@@ -1287,7 +1287,7 @@
   "nodeEditorBlankGraphInOpenFilePrefix": "Started a blank graph in",
   "nodeEditorSaveToOverwriteOpenFlow": "save to overwrite it.",
   "ancillariesNoSubcategory": "(no subcategory)",
-  "ancillariesNoUniquenessGroup": "(no uniqueness group)",
+  "ancillariesDisableUniquenessSorting": "Disable uniqueness sorting",
   "ancillariesModBadge": "mod",
   "ancillariesFilterByMod": "Filter by mod",
   "ancillariesModFilterAll": "All",

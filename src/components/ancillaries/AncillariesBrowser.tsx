@@ -1,4 +1,4 @@
-import React, { memo, useCallback, useEffect, useMemo, useState } from "react";
+import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AutoSizer, List, type ListRowProps } from "react-virtualized";
 import { IoChevronDown, IoChevronForward, IoSearch } from "react-icons/io5";
 import { useLocalizations } from "../../localizationContext";
@@ -9,7 +9,7 @@ import {
   matchesModFilter,
 } from "../../ancillariesData/filter";
 import { ancillaryUniquenessColor } from "../../ancillariesData/data";
-import type { AncillariesCatalog, AncillarySummary, AncillaryUniquenessGrouping } from "../../ancillariesData/types";
+import type { AncillariesCatalog, AncillarySummary } from "../../ancillariesData/types";
 
 export type AncillariesBrowserProps = {
   catalog: AncillariesCatalog | undefined;
@@ -26,21 +26,10 @@ export type AncillariesBrowserProps = {
 type BrowserRow =
   | { kind: "category"; key: string; name: string; iconUrl?: string; count: number }
   | { kind: "subcategory"; key: string; name: string; count: number }
-  | {
-      kind: "uniquenessGroup";
-      key: string;
-      name: string;
-      count: number;
-      group?: AncillaryUniquenessGrouping;
-      nested: boolean;
-    }
   | { kind: "ancillary"; key: string; ancillary: AncillarySummary; nested: boolean };
 
 /** Collapse key for a subcategory, kept distinct from a category of the same name. */
 const subcategoryRowKey = (category: string, subcategory: string) => `${category} ${subcategory}`;
-const uniquenessGroupRowKey = (category: string, subcategory: string, groupKey: string) =>
-  `${category} ${subcategory} uniqueness ${groupKey}`;
-const NO_UNIQUENESS_GROUP_KEY = "__no_uniqueness_group__";
 
 const ROW_HEIGHT = 30;
 
@@ -49,10 +38,26 @@ const AncillariesBrowser = memo(
     const [filter, setFilter] = useState("");
     const [modFilter, setModFilter] = useState(ALL_ANCILLARY_MODS);
     const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+    const [isOptionsMenuOpen, setIsOptionsMenuOpen] = useState(false);
+    const [disableUniquenessSorting, setDisableUniquenessSorting] = useState(false);
+    const optionsMenuRef = useRef<HTMLDivElement>(null);
     const localized = useLocalizations();
     /** Ancillaries whose `subcategory` cell is empty still need a bucket to sit in. */
     const noSubcategoryLabel = localized.ancillariesNoSubcategory || "(no subcategory)";
-    const noUniquenessGroupLabel = localized.ancillariesNoUniquenessGroup || "(no uniqueness group)";
+
+    useEffect(() => {
+      if (!isOptionsMenuOpen) return;
+
+      const onPointerDown = (event: MouseEvent) => {
+        if (optionsMenuRef.current?.contains(event.target as Node)) return;
+        setIsOptionsMenuOpen(false);
+      };
+
+      document.addEventListener("mousedown", onPointerDown);
+      return () => {
+        document.removeEventListener("mousedown", onPointerDown);
+      };
+    }, [isOptionsMenuOpen]);
 
     // Categories start collapsed, and a category the catalog no longer has must not keep its entry.
     useEffect(() => {
@@ -90,6 +95,16 @@ const AncillariesBrowser = memo(
       const uniquenessGroupingOrder = new Map(
         (catalog.uniquenessGroupings ?? []).map((grouping, index) => [grouping.groupKey, index]),
       );
+      const sortWithinBucket = (ancillaries: AncillarySummary[]) => {
+        if (disableUniquenessSorting) return ancillaries;
+
+        return [...ancillaries].sort(
+          (a, b) =>
+            (uniquenessGroupingOrder.get(a.uniquenessGrouping?.groupKey ?? "") ?? Number.MAX_SAFE_INTEGER) -
+              (uniquenessGroupingOrder.get(b.uniquenessGrouping?.groupKey ?? "") ?? Number.MAX_SAFE_INTEGER) ||
+            a.localizedName.localeCompare(b.localizedName),
+        );
+      };
       const byCategory = new Map<string, AncillarySummary[]>();
       for (const ancillary of matching) {
         const bucket = byCategory.get(ancillary.category) ?? [];
@@ -109,57 +124,9 @@ const AncillariesBrowser = memo(
       ];
 
       const result: BrowserRow[] = [];
-      const addAncillaries = (
-        categoryKey: string,
-        subcategoryKey: string,
-        ancillaries: AncillarySummary[],
-        nested: boolean,
-      ) => {
-        const byUniquenessGroup = new Map<
-          string,
-          { group?: AncillaryUniquenessGrouping; ancillaries: AncillarySummary[] }
-        >();
-        for (const ancillary of ancillaries) {
-          const group = ancillary.uniquenessGrouping;
-          const key = group?.groupKey ?? "";
-          const bucket = byUniquenessGroup.get(key) ?? { group, ancillaries: [] };
-          bucket.ancillaries.push(ancillary);
-          byUniquenessGroup.set(key, bucket);
-        }
-
-        const orderedGroups = [...byUniquenessGroup.entries()].sort(([firstKey, first], [secondKey, second]) => {
-          if (!firstKey) return secondKey ? 1 : 0;
-          if (!secondKey) return -1;
-          return (
-            (uniquenessGroupingOrder.get(firstKey) ?? Number.MAX_SAFE_INTEGER) -
-              (uniquenessGroupingOrder.get(secondKey) ?? Number.MAX_SAFE_INTEGER) ||
-            first.group!.localizedName.localeCompare(second.group!.localizedName)
-          );
-        });
-
-        // A row with no matching table range has nowhere meaningful to group under. Keep that
-        // uncommon case in the same flat bucket the browser has always used.
-        if (orderedGroups.length === 1 && !orderedGroups[0][1].group) {
-          for (const ancillary of ancillaries)
-            result.push({ kind: "ancillary", key: ancillary.key, ancillary, nested });
-          return;
-        }
-
-        for (const [groupKey, bucket] of orderedGroups) {
-          bucket.ancillaries.sort((a, b) => a.localizedName.localeCompare(b.localizedName));
-          const rowKey = uniquenessGroupRowKey(categoryKey, subcategoryKey, groupKey || NO_UNIQUENESS_GROUP_KEY);
-          result.push({
-            kind: "uniquenessGroup",
-            key: rowKey,
-            name: bucket.group?.localizedName ?? noUniquenessGroupLabel,
-            count: bucket.ancillaries.length,
-            group: bucket.group,
-            nested,
-          });
-          if (collapsed[rowKey] === true && ancillaryFilter.isEmpty) continue;
-          for (const ancillary of bucket.ancillaries) {
-            result.push({ kind: "ancillary", key: ancillary.key, ancillary, nested: true });
-          }
+      const addAncillaries = (ancillaries: AncillarySummary[], nested: boolean) => {
+        for (const ancillary of sortWithinBucket(ancillaries)) {
+          result.push({ kind: "ancillary", key: ancillary.key, ancillary, nested });
         }
       };
       for (const category of orderedCategories) {
@@ -192,7 +159,7 @@ const AncillariesBrowser = memo(
 
         // A lone subcategory says nothing the category header does not: list its ancillaries directly.
         if (orderedSubcategories.length === 1) {
-          addAncillaries(category.key, orderedSubcategories[0], bySubcategory.get(orderedSubcategories[0])!, false);
+          addAncillaries(bySubcategory.get(orderedSubcategories[0])!, false);
           continue;
         }
 
@@ -206,11 +173,11 @@ const AncillariesBrowser = memo(
             count: inSubcategory.length,
           });
           if (collapsed[rowKey] === true && ancillaryFilter.isEmpty) continue;
-          addAncillaries(category.key, subcategory, inSubcategory, true);
+          addAncillaries(inSubcategory, true);
         }
       }
       return result;
-    }, [ancillaryFilter, catalog, collapsed, modFilter, noSubcategoryLabel, noUniquenessGroupLabel]);
+    }, [ancillaryFilter, catalog, collapsed, disableUniquenessSorting, modFilter, noSubcategoryLabel]);
 
     const toggleCollapsed = useCallback((key: string, defaultCollapsed: boolean) => {
       setCollapsed((current) => ({ ...current, [key]: !(current[key] ?? defaultCollapsed) }));
@@ -249,34 +216,6 @@ const AncillariesBrowser = memo(
                 className="flex h-full w-full items-center gap-2 px-2 pl-5 text-left text-xs uppercase tracking-wide text-gray-400 hover:text-gray-200"
               >
                 {isCollapsed ? <IoChevronForward size={11} /> : <IoChevronDown size={11} />}
-                <span className="truncate">{row.name}</span>
-                <span className="ml-auto shrink-0 normal-case tracking-normal">{row.count}</span>
-              </button>
-            </div>
-          );
-        }
-
-        if (row.kind === "uniquenessGroup") {
-          const isCollapsed = collapsed[row.key] === true;
-          const range = row.group ? ` (${row.group.uniquenessMin}–${row.group.uniquenessMax})` : "";
-          return (
-            <div key={key} style={style}>
-              <button
-                type="button"
-                title={`${row.name}${range}`}
-                onClick={() => toggleCollapsed(row.key, false)}
-                className={`flex h-full w-full items-center gap-2 px-2 text-left text-xs uppercase tracking-wide text-gray-400 hover:text-gray-200 ${
-                  row.nested ? "pl-8" : "pl-5"
-                }`}
-              >
-                {isCollapsed ? <IoChevronForward size={11} /> : <IoChevronDown size={11} />}
-                {row.group && (
-                  <span
-                    aria-label={`${row.group.localizedName} color`}
-                    className="h-3 w-3 shrink-0 rounded-full border border-white/40"
-                    style={{ backgroundColor: ancillaryUniquenessColor(row.group) }}
-                  />
-                )}
                 <span className="truncate">{row.name}</span>
                 <span className="ml-auto shrink-0 normal-case tracking-normal">{row.count}</span>
               </button>
@@ -326,23 +265,48 @@ const AncillariesBrowser = memo(
     return (
       <div className="flex h-full min-h-0 flex-col">
         <div className="shrink-0 border-b border-gray-700 p-2">
-          <label className="mb-2 flex items-center gap-2 text-xs text-gray-400">
-            <span className="shrink-0">{localized.ancillariesFilterByMod || "Filter by mod"}</span>
-            <select
-              aria-label={localized.ancillariesFilterByMod || "Filter by mod"}
-              value={modFilter}
-              onChange={(event) => setModFilter(event.target.value)}
-              className="min-w-0 flex-1 rounded border border-gray-700 bg-gray-900 px-2 py-1.5 text-white"
-            >
-              <option value={ALL_ANCILLARY_MODS}>{localized.ancillariesModFilterAll || "All"}</option>
-              <option value={VANILLA_ANCILLARY_MODS}>{localized.ancillariesModFilterVanilla || "Vanilla"}</option>
-              {modOptions.map((mod) => (
-                <option key={mod.path} value={mod.path}>
-                  {mod.label}
-                </option>
-              ))}
-            </select>
-          </label>
+          <div className="mb-2 flex items-center gap-2">
+            <label className="flex min-w-0 flex-1 items-center gap-2 text-xs text-gray-400">
+              <span className="shrink-0">{localized.ancillariesFilterByMod || "Filter by mod"}</span>
+              <select
+                aria-label={localized.ancillariesFilterByMod || "Filter by mod"}
+                value={modFilter}
+                onChange={(event) => setModFilter(event.target.value)}
+                className="min-w-0 flex-1 rounded border border-gray-700 bg-gray-900 px-2 py-1.5 text-white"
+              >
+                <option value={ALL_ANCILLARY_MODS}>{localized.ancillariesModFilterAll || "All"}</option>
+                <option value={VANILLA_ANCILLARY_MODS}>{localized.ancillariesModFilterVanilla || "Vanilla"}</option>
+                {modOptions.map((mod) => (
+                  <option key={mod.path} value={mod.path}>
+                    {mod.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="relative shrink-0" ref={optionsMenuRef}>
+              <button
+                type="button"
+                aria-expanded={isOptionsMenuOpen}
+                onClick={() => setIsOptionsMenuOpen((currentValue) => !currentValue)}
+                className="rounded border border-gray-700 bg-gray-900 px-2 py-1.5 text-xs text-gray-300 hover:border-blue-500 hover:bg-gray-800 hover:text-white"
+              >
+                {localized.options || "Options"}
+              </button>
+              {isOptionsMenuOpen && (
+                <div className="absolute right-0 z-[250] mt-1 w-56 rounded-lg border border-gray-700 bg-gray-800 p-1 text-left shadow-lg">
+                  <label className="flex items-center gap-2 rounded px-3 py-2 text-sm text-white hover:bg-gray-700">
+                    <input
+                      type="checkbox"
+                      aria-label={localized.ancillariesDisableUniquenessSorting || "Disable uniqueness sorting"}
+                      checked={disableUniquenessSorting}
+                      onChange={(event) => setDisableUniquenessSorting(event.target.checked)}
+                    />
+                    {localized.ancillariesDisableUniquenessSorting || "Disable uniqueness sorting"}
+                  </label>
+                </div>
+              )}
+            </div>
+          </div>
           <label
             className={`flex items-center gap-2 rounded border bg-gray-900 px-2 ${
               ancillaryFilter.isValidRegex ? "border-gray-700" : "border-amber-600"

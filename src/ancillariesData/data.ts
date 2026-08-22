@@ -179,8 +179,6 @@ export const buildAncillariesData = (
   );
   const uniquenessGroupingForScore = (score: number) =>
     uniquenessGroupings.find((grouping) => score >= grouping.uniquenessMin && score <= grouping.uniquenessMax);
-  const uniquenessGroupingOrder = new Map(uniquenessGroupings.map((grouping, index) => [grouping.groupKey, index]));
-
   // --- types ------------------------------------------------------------------
   const typeIcons: Record<string, string> = {};
   const typeKeys: string[] = [];
@@ -290,8 +288,6 @@ export const buildAncillariesData = (
       (categoryOrder.get(a.category) ?? Number.MAX_SAFE_INTEGER) -
         (categoryOrder.get(b.category) ?? Number.MAX_SAFE_INTEGER) ||
       a.subcategory.localeCompare(b.subcategory) ||
-      (uniquenessGroupingOrder.get(a.uniquenessGrouping?.groupKey ?? "") ?? Number.MAX_SAFE_INTEGER) -
-        (uniquenessGroupingOrder.get(b.uniquenessGrouping?.groupKey ?? "") ?? Number.MAX_SAFE_INTEGER) ||
       a.localizedName.localeCompare(b.localizedName),
   );
 

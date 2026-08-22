@@ -92,7 +92,7 @@ describe("buildAncillariesData", () => {
     expect(data.ancillaries.find((ancillary) => ancillary.key === "anc_charm")?.subcategory).toBe("rune");
   });
 
-  it("assigns uniqueness colors and sorts ancillaries by their score group", () => {
+  it("assigns uniqueness colors without changing category/subcategory/name data order", () => {
     const tables = fixtureTables();
     tables.ancillary_uniqueness_groupings_tables = [
       { group_key: "common", uniqueness_min: "0", uniqueness_max: "35", col_r: "255", col_g: "255", col_b: "255" },
@@ -109,6 +109,9 @@ describe("buildAncillariesData", () => {
       (key) =>
         ({
           ...LOC,
+          ancillaries_onscreen_name_anc_unique: "Alpha Unique",
+          ancillaries_onscreen_name_anc_rare: "Middle Rare",
+          ancillaries_onscreen_name_anc_common: "Zulu Common",
           ancillary_uniqueness_groupings_onscreen_name_common: "Common",
           ancillary_uniqueness_groupings_onscreen_name_rare: "Rare",
           ancillary_uniqueness_groupings_onscreen_name_unique: "Unique",
@@ -116,9 +119,9 @@ describe("buildAncillariesData", () => {
     );
 
     expect(data.uniquenessGroupings.map((grouping) => grouping.localizedName)).toEqual(["Common", "Rare", "Unique"]);
-    expect(data.ancillaries.map((ancillary) => ancillary.key)).toEqual(["anc_common", "anc_rare", "anc_unique"]);
-    expect(data.ancillaries[0].uniquenessGrouping?.color).toEqual({ r: 255, g: 255, b: 255 });
-    expect(data.ancillaries[2].uniquenessGrouping?.groupKey).toBe("unique");
+    expect(data.ancillaries.map((ancillary) => ancillary.key)).toEqual(["anc_unique", "anc_rare", "anc_common"]);
+    expect(data.ancillaries[0].uniquenessGrouping?.color).toEqual({ r: 180, g: 60, b: 220 });
+    expect(data.ancillaries[2].uniquenessGrouping?.groupKey).toBe("common");
   });
 
   it("resolves the icon through ancillaries.type -> ancillary_types.ui_icon, normalising slashes", () => {

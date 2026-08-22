@@ -224,21 +224,41 @@ describe("AncillariesBrowser", () => {
     expect(screen.getByText("Rune")).toBeTruthy();
   });
 
-  it("groups items by uniqueness range and draws each range color", async () => {
+  it("sorts items by uniqueness range within the existing category hierarchy and draws each range color", async () => {
     renderBrowser({ catalog: groupedCatalog });
     await userEvent.click(screen.getByText("Weapon"));
 
-    expect(screen.getByText("Common")).toBeTruthy();
-    expect(screen.getByText("Unique")).toBeTruthy();
+    expect(screen.queryByText("Common", { exact: true })).toBeNull();
+    expect(screen.queryByText("Unique", { exact: true })).toBeNull();
     expect(screen.getByText("Common Item")).toBeTruthy();
     expect(screen.getByText("Unique Item")).toBeTruthy();
-    expect(screen.getAllByLabelText("Common color")).toHaveLength(2);
-    expect(screen.getAllByLabelText("Unique color")).toHaveLength(2);
+    expect(screen.getAllByLabelText("Common color")).toHaveLength(1);
+    expect(screen.getAllByLabelText("Unique color")).toHaveLength(1);
 
     const names = [...screen.getAllByRole("button")]
       .map((button) => button.textContent)
       .filter((text): text is string => text?.includes("Item") ?? false);
     expect(names).toEqual(["Common Item", "Unique Item"]);
+  });
+
+  it("can disable uniqueness sorting from the Options menu", async () => {
+    renderBrowser({ catalog: groupedCatalog });
+    await userEvent.click(screen.getByText("Weapon"));
+
+    const itemNames = () =>
+      [...screen.getAllByRole("button")]
+        .map((button) => button.textContent)
+        .filter((text): text is string => text?.includes("Item") ?? false);
+
+    expect(itemNames()).toEqual(["Common Item", "Unique Item"]);
+
+    await userEvent.click(screen.getByRole("button", { name: "Options" }));
+    const disableSorting = screen.getByRole("checkbox", { name: "Disable uniqueness sorting" });
+    expect(disableSorting).not.toBeChecked();
+    await userEvent.click(disableSorting);
+
+    expect(disableSorting).toBeChecked();
+    expect(itemNames()).toEqual(["Unique Item", "Common Item"]);
   });
 
   it("skips the subcategory row when a category has only one", async () => {
