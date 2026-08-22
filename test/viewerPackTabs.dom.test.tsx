@@ -30,23 +30,47 @@ vi.mock("../src/components/viewer/PackTablesTreeView", () => {
           Open table {props.packPath}
         </button>
         {props.onCopyInto && props.otherOpenPacks?.[0] && (
-          <button
-            type="button"
-            data-testid={`copy-file-${props.packPath}`}
-            onClick={() =>
-              props.onCopyInto(
-                {
-                  packPath: props.packPath,
-                  filePath: "scripts\\same.lua",
-                  kind: "file",
-                },
-                props.otherOpenPacks[0].packPath,
-                true,
-              )
-            }
-          >
-            Copy file {props.packPath}
-          </button>
+          <>
+            <button
+              type="button"
+              data-testid={`copy-file-${props.packPath}`}
+              onClick={() =>
+                props.onCopyInto(
+                  {
+                    packPath: props.packPath,
+                    filePath: "scripts\\same.lua",
+                    kind: "file",
+                  },
+                  props.otherOpenPacks[0].packPath,
+                  true,
+                )
+              }
+            >
+              Copy file {props.packPath}
+            </button>
+            <button
+              type="button"
+              data-testid={`copy-table-${props.packPath}`}
+              onClick={() =>
+                props.onCopyInto(
+                  {
+                    packPath: props.packPath,
+                    filePath: "db\\units_tables\\data__",
+                    kind: "db",
+                    dbSelection: {
+                      packPath: props.packPath,
+                      dbName: "units_tables",
+                      dbSubname: "data__",
+                    },
+                  },
+                  props.otherOpenPacks[0].packPath,
+                  true,
+                )
+              }
+            >
+              Copy table {props.packPath}
+            </button>
+          </>
         )}
       </div>
     );
@@ -344,6 +368,7 @@ describe("multiple pack viewer tabs", () => {
       .mockResolvedValueOnce({ success: true, targetPackPath: packB, filePath: "scripts\\same.lua" });
     window.api = {
       copyPackedFileToPack,
+      getPackData: vi.fn(),
       setViewerActivePack: vi.fn(),
     } as unknown as NonNullable<Window["api"]>;
 
@@ -381,5 +406,64 @@ describe("multiple pack viewer tabs", () => {
     await user.click(screen.getByRole("button", { name: "Overwrite", exact: true }));
     await waitFor(() => expect(copyPackedFileToPack).toHaveBeenCalledWith(packA, "scripts\\same.lua", packB, true));
     expect(screen.queryByText("File Already Exists")).not.toBeInTheDocument();
+  });
+
+  it("offers a new table name when copying into a pack that already has the table", async () => {
+    const user = userEvent.setup();
+    const packA = "A:\\mods\\table-copy-source.pack";
+    const packB = "B:\\mods\\table-copy-target.pack";
+    const copyPackedFileToPack = vi.fn().mockResolvedValue({
+      success: true,
+      targetPackPath: packB,
+      filePath: "db\\copied_units_tables\\data__",
+    });
+    window.api = {
+      copyPackedFileToPack,
+      getPackData: vi.fn(),
+      setViewerActivePack: vi.fn(),
+    } as unknown as NonNullable<Window["api"]>;
+
+    const store = configureStore({
+      reducer: { app: appReducer },
+      preloadedState: {
+        app: {
+          ...initialState,
+          packsData: { [packA]: pack(packA, "Table Copy Source"), [packB]: pack(packB, "Table Copy Target") },
+        },
+      },
+    });
+
+    render(
+      <Provider store={store}>
+        <LocalizationContext.Provider value={{ filter: "Filter" }}>
+          <ModsViewer />
+        </LocalizationContext.Provider>
+      </Provider>,
+    );
+
+    store.dispatch(requestOpenPackTab(packA));
+    store.dispatch(requestOpenPackTab(packB));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Table Copy Source", exact: true })).toBeInTheDocument(),
+    );
+    await user.click(screen.getByRole("button", { name: "Table Copy Source", exact: true }));
+    await user.click(screen.getByTestId(`copy-table-${packA}`));
+
+    expect(await screen.findByText("Table Already Exists")).toBeInTheDocument();
+    const nameInput = screen.getByRole("textbox", { name: "New table name" });
+    expect(nameInput).toHaveValue("units_tables");
+    await user.clear(nameInput);
+    await user.type(nameInput, "copied_units_tables");
+    await user.click(screen.getByRole("button", { name: "Copy with New Name", exact: true }));
+
+    await waitFor(() =>
+      expect(copyPackedFileToPack).toHaveBeenCalledWith(
+        packA,
+        "db\\units_tables\\data__",
+        packB,
+        false,
+        "db\\copied_units_tables\\data__",
+      ),
+    );
   });
 });

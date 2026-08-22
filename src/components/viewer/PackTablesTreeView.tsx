@@ -20,8 +20,9 @@ import selectStyle from "../../styles/selectStyle";
 import { dataFromBackend } from "./packDataStore";
 import type { ShowViewerDialog } from "./viewerDialogs";
 import { makeSelectCurrentPackData, makeSelectCurrentPackUnsavedFiles } from "./viewerSelectors";
-import type { DBVersion, PackedFile } from "../../packFileTypes";
+import type { AmendedSchemaField, DBVersion, PackedFile } from "../../packFileTypes";
 import { isOpenablePackedFilePath } from "../../utility/packFileViewing";
+import CopyIntoSubmenu from "./CopyIntoSubmenu";
 
 type PackTablesTreeViewProps = {
   packPath: string;
@@ -47,17 +48,12 @@ export type ViewerPackTarget = { packPath: string; label: string };
 export type CopyIntoSource = {
   packPath: string;
   filePath: string;
-  kind: "db" | "file";
+  kind: "db" | "dbRows" | "file";
   dbSelection?: DBTableSelection;
+  rows?: AmendedSchemaField[][];
+  tableSchema?: DBVersion;
+  version?: number;
 };
-type ViewerPackCatalogEntry = {
-  path: string;
-  name: string;
-  humanName?: string;
-  isEnabled: boolean;
-  isInData: boolean;
-};
-
 export type PackTablesTreeViewHandle = {
   openNewFlowDialog: () => void;
 };
@@ -206,11 +202,6 @@ const PackTablesTreeView = React.memo(
       treeTab: ContextMenuTreeTab;
       target?: TreeContextTarget;
     } | null>(null);
-    const [isCopySubmenuOpen, setIsCopySubmenuOpen] = React.useState(false);
-    const [isPackPickerOpen, setIsPackPickerOpen] = React.useState(false);
-    const [isLoadingPackCatalog, setIsLoadingPackCatalog] = React.useState(false);
-    const [packCatalog, setPackCatalog] = React.useState<ViewerPackCatalogEntry[]>([]);
-    const [openCopiedPackAfterCopy, setOpenCopiedPackAfterCopy] = React.useState(true);
     const [isNewFlowDialogOpen, setIsNewFlowDialogOpen] = React.useState(false);
     const [newFlowName, setNewFlowName] = React.useState("");
     const [isNewTableDialogOpen, setIsNewTableDialogOpen] = React.useState(false);
@@ -733,36 +724,10 @@ const PackTablesTreeView = React.memo(
       target?: TreeContextTarget,
     ) => {
       e.preventDefault();
-      setIsCopySubmenuOpen(false);
-      setIsPackPickerOpen(false);
-      setOpenCopiedPackAfterCopy(true);
       setContextMenu({ x: e.clientX, y: e.clientY, treeTab, target });
     };
 
-    const handleLoadPackCatalog = async () => {
-      if (isLoadingPackCatalog) return;
-      setIsPackPickerOpen(true);
-      if (packCatalog.length > 0) return;
-
-      setIsLoadingPackCatalog(true);
-      try {
-        const result = await window.api?.getViewerPackCatalog();
-        if (!result?.success) {
-          throw new Error(result?.error || "Failed to load mod packs");
-        }
-        setPackCatalog(result.packs || []);
-      } catch (error) {
-        console.error("Error loading viewer pack catalog:", error);
-        props.showDialog(`Failed to load mod packs: ${error instanceof Error ? error.message : "Unknown error"}`, {
-          title: "Pack Selection Failed",
-        });
-        setIsPackPickerOpen(false);
-      } finally {
-        setIsLoadingPackCatalog(false);
-      }
-    };
-
-    const handleCopyIntoPack = (targetPackPath: string) => {
+    const handleCopyIntoPack = (targetPackPath: string, openAfterCopy: boolean) => {
       const target = contextMenu?.target;
       if (!target || !props.onCopyInto || packPathKey(target.packPath) === packPathKey(targetPackPath)) return;
 
@@ -773,9 +738,7 @@ const PackTablesTreeView = React.memo(
         ...(target.kind === "db" ? { dbSelection: target.selection } : {}),
       };
       setContextMenu(null);
-      setIsCopySubmenuOpen(false);
-      setIsPackPickerOpen(false);
-      void props.onCopyInto(source, targetPackPath, openCopiedPackAfterCopy);
+      void props.onCopyInto(source, targetPackPath, openAfterCopy);
     };
 
     /**
@@ -1168,12 +1131,6 @@ const PackTablesTreeView = React.memo(
         (contextMenu.treeTab === "files" && hasFiles && !hasDBTables)),
     );
     const showCopyIntoInContext = Boolean(contextMenu?.target && props.onCopyInto);
-    const selectablePackCatalog = contextMenu?.target
-      ? packCatalog.filter(
-          (pack) => packPathKey(pack.path) !== packPathKey(contextMenu.target!.packPath),
-        )
-      : [];
-    const enabledPackCatalog = selectablePackCatalog.filter((pack) => pack.isEnabled);
 
     return (
       <div
@@ -1242,123 +1199,13 @@ const PackTablesTreeView = React.memo(
             className="fixed bg-gray-800 border border-gray-600 rounded shadow-lg z-50 min-w-[150px]"
             style={{ top: contextMenu.y, left: contextMenu.x }}
           >
-            {showCopyIntoInContext && (
-              <div
-                className="relative"
-                onMouseEnter={() => setIsCopySubmenuOpen(true)}
-                onFocus={() => setIsCopySubmenuOpen(true)}
-              >
-                <button
-                  type="button"
-                  onClick={() => setIsCopySubmenuOpen((isOpen) => !isOpen)}
-                  className="w-full text-left px-4 py-2 hover:bg-gray-700 text-white text-sm flex items-center justify-between gap-4"
-                  aria-haspopup="menu"
-                  aria-expanded={isCopySubmenuOpen}
-                >
-                  <span>Copy into</span>
-                  <span aria-hidden="true">▶</span>
-                </button>
-
-                {isCopySubmenuOpen && (
-                  <div
-                    role="menu"
-                    className="absolute left-full top-0 ml-1 z-50 min-w-[250px] max-w-[340px] bg-gray-800 border border-gray-600 rounded shadow-lg p-1"
-                  >
-                    <button
-                      type="button"
-                      onClick={() => void handleLoadPackCatalog()}
-                      disabled={isLoadingPackCatalog}
-                      className="w-full text-left px-3 py-2 hover:bg-gray-700 text-white text-sm disabled:opacity-50"
-                    >
-                      {isLoadingPackCatalog ? "Loading Packs..." : "Select Pack..."}
-                    </button>
-
-                    {isPackPickerOpen && (
-                      <div className="px-2 pb-2">
-                        {isLoadingPackCatalog ? (
-                          <div className="text-xs text-gray-400 px-1 pt-1">Loading all mods...</div>
-                        ) : selectablePackCatalog.length > 0 ? (
-                          <div className="space-y-2">
-                            <label className="block text-xs text-gray-300">
-                              <span className="mb-1 block">Enabled mods</span>
-                              <select
-                                aria-label="Enabled mods"
-                                defaultValue=""
-                                onChange={(event) => handleCopyIntoPack(event.target.value)}
-                                className="w-full rounded border border-gray-600 bg-gray-700 px-2 py-1 text-sm text-white"
-                              >
-                                <option value="" disabled>
-                                  {enabledPackCatalog.length > 0 ? "Choose an enabled mod..." : "No other enabled mods"}
-                                </option>
-                                {enabledPackCatalog.map((pack) => (
-                                  <option key={pack.path} value={pack.path} title={pack.path}>
-                                    {pack.humanName?.trim() || pack.name}
-                                    {pack.humanName?.trim() && pack.name ? ` (${pack.name})` : ""}
-                                  </option>
-                                ))}
-                              </select>
-                            </label>
-                            <label className="block text-xs text-gray-300">
-                              <span className="mb-1 block">All mods</span>
-                              <select
-                                aria-label="All mods"
-                                defaultValue=""
-                                onChange={(event) => handleCopyIntoPack(event.target.value)}
-                                className="w-full rounded border border-gray-600 bg-gray-700 px-2 py-1 text-sm text-white"
-                              >
-                                <option value="" disabled>
-                                  Choose a pack...
-                                </option>
-                                {selectablePackCatalog.map((pack) => (
-                                  <option key={pack.path} value={pack.path} title={pack.path}>
-                                    {pack.humanName?.trim() || pack.name}
-                                    {pack.humanName?.trim() && pack.name ? ` (${pack.name})` : ""}
-                                  </option>
-                                ))}
-                              </select>
-                            </label>
-                          </div>
-                        ) : (
-                          <div className="text-xs text-gray-400 px-1 pt-1">No other mods found.</div>
-                        )}
-                      </div>
-                    )}
-
-                    <div className="my-1 border-t border-gray-700" />
-                    {(props.otherOpenPacks || []).filter(
-                      (pack) => packPathKey(pack.packPath) !== packPathKey(contextMenu.target!.packPath),
-                    ).length > 0 ? (
-                      (props.otherOpenPacks || [])
-                        .filter(
-                          (pack) => packPathKey(pack.packPath) !== packPathKey(contextMenu.target!.packPath),
-                        )
-                        .map((pack) => (
-                          <button
-                            key={pack.packPath}
-                            type="button"
-                            onClick={() => handleCopyIntoPack(pack.packPath)}
-                            className="w-full text-left px-3 py-2 hover:bg-gray-700 text-white text-sm truncate"
-                            title={pack.label}
-                          >
-                            {pack.label}
-                          </button>
-                        ))
-                    ) : (
-                      <div className="px-3 py-2 text-xs text-gray-500">No other packs are open.</div>
-                    )}
-
-                    <label className="mt-1 flex items-start gap-2 border-t border-gray-700 px-3 py-2 text-xs text-gray-300 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={openCopiedPackAfterCopy}
-                        onChange={(event) => setOpenCopiedPackAfterCopy(event.target.checked)}
-                        className="mt-0.5"
-                      />
-                      <span>Open pack and copied file after copying</span>
-                    </label>
-                  </div>
-                )}
-              </div>
+            {showCopyIntoInContext && contextMenu.target && (
+              <CopyIntoSubmenu
+                sourcePackPath={contextMenu.target.packPath}
+                otherOpenPacks={props.otherOpenPacks}
+                showDialog={props.showDialog}
+                onSelectTarget={handleCopyIntoPack}
+              />
             )}
             {showAddNewFlowInContext && (
               <button

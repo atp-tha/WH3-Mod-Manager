@@ -381,13 +381,24 @@ const api = {
     filePath: string,
     targetPackPath: string,
     overwriteExisting?: boolean,
+    destinationFilePath?: string,
   ): Promise<{
     success: boolean;
     targetPackPath?: string;
     filePath?: string;
     overwriteRequired?: boolean;
+    tableNameRequired?: boolean;
+    tableName?: string;
     error?: string;
-  }> => ipcRenderer.invoke("copyPackedFileToPack", sourcePackPath, filePath, targetPackPath, overwriteExisting),
+  }> =>
+    ipcRenderer.invoke(
+      "copyPackedFileToPack",
+      sourcePackPath,
+      filePath,
+      targetPackPath,
+      overwriteExisting,
+      destinationFilePath,
+    ),
   getPackRowsForSave: (packPath: string, tableNames: string[], includeLocs: boolean): Promise<PackRowsForSave> =>
     ipcRenderer.invoke("getPackRowsForSave", packPath, tableNames, includeLocs),
   renamePackedFiles: (

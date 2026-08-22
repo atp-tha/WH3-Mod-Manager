@@ -29,6 +29,9 @@ import { pickWidestValue, type WidestValue } from "./viewerHelpers";
 import { makeSelectCurrentPackData, makeSelectCurrentPackUnsavedFiles } from "./viewerSelectors";
 import { vanillaPackNames } from "@/src/supportedGames";
 import { isDBCloneTableIgnored } from "@/src/utility/dbCloneTableRouting";
+import CopyIntoSubmenu from "./CopyIntoSubmenu";
+import type { CopyIntoSource, ViewerPackTarget } from "./PackTablesTreeView";
+import { getRowsForCopy, getSelectedRowIndices } from "./copyRows";
 
 const BIG_TABLE_ROW_THRESHOLD = 20000;
 const BIG_TABLE_CELL_THRESHOLD = 2000000;
@@ -528,6 +531,10 @@ const AgGridWrapper = memo(
     canDeepCloneTable,
     onCellValueChangedCallback,
     onContextMenuCallback,
+    onCopyRowsInto,
+    otherOpenPacks,
+    showDialog,
+    sourcePackPath,
     keyColumnNamesUnderscore,
     currentSchema,
     isBigTable,
@@ -542,6 +549,10 @@ const AgGridWrapper = memo(
     canDeepCloneTable: boolean;
     onCellValueChangedCallback: (event: CellValueChangedEvent<RowData>) => void;
     onContextMenuCallback: (row: number, col: number) => void;
+    onCopyRowsInto?: (displayedRows: number[], targetPackPath: string, openAfterCopy: boolean) => void | Promise<void>;
+    otherOpenPacks?: ViewerPackTarget[];
+    showDialog: ShowViewerDialog;
+    sourcePackPath: string;
     keyColumnNamesUnderscore: string[];
     currentSchema: DBVersion;
     isBigTable: boolean;
@@ -774,7 +785,8 @@ const AgGridWrapper = memo(
           clientY: number;
           row: number;
           col: number;
-          label: string;
+          label?: string;
+          copyRows: number[];
         }
       | undefined
     >(undefined);
@@ -967,7 +979,7 @@ const AgGridWrapper = memo(
         ev.event?.preventDefault();
         ev.event?.stopPropagation();
 
-        if (!canDeepCloneTable || keyColumnSet.size === 0) {
+        if ((!canDeepCloneTable || keyColumnSet.size === 0) && !onCopyRowsInto) {
           setMenuState(undefined);
           return;
         }
@@ -984,24 +996,20 @@ const AgGridWrapper = memo(
 
         const deepCloneColIndex =
           clickedField && keyColumnSet.has(clickedField.name) ? clickedColIndex : firstKeyColumnIndex;
-
-        if (deepCloneColIndex === -1) {
-          setMenuState(undefined);
-          return;
-        }
-
-        const deepCloneValue = ev.data?.[getColumnFieldKey(deepCloneColIndex)];
-        const label = `Deep clone ${deepCloneValue ?? ""}`.trimEnd();
+        const canShowDeepClone = canDeepCloneTable && keyColumnSet.size > 0 && deepCloneColIndex !== -1;
+        const deepCloneValue = canShowDeepClone ? ev.data?.[getColumnFieldKey(deepCloneColIndex)] : undefined;
+        const label = canShowDeepClone ? `Deep clone ${deepCloneValue ?? ""}`.trimEnd() : undefined;
         const mouse = ev.event as MouseEvent | undefined;
         setMenuState({
           clientX: mouse?.clientX ?? 0,
           clientY: mouse?.clientY ?? 0,
           row: displayedRowIndex,
-          col: deepCloneColIndex,
+          col: deepCloneColIndex === -1 ? 0 : deepCloneColIndex,
           label,
+          copyRows: getSelectedRowIndices(selectionRangesRef.current, displayedRowIndex),
         });
       },
-      [canDeepCloneTable, currentSchema.fields, firstKeyColumnIndex, keyColumnSet],
+      [canDeepCloneTable, currentSchema.fields, firstKeyColumnIndex, keyColumnSet, onCopyRowsInto],
     );
 
     const onCellMouseDown = useCallback(
@@ -1036,7 +1044,7 @@ const AgGridWrapper = memo(
           mouseEvent.preventDefault();
         }
       },
-      [currentSchema.fields],
+      [currentSchema.fields, startAutoScroll],
     );
 
     const onCellMouseOver = useCallback(
@@ -1215,16 +1223,31 @@ const AgGridWrapper = memo(
             className="rounded-md border border-gray-600 bg-gray-800 text-gray-100 shadow-lg overflow-hidden"
             onMouseDownCapture={(e) => e.stopPropagation()}
           >
-            <button
-              type="button"
-              className="w-full text-left px-3 py-2 text-sm hover:bg-gray-700"
-              onClick={() => {
-                onContextMenuCallback(menuState.row, menuState.col);
-                setMenuState(undefined);
-              }}
-            >
-              {menuState.label}
-            </button>
+            {menuState.label && (
+              <button
+                type="button"
+                className="w-full text-left px-3 py-2 text-sm hover:bg-gray-700"
+                onClick={() => {
+                  onContextMenuCallback(menuState.row, menuState.col);
+                  setMenuState(undefined);
+                }}
+              >
+                {menuState.label}
+              </button>
+            )}
+            {onCopyRowsInto && (
+              <CopyIntoSubmenu
+                sourcePackPath={sourcePackPath}
+                otherOpenPacks={otherOpenPacks}
+                showDialog={showDialog}
+                label="Copy rows into"
+                onSelectTarget={(targetPackPath, openAfterCopy) => {
+                  const selectedRows = menuState.copyRows;
+                  setMenuState(undefined);
+                  void onCopyRowsInto(selectedRows, targetPackPath, openAfterCopy);
+                }}
+              />
+            )}
           </div>
         )}
       </div>
@@ -1232,7 +1255,13 @@ const AgGridWrapper = memo(
   },
 );
 
-const PackTablesTableView = memo(({ showDialog }: { showDialog: ShowViewerDialog }) => {
+type PackTablesTableViewProps = {
+  showDialog: ShowViewerDialog;
+  otherOpenPacks?: ViewerPackTarget[];
+  onCopyInto?: (source: CopyIntoSource, targetPackPath: string, openAfterCopy: boolean) => void | Promise<void>;
+};
+
+const PackTablesTableView = memo(({ showDialog, otherOpenPacks, onCopyInto }: PackTablesTableViewProps) => {
   const dispatch = useAppDispatch();
   const currentDBTableSelection = useAppSelector((state) => state.app.currentDBTableSelection);
   const isFeaturesForModdersEnabled = useAppSelector((state) => state.app.isFeaturesForModdersEnabled);
@@ -1417,6 +1446,34 @@ const PackTablesTableView = memo(({ showDialog }: { showDialog: ShowViewerDialog
       dispatch(setDeepCloneTarget({ row: unfilteredRowIndex, col }));
     },
     [dispatch, filteredRowIndices],
+  );
+
+  const handleCopyRowsInto = useCallback(
+    (displayedRows: number[], targetPackPath: string, openAfterCopy: boolean) => {
+      if (!onCopyInto || !currentDBTableSelection || !activePackFile || !currentSchema) return;
+
+      const columnCount = currentSchema.fields.length;
+      if (columnCount === 0 || !activePackFile.schemaFields) return;
+
+      const sourceSchemaFields = activePackFile.schemaFields as AmendedSchemaField[];
+      const unfilteredRows = [
+        ...new Set(displayedRows.map((row) => filteredRowIndices[row]).filter((row) => row != null)),
+      ];
+      const rows = getRowsForCopy(sourceSchemaFields, unfilteredRows, columnCount);
+      if (rows.length === 0) return;
+
+      const source: CopyIntoSource = {
+        packPath,
+        filePath: activePackFile.name || packedFilePath,
+        kind: "dbRows",
+        dbSelection: currentDBTableSelection,
+        rows,
+        tableSchema: currentSchema,
+        version: activePackFile.version,
+      };
+      void onCopyInto(source, targetPackPath, openAfterCopy);
+    },
+    [activePackFile, currentDBTableSelection, currentSchema, filteredRowIndices, onCopyInto, packPath, packedFilePath],
   );
 
   const applyPackFileLocally = useCallback(
@@ -1652,6 +1709,10 @@ const PackTablesTableView = memo(({ showDialog }: { showDialog: ShowViewerDialog
           canDeepCloneTable={!isDBCloneTableIgnored(currentDBTableSelection.dbName)}
           onCellValueChangedCallback={handleCellValueChangedCallback}
           onContextMenuCallback={handleContextMenuCallback}
+          onCopyRowsInto={onCopyInto ? handleCopyRowsInto : undefined}
+          otherOpenPacks={otherOpenPacks}
+          showDialog={showDialog}
+          sourcePackPath={packPath}
           keyColumnNamesUnderscore={keyColumnNamesUnderscore}
           currentSchema={currentSchema}
           isBigTable={isBigTable}

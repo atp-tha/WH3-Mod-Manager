@@ -31,9 +31,11 @@ import type { ShowViewerDialog } from "./viewerDialogs";
 import { makeSelectCurrentPackData, makeSelectCurrentPackUnsavedFiles } from "./viewerSelectors";
 import {
   DEFAULT_DB_TABLE_ROOT,
+  UNUSED_DB_TABLE_ROOT,
   getDBGroupName,
   getDBPackedFilePath,
   getPackNameFromPath,
+  parseDBTablePath,
 } from "@/src/utility/packFileHelpers";
 import { clearPackDataStoreForPack } from "./packDataStore";
 import { clearPreparedTableForPack } from "./tablePrepCache";
@@ -64,9 +66,41 @@ type CopyOverwriteRequest = {
   openAfterCopy: boolean;
   filePath: string;
 };
+type CopyTableNameRequest = {
+  source: CopyIntoSource;
+  targetPackPath: string;
+  openAfterCopy: boolean;
+  tableName: string;
+  filePath: string;
+  exactFileExists: boolean;
+};
 const EMPTY_TABS: ViewerTab[] = [];
 /** Below this the modder File button cannot show its label inside the sidebar's width. */
 const TOOLBAR_ICON_ONLY_SIDEBAR_WIDTH = 300;
+
+const copyPackPathKey = (value: string) => value.replaceAll("/", "\\").toLowerCase();
+
+const getRenamedDBTablePath = (filePath: string, tableName: string): string | undefined => {
+  const parsed = parseDBTablePath(filePath);
+  const trimmedTableName = tableName.trim();
+  if (
+    !parsed ||
+    (parsed.dbFolder !== DEFAULT_DB_TABLE_ROOT && parsed.dbFolder !== UNUSED_DB_TABLE_ROOT) ||
+    !trimmedTableName ||
+    /[\\/]/.test(trimmedTableName)
+  ) {
+    return undefined;
+  }
+
+  return `${parsed.dbFolder}\\${trimmedTableName}\\${parsed.dbSubname}`;
+};
+
+const getDBTableNameForCopy = (filePath: string): string | undefined => {
+  const parsed = parseDBTablePath(filePath);
+  if (!parsed || (parsed.dbFolder !== DEFAULT_DB_TABLE_ROOT && parsed.dbFolder !== UNUSED_DB_TABLE_ROOT))
+    return undefined;
+  return parsed.dbName;
+};
 
 const hasDBSelectionTarget = (selection?: DBTableSelection): selection is DBTableSelection =>
   Boolean(selection?.packPath && selection.dbName && selection.dbSubname);
@@ -108,6 +142,8 @@ const ModsViewer = memo(() => {
   const [isFileMenuOpen, setIsFileMenuOpen] = useState(false);
   const [packCloseConfirmPath, setPackCloseConfirmPath] = useState<string | null>(null);
   const [copyOverwriteRequest, setCopyOverwriteRequest] = useState<CopyOverwriteRequest | null>(null);
+  const [copyTableNameRequest, setCopyTableNameRequest] = useState<CopyTableNameRequest | null>(null);
+  const [copyTableName, setCopyTableName] = useState("");
   const [isCopyProcessing, setIsCopyProcessing] = useState(false);
   const [packTabs, setPackTabs] = useState<PackTab[]>([]);
   const [activePackPath, setActivePackPath] = useState<string | null>(null);
@@ -216,6 +252,7 @@ const ModsViewer = memo(() => {
   const [isSidebarNarrow, setIsSidebarNarrow] = useState(false);
   const saveAsPackNameInputRef = useRef<HTMLInputElement>(null);
   const newPackNameInputRef = useRef<HTMLInputElement>(null);
+  const copyTableNameInputRef = useRef<HTMLInputElement>(null);
   const tabIdCounterRef = useRef(0);
   const lastActionRef = useRef<{ key: string; at: number; openedNew: boolean; tabId?: string } | null>(null);
   const lastHandledPackOpenNonceRef = useRef(0);
@@ -275,6 +312,15 @@ const ModsViewer = memo(() => {
       }, 0);
     }
   }, [isNewPackModalOpen]);
+
+  useEffect(() => {
+    if (!copyTableNameRequest || !copyTableNameInputRef.current) return;
+    window.focus();
+    setTimeout(() => {
+      copyTableNameInputRef.current?.focus();
+      copyTableNameInputRef.current?.select();
+    }, 0);
+  }, [copyTableNameRequest]);
 
   useEffect(() => {
     if (!isFileMenuOpen) return;
@@ -479,21 +525,140 @@ const ModsViewer = memo(() => {
     [buildPackedFileTabCandidate, openOrActivateTab],
   );
 
+  const getTargetPackFileNames = useCallback(
+    async (targetPackPath: string): Promise<Set<string> | undefined> => {
+      const targetPackDataPath = Object.keys(packsDataByPath).find(
+        (packPath) => copyPackPathKey(packPath) === copyPackPathKey(targetPackPath),
+      );
+      const targetUnsavedDataPath = Object.keys(unsavedPacksDataByPath).find(
+        (packPath) => copyPackPathKey(packPath) === copyPackPathKey(targetPackPath),
+      );
+      const targetPackData = targetPackDataPath ? packsDataByPath[targetPackDataPath] : undefined;
+      const targetUnsavedFiles = targetUnsavedDataPath
+        ? unsavedPacksDataByPath[targetUnsavedDataPath] || []
+        : undefined;
+
+      if (targetPackData || targetUnsavedFiles) {
+        return new Set([
+          ...(targetPackData?.tables || []),
+          ...Object.keys(targetPackData?.packedFiles || {}),
+          ...(targetUnsavedFiles || []).map((file) => file.name),
+        ]);
+      }
+
+      if (!window.api?.getPackFilesList) return undefined;
+      return new Set(await window.api.getPackFilesList(targetPackPath));
+    },
+    [packsDataByPath, unsavedPacksDataByPath],
+  );
+
   const handleCopyInto = useCallback(
     async (
       source: CopyIntoSource,
       targetPackPath: string,
       openAfterCopy: boolean,
       overwriteExisting = false,
+      destinationFilePath?: string,
     ) => {
       setIsCopyProcessing(true);
       try {
-        const result = await window.api?.copyPackedFileToPack(
-          source.packPath,
-          source.filePath,
-          targetPackPath,
-          overwriteExisting,
-        );
+        const sourceTableName = getDBTableNameForCopy(source.filePath);
+        if (sourceTableName && !overwriteExisting) {
+          const targetFileNames = await getTargetPackFileNames(targetPackPath);
+          if (targetFileNames) {
+            const hasTableName = (tableName: string) =>
+              [...targetFileNames].some((filePath) => {
+                const targetTableName = getDBTableNameForCopy(filePath);
+                return targetTableName?.toLowerCase() === tableName.toLowerCase();
+              });
+
+            if (destinationFilePath) {
+              const destinationTableName = getDBTableNameForCopy(destinationFilePath);
+              if (destinationTableName && hasTableName(destinationTableName)) {
+                showDialog(`The destination already contains a table named "${destinationTableName}"`, {
+                  title: "Table Already Exists",
+                });
+                return;
+              }
+            }
+
+            const hasSameTableName = !destinationFilePath && hasTableName(sourceTableName);
+            if (hasSameTableName) {
+              setCopyTableNameRequest({
+                source,
+                targetPackPath,
+                openAfterCopy,
+                tableName: sourceTableName,
+                filePath: source.filePath,
+                exactFileExists: [...targetFileNames].some(
+                  (filePath) => copyPackPathKey(filePath) === copyPackPathKey(source.filePath),
+                ),
+              });
+              setCopyTableName(sourceTableName);
+              return;
+            }
+          }
+        }
+
+        let result:
+          | {
+              success: boolean;
+              targetPackPath?: string;
+              filePath?: string;
+              overwriteRequired?: boolean;
+              tableNameRequired?: boolean;
+              tableName?: string;
+              error?: string;
+            }
+          | undefined;
+
+        if (source.kind === "dbRows") {
+          if (!source.rows || !source.tableSchema) {
+            result = { success: false, error: "The selected rows do not have a table schema" };
+          } else {
+            const copiedFile: PackedFile = {
+              name: destinationFilePath || source.filePath,
+              file_size: 0,
+              start_pos: -1,
+              is_compressed: false,
+              schemaFields: source.rows.flat(),
+              tableSchema: source.tableSchema,
+              version: source.version,
+            };
+            const saveResult = await window.api?.saveDBTableEdits(targetPackPath, copiedFile);
+            result = saveResult?.success
+              ? { success: true, targetPackPath, filePath: copiedFile.name }
+              : { success: false, error: saveResult?.error || "Failed to save copied rows" };
+          }
+        } else if (destinationFilePath) {
+          result = await window.api?.copyPackedFileToPack(
+            source.packPath,
+            source.filePath,
+            targetPackPath,
+            overwriteExisting,
+            destinationFilePath,
+          );
+        } else {
+          result = await window.api?.copyPackedFileToPack(
+            source.packPath,
+            source.filePath,
+            targetPackPath,
+            overwriteExisting,
+          );
+        }
+
+        if (result?.tableNameRequired && !destinationFilePath && !overwriteExisting) {
+          setCopyTableNameRequest({
+            source,
+            targetPackPath,
+            openAfterCopy,
+            tableName: result.tableName || sourceTableName || "",
+            filePath: result.filePath || source.filePath,
+            exactFileExists: false,
+          });
+          setCopyTableName(result.tableName || sourceTableName || "");
+          return;
+        }
         if (result?.overwriteRequired && !overwriteExisting) {
           setCopyOverwriteRequest({
             source,
@@ -511,9 +676,12 @@ const ModsViewer = memo(() => {
         }
 
         setCopyOverwriteRequest(null);
+        setCopyTableNameRequest(null);
+        setCopyTableName("");
         if (!openAfterCopy) return;
 
         const copiedPackPath = result.targetPackPath || targetPackPath;
+        const copiedFilePath = result.filePath || destinationFilePath || source.filePath;
         const targetWasAlreadyOpen = packTabs.some((packTab) => packTab.packPath === copiedPackPath);
         if (!targetWasAlreadyOpen && !copiedPackPath.startsWith("memory://")) {
           // This asks the main process to load the destination's file index and register its viewer
@@ -523,15 +691,23 @@ const ModsViewer = memo(() => {
         }
         openOrActivatePackTab(copiedPackPath);
 
-        if (source.kind === "db" && source.dbSelection) {
+        if ((source.kind === "db" || source.kind === "dbRows") && source.dbSelection) {
+          const copiedTable = parseDBTablePath(copiedFilePath);
           handleOpenDBTable({
             ...source.dbSelection,
+            ...(copiedTable
+              ? {
+                  dbFolder: copiedTable.dbFolder,
+                  dbName: copiedTable.dbName,
+                  dbSubname: copiedTable.dbSubname,
+                }
+              : {}),
             packPath: copiedPackPath,
           });
-        } else if (source.filePath.startsWith("whmmflows\\")) {
-          handleOpenFlowFile({ flowFile: source.filePath, packPath: copiedPackPath });
+        } else if (copiedFilePath.startsWith("whmmflows\\")) {
+          handleOpenFlowFile({ flowFile: copiedFilePath, packPath: copiedPackPath });
         } else {
-          handleOpenPackedFile({ filePath: source.filePath, packPath: copiedPackPath });
+          handleOpenPackedFile({ filePath: copiedFilePath, packPath: copiedPackPath });
         }
       } catch (error) {
         console.error("Error copying packed file into another pack:", error);
@@ -546,6 +722,7 @@ const ModsViewer = memo(() => {
       handleOpenDBTable,
       handleOpenFlowFile,
       handleOpenPackedFile,
+      getTargetPackFileNames,
       openOrActivatePackTab,
       packTabs,
       showDialog,
@@ -561,6 +738,37 @@ const ModsViewer = memo(() => {
       true,
     );
   }, [copyOverwriteRequest, handleCopyInto, isCopyProcessing]);
+
+  const handleCopyTableWithNewName = useCallback(() => {
+    if (!copyTableNameRequest || isCopyProcessing) return;
+    if (copyTableName.trim().toLowerCase() === copyTableNameRequest.tableName.trim().toLowerCase()) {
+      showDialog("Enter a different table name for the copy", { title: "Table Name Unchanged" });
+      return;
+    }
+    const destinationFilePath = getRenamedDBTablePath(copyTableNameRequest.filePath, copyTableName);
+    if (!destinationFilePath) {
+      showDialog("Enter a valid table name without slashes", { title: "Invalid Table Name" });
+      return;
+    }
+
+    void handleCopyInto(
+      copyTableNameRequest.source,
+      copyTableNameRequest.targetPackPath,
+      copyTableNameRequest.openAfterCopy,
+      false,
+      destinationFilePath,
+    );
+  }, [copyTableName, copyTableNameRequest, handleCopyInto, isCopyProcessing, showDialog]);
+
+  const handleOverwriteOriginalTable = useCallback(() => {
+    if (!copyTableNameRequest || isCopyProcessing || !copyTableNameRequest.exactFileExists) return;
+    void handleCopyInto(
+      copyTableNameRequest.source,
+      copyTableNameRequest.targetPackPath,
+      copyTableNameRequest.openAfterCopy,
+      true,
+    );
+  }, [copyTableNameRequest, handleCopyInto, isCopyProcessing]);
 
   const getOtherOpenPacks = useCallback(
     (sourcePackPath: string): ViewerPackTarget[] =>
@@ -1221,6 +1429,73 @@ const ModsViewer = memo(() => {
         </Modal.Footer>
       </Modal>
 
+      {/* Destination table-name prompt for DB tables and copied rows */}
+      <Modal
+        onClose={() => {
+          if (!isCopyProcessing) {
+            setCopyTableNameRequest(null);
+            setCopyTableName("");
+          }
+        }}
+        show={!!copyTableNameRequest}
+        size="md"
+        position="center"
+      >
+        <Modal.Header>Table Already Exists</Modal.Header>
+        <Modal.Body>
+          <div className="space-y-3 text-sm text-gray-200">
+            <div>
+              The destination pack already contains a table named:
+              <div className="mt-2 break-all text-gray-400">{copyTableNameRequest?.tableName}</div>
+            </div>
+            <label className="block">
+              <span className="mb-1 block text-gray-300">New table name</span>
+              <input
+                ref={copyTableNameInputRef}
+                type="text"
+                value={copyTableName}
+                onChange={(event) => setCopyTableName(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") handleCopyTableWithNewName();
+                }}
+                className="w-full rounded-lg border border-gray-600 bg-gray-700 px-3 py-2 text-white focus:border-blue-500 focus:outline-none"
+                disabled={isCopyProcessing}
+                aria-label="New table name"
+              />
+            </label>
+            <div className="break-all text-xs text-gray-500">Destination: {copyTableNameRequest?.targetPackPath}</div>
+          </div>
+        </Modal.Body>
+        <Modal.Footer>
+          <button
+            onClick={() => {
+              setCopyTableNameRequest(null);
+              setCopyTableName("");
+            }}
+            disabled={isCopyProcessing}
+            className="px-4 py-2 bg-gray-600 hover:bg-gray-500 text-white font-medium rounded-lg transition-colors duration-200 disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          {copyTableNameRequest?.exactFileExists && copyTableNameRequest.source.kind === "db" && (
+            <button
+              onClick={handleOverwriteOriginalTable}
+              disabled={isCopyProcessing}
+              className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-medium rounded-lg transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isCopyProcessing ? "Copying..." : "Overwrite Original"}
+            </button>
+          )}
+          <button
+            onClick={handleCopyTableWithNewName}
+            disabled={isCopyProcessing || !copyTableName.trim()}
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {isCopyProcessing ? "Copying..." : "Copy with New Name"}
+          </button>
+        </Modal.Footer>
+      </Modal>
+
       {/* Overwrite confirmation, shown over the Save As modal so Cancel goes back to it */}
       <Modal onClose={() => setOverwriteConfirmPath(null)} show={!!overwriteConfirmPath} size="md" position="center">
         <Modal.Header>Pack Already Exists</Modal.Header>
@@ -1619,7 +1894,11 @@ const ModsViewer = memo(() => {
                         showDialog={showDialog}
                       />
                     ) : (
-                      <PackTablesTableView showDialog={showDialog} />
+                      <PackTablesTableView
+                        showDialog={showDialog}
+                        otherOpenPacks={getOtherOpenPacks(activeTab.packPath)}
+                        onCopyInto={handleCopyInto}
+                      />
                     )
                   ) : (
                     <div className="h-full flex items-center justify-center text-sm text-gray-400">

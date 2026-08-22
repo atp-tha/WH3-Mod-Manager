@@ -1,5 +1,7 @@
 import assert from "assert";
 import {
+  DEFAULT_DB_TABLE_ROOT,
+  UNUSED_DB_TABLE_ROOT,
   getDBName,
   findUnparsedTablePrefixes,
   getDBPackedFilePath,
@@ -7002,6 +7004,7 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
       filePath: string,
       targetPackPath: string,
       overwriteExisting = false,
+      destinationFilePath?: string,
     ) => {
       try {
         if (!sourcePackPath || !filePath || !targetPackPath) {
@@ -7015,24 +7018,68 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
         }
 
         const normalizedFilePath = normalizePackFilePath(filePath);
+        const normalizedDestinationFilePath = normalizePackFilePath(destinationFilePath || normalizedFilePath);
+        const sourceDBTable = parseDBTablePath(normalizedFilePath);
+        const destinationDBTable = parseDBTablePath(normalizedDestinationFilePath);
         const targetUnsavedFiles = appData.unsavedPacksData[targetPackPath] || [];
-        let targetPackedFile = findPackedFileInList(targetUnsavedFiles, normalizedFilePath);
+        let targetPackedFiles = [...targetUnsavedFiles];
+        let targetPackedFile = findPackedFileInList(targetUnsavedFiles, normalizedDestinationFilePath);
         const targetPack = appData.packsData.find(
           (pack) => pack.path === targetPackPath || packPathKey(pack.path) === packPathKey(targetPackPath),
         );
         if (!targetPackedFile && targetPack) {
-          targetPackedFile = findPackedFileInList(targetPack.packedFiles, normalizedFilePath);
+          targetPackedFiles = [...targetPackedFiles, ...targetPack.packedFiles];
+          targetPackedFile = findPackedFileInList(targetPack.packedFiles, normalizedDestinationFilePath);
         }
         if (!targetPackedFile && !targetPackPath.startsWith("memory://")) {
           const targetRead = await readPack(targetPackPath, { skipParsingTables: true });
-          targetPackedFile = findPackedFileInList(targetRead.packedFiles, normalizedFilePath);
+          targetPackedFiles = [...targetPackedFiles, ...targetRead.packedFiles];
+          targetPackedFile = findPackedFileInList(targetRead.packedFiles, normalizedDestinationFilePath);
+        }
+        if (
+          sourceDBTable &&
+          (sourceDBTable.dbFolder === DEFAULT_DB_TABLE_ROOT || sourceDBTable.dbFolder === UNUSED_DB_TABLE_ROOT) &&
+          destinationFilePath &&
+          !overwriteExisting &&
+          targetPackedFiles.some((targetFile) => {
+            const targetDBTable = parseDBTablePath(targetFile.name);
+            return (
+              destinationDBTable &&
+              targetDBTable?.dbName.toLowerCase() === destinationDBTable.dbName.toLowerCase()
+            );
+          })
+        ) {
+          return {
+            success: false,
+            targetPackPath,
+            filePath: normalizedDestinationFilePath,
+            error: `The destination already contains a table named "${destinationDBTable?.dbName}"`,
+          };
+        }
+        if (
+          sourceDBTable &&
+          (sourceDBTable.dbFolder === DEFAULT_DB_TABLE_ROOT || sourceDBTable.dbFolder === UNUSED_DB_TABLE_ROOT) &&
+          !destinationFilePath &&
+          !overwriteExisting &&
+          targetPackedFiles.some((targetFile) => {
+            const targetDBTable = parseDBTablePath(targetFile.name);
+            return targetDBTable?.dbName.toLowerCase() === sourceDBTable.dbName.toLowerCase();
+          })
+        ) {
+          return {
+            success: false,
+            tableNameRequired: true,
+            targetPackPath,
+            filePath: normalizedFilePath,
+            tableName: sourceDBTable.dbName,
+          };
         }
         if (targetPackedFile && !overwriteExisting) {
           return {
             success: false,
             overwriteRequired: true,
             targetPackPath,
-            filePath: normalizedFilePath,
+            filePath: normalizedDestinationFilePath,
           };
         }
 
@@ -7106,7 +7153,9 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
           return { success: false, error: `Could not prepare DB table "${normalizedFilePath}" for the viewer` };
         }
 
-        const copiedFileName = normalizePackFilePath(sourcePackedFile.name || normalizedFilePath);
+        const copiedFileName = normalizePackFilePath(
+          destinationFilePath || sourcePackedFile.name || normalizedFilePath,
+        );
         const copiedFile: PackedFile = {
           ...sourcePackedFile,
           name: copiedFileName,
