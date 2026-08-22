@@ -13,8 +13,8 @@
     "handsontable/styles/*.css"
   ],
   "scripts": {
-    "start": "tsc ./src/sub.ts ./src/readPacksWorker.ts --skipLibCheck --resolveJsonModule --outDir ./temp && electron-forge start --inspect-electron -- --mode development",
-    "dbclone": "tsc ./src/sub.ts ./src/readPacksWorker.ts --skipLibCheck --resolveJsonModule --outDir ./temp && electron-forge start --inspect-electron -- --mode development -testDBClone",
+    "start": "tsc ./src/sub.ts ./src/readPacksWorker.ts --skipLibCheck --resolveJsonModule --outDir ./temp && electron-forge start -- --mode development",
+    "dbclone": "tsc ./src/sub.ts ./src/readPacksWorker.ts --skipLibCheck --resolveJsonModule --outDir ./temp && electron-forge start -- --mode development -testDBClone",
     "package": "electron-forge package",
     "make": "tsc ./src/sub.ts ./src/readPacksWorker.ts --skipLibCheck --resolveJsonModule --outDir ./temp && electron-forge make -- --mode production",
     "publish": "electron-forge publish",
@@ -39,6 +39,9 @@
   "license": "MIT",
   "config": {
     "forge": {
+      "rebuildConfig": {
+        "useCache": true
+      },
       "hooks": {
         "postMake": "require:./scripts/normalize-zip-paths.cjs"
       },
