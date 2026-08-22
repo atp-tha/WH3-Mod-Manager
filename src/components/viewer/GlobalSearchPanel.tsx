@@ -62,9 +62,9 @@ type PanelRow =
     }
   | { type: "result"; key: string; result: GlobalSearchResult };
 
-const PACK_ROW_HEIGHT = 30;
-const FILE_ROW_HEIGHT = 28;
-const RESULT_ROW_HEIGHT = 26;
+const PACK_ROW_HEIGHT = 32;
+const FILE_ROW_HEIGHT = 30;
+const RESULT_ROW_HEIGHT = 28;
 
 const packPathKey = (value: string) => value.replaceAll("/", "\\").toLowerCase();
 
@@ -75,7 +75,9 @@ const renderHighlighted = (value: string, start: number, end: number) => {
   return (
     <>
       {value.slice(0, start)}
-      <mark className="rounded-sm bg-amber-500/30 text-amber-200">{value.slice(start, safeEnd)}</mark>
+      <mark className="rounded-sm bg-amber-400/40 px-0.5 font-semibold text-amber-100">
+        {value.slice(start, safeEnd)}
+      </mark>
       {value.slice(safeEnd)}
     </>
   );
@@ -400,7 +402,7 @@ const GlobalSearchPanel = memo(
                 type="button"
                 onClick={() => toggleCollapsed(row.key)}
                 title={row.filePath}
-                className="flex w-full items-center gap-2 pl-6 pr-2 text-left text-sm text-gray-200 hover:bg-gray-700/60"
+                className="flex w-full items-center gap-2 pl-5 pr-2 text-left text-sm text-gray-200 hover:bg-gray-700/60"
               >
                 <FontAwesomeIcon icon={isCollapsed ? faChevronRight : faChevronDown} className="w-2.5 shrink-0" />
                 <span className="truncate">{row.label}</span>
@@ -424,24 +426,26 @@ const GlobalSearchPanel = memo(
               disabled={!isOpenable}
               title={isOpenable ? undefined : "Rigid models have no viewer; use the path to locate the file."}
               className={
-                "flex w-full items-center gap-2 pl-12 pr-2 text-left text-sm " +
-                (isOpenable ? "text-gray-200 hover:bg-gray-700/60" : "cursor-default text-gray-400")
+                "flex w-full items-center gap-3 pl-9 pr-2 text-left text-sm " +
+                // The colours live on the spans below, so a row that cannot be opened is dimmed as a
+                // whole rather than by restating them.
+                (isOpenable ? "hover:bg-gray-700/60" : "cursor-default opacity-60")
               }
             >
               {result.kind === "db" && (
                 <>
-                  <span className="shrink-0 text-gray-400">
+                  <span className="shrink-0 whitespace-nowrap text-gray-400">
                     {result.columnName} · row {result.rowIndex}
                   </span>
-                  <span className="truncate font-mono">
+                  <span className="truncate font-mono text-gray-50">
                     {renderHighlighted(result.value, result.matchStart, result.matchEnd)}
                   </span>
                 </>
               )}
               {result.kind === "loc" && (
                 <>
-                  <span className="shrink-0 text-gray-400">{result.matchedIn}</span>
-                  <span className="truncate font-mono">
+                  <span className="shrink-0 whitespace-nowrap text-gray-400">{result.matchedIn}</span>
+                  <span className="truncate font-mono text-gray-50">
                     {result.matchedIn === "key"
                       ? renderHighlighted(result.key, result.matchStart, result.matchEnd)
                       : renderHighlighted(result.value, result.matchStart, result.matchEnd)}
@@ -451,7 +455,7 @@ const GlobalSearchPanel = memo(
               {result.kind === "text" && (
                 <>
                   <span className="shrink-0 tabular-nums text-gray-400">:{result.line}</span>
-                  <span className="truncate font-mono">
+                  <span className="truncate font-mono text-gray-50">
                     {renderHighlighted(result.excerpt, result.matchStartInExcerpt, result.matchEndInExcerpt)}
                   </span>
                 </>
@@ -461,7 +465,7 @@ const GlobalSearchPanel = memo(
                   <span className="shrink-0 tabular-nums text-gray-400">
                     @{result.offset} · {result.encoding}
                   </span>
-                  <span className="truncate font-mono">
+                  <span className="truncate font-mono text-gray-50">
                     {renderHighlighted(result.excerpt, result.matchStartInExcerpt, result.matchEndInExcerpt)}
                   </span>
                 </>
