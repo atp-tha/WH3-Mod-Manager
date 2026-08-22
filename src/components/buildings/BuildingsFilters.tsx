@@ -127,6 +127,15 @@ const filterSelectStyle = {
 /** Above this many options the menu is virtualised; regions and factions are well past it. */
 const WINDOW_THRESHOLD = 60;
 
+/** Default cultures for foreign slot types whose game content has one intended owner. */
+export const FOREIGN_SLOT_TYPE_CULTURES: Readonly<Record<string, string>> = {
+  PIRATE_COVE: "wh2_dlc11_cst_vampire_coast",
+  SILENT_SANCTUM: "wh2_main_lzd_lizardmen",
+  TYRANTS_DEMANDS: "wh3_main_ogr_ogre_kingdoms",
+  UNDERDEEP: "wh_main_dwf_dwarfs",
+  UNDEREMPIRE: "wh2_main_skv_skaven",
+};
+
 /**
  * The query change that switching foreign slot type implies.
  *
@@ -140,13 +149,15 @@ export const foreignSlotTypeQueryPatch = (
 ): Partial<BuildingsRegionQuery> => {
   const keep = (value: string | undefined, allowed: string[]) =>
     value && (!option || allowed.includes(value)) ? value : undefined;
-  const culture = keep(query.culture, option?.cultures ?? []);
+  const mappedCulture = option ? FOREIGN_SLOT_TYPE_CULTURES[option.key] : undefined;
+  const culture = mappedCulture ?? keep(query.culture, option?.cultures ?? []);
+  const cultureChanged = culture !== query.culture;
   return {
     foreignSlotType: option?.key,
     settlementType: undefined,
     culture,
-    subculture: culture ? keep(query.subculture, option?.subcultures ?? []) : undefined,
-    faction: culture ? keep(query.faction, option?.factions ?? []) : undefined,
+    subculture: culture && !cultureChanged ? keep(query.subculture, option?.subcultures ?? []) : undefined,
+    faction: culture && !cultureChanged ? keep(query.faction, option?.factions ?? []) : undefined,
   };
 };
 

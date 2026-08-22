@@ -160,4 +160,20 @@ describe("foreignSlotTypeQueryPatch", () => {
       faction: "kho_faction",
     });
   });
+
+  it("uses the mapped culture when selecting a known foreign slot type", () => {
+    const underEmpire: BuildingsForeignSlotTypeOption = {
+      ...cult,
+      key: "UNDEREMPIRE",
+      cultures: ["wh2_main_skv_skaven"],
+    };
+
+    expect(foreignSlotTypeQueryPatch(underEmpire, query)).toEqual({
+      foreignSlotType: "UNDEREMPIRE",
+      settlementType: undefined,
+      culture: "wh2_main_skv_skaven",
+      subculture: undefined,
+      faction: undefined,
+    });
+  });
 });
