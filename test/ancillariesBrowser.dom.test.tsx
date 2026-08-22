@@ -81,8 +81,18 @@ const groupedCatalog: AncillariesCatalog = {
   ...catalog,
   uniquenessGroupings: [commonGrouping, uniqueGrouping],
   ancillaries: [
-    ancillary({ key: "anc_unique", localizedName: "Unique Item", uniquenessGrouping: uniqueGrouping }),
-    ancillary({ key: "anc_common", localizedName: "Common Item", uniquenessGrouping: commonGrouping }),
+    ancillary({
+      key: "anc_common",
+      localizedName: "Common Item",
+      uniquenessScore: 35,
+      uniquenessGrouping: commonGrouping,
+    }),
+    ancillary({
+      key: "anc_unique",
+      localizedName: "Unique Item",
+      uniquenessScore: 130,
+      uniquenessGrouping: uniqueGrouping,
+    }),
   ],
 };
 
@@ -238,7 +248,7 @@ describe("AncillariesBrowser", () => {
     const names = [...screen.getAllByRole("button")]
       .map((button) => button.textContent)
       .filter((text): text is string => text?.includes("Item") ?? false);
-    expect(names).toEqual(["Common Item", "Unique Item"]);
+    expect(names).toEqual(["Unique Item", "Common Item"]);
   });
 
   it("can disable uniqueness sorting from the Options menu", async () => {
@@ -250,7 +260,7 @@ describe("AncillariesBrowser", () => {
         .map((button) => button.textContent)
         .filter((text): text is string => text?.includes("Item") ?? false);
 
-    expect(itemNames()).toEqual(["Common Item", "Unique Item"]);
+    expect(itemNames()).toEqual(["Unique Item", "Common Item"]);
 
     await userEvent.click(screen.getByRole("button", { name: "Options" }));
     const disableSorting = screen.getByRole("checkbox", { name: "Disable uniqueness sorting" });
@@ -258,7 +268,7 @@ describe("AncillariesBrowser", () => {
     await userEvent.click(disableSorting);
 
     expect(disableSorting).toBeChecked();
-    expect(itemNames()).toEqual(["Unique Item", "Common Item"]);
+    expect(itemNames()).toEqual(["Common Item", "Unique Item"]);
   });
 
   it("skips the subcategory row when a category has only one", async () => {

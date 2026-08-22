@@ -92,8 +92,17 @@ const AncillariesBrowser = memo(
       );
 
       const subcategoryNames = new Map(catalog.subcategories.map((row) => [row.key, row.localizedName]));
+      // Rank groups by their score range, highest first. Individual ancillary scores must not
+      // affect the order: they only determine which group an ancillary belongs to.
       const uniquenessGroupingOrder = new Map(
-        (catalog.uniquenessGroupings ?? []).map((grouping, index) => [grouping.groupKey, index]),
+        [...(catalog.uniquenessGroupings ?? [])]
+          .sort(
+            (a, b) =>
+              b.uniquenessMin - a.uniquenessMin ||
+              b.uniquenessMax - a.uniquenessMax ||
+              a.localizedName.localeCompare(b.localizedName),
+          )
+          .map((grouping, index) => [grouping.groupKey, index]),
       );
       const sortWithinBucket = (ancillaries: AncillarySummary[]) => {
         if (disableUniquenessSorting) return ancillaries;
