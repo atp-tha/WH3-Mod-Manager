@@ -12267,12 +12267,22 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
               if (!convertedFile?.schemaFields || !convertedFile.tableSchema) {
                 throw new Error("The TSV did not contain an RPFM table metadata line");
               }
+              // The payload has to be serialized here, the way saveDBTableEdits does it: both pack
+              // save paths flatten an unsaved file to `file.buffer || Buffer.from(file.text || "")`
+              // and drop schemaFields, so a staged table with no buffer is written out as 0 bytes.
+              const tableBuffer = serializePackFileDataToBuffer({
+                name: convertedFile.name,
+                schemaFields: convertedFile.schemaFields,
+                tableSchema: convertedFile.tableSchema,
+                version: convertedFile.version,
+              });
               importedFile = {
                 name: convertedFile.name,
                 version: convertedFile.version,
                 tableSchema: convertedFile.tableSchema,
                 schemaFields: convertedFile.schemaFields,
-                file_size: 0,
+                buffer: tableBuffer,
+                file_size: tableBuffer.length,
                 start_pos: -1,
                 is_compressed: false,
               };
@@ -12406,11 +12416,7 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
             addSkipped(candidate.name, "No matching parsed table schema");
             continue;
           }
-          const rows = chunkSchemaIntoRows(packedFile.schemaFields, schema).map((row) =>
-            row.map((cell, index) => ({
-              resolvedKeyValue: resolveKeyValue(schema.fields[index].field_type, cell.fields),
-            })),
-          );
+          const rows = chunkSchemaIntoRows(packedFile.schemaFields, schema);
           const content = buildRpfmTsvContent({
             packedFilePath: candidate.name,
             tableName: isLocPackedFilePath(candidate.name) ? "Loc" : parsedPath.dbName,
@@ -12492,11 +12498,7 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
               addSkipped(candidate.name, "No matching parsed table schema");
               continue;
             }
-            const rows = chunkSchemaIntoRows(packedFile.schemaFields, schema).map((row) =>
-              row.map((cell, index) => ({
-                resolvedKeyValue: resolveKeyValue(schema.fields[index].field_type, cell.fields),
-              })),
-            );
+            const rows = chunkSchemaIntoRows(packedFile.schemaFields, schema);
             const content = buildRpfmTsvContent({
               packedFilePath: candidate.name,
               tableName: isLocPackedFilePath(candidate.name) ? "Loc" : parsedPath.dbName,

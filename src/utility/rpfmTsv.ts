@@ -1,6 +1,6 @@
 import { buildRowFromValues } from "./dbRowCells";
 import { isLocPackedFilePath, parseDBTablePath } from "./packFileHelpers";
-import type { DBVersion, Field, NewPackedFile, SCHEMA_FIELD_TYPE, SchemaField } from "../packFileTypes";
+import type { DBVersion, NewPackedFile, SCHEMA_FIELD_TYPE, SchemaField } from "../packFileTypes";
 import { LocVersion } from "../packFileTypes";
 
 export interface RpfmTsvMetadata {
@@ -33,58 +33,41 @@ export const getRpfmTsvMetadata = (line: string, fallbackPackedFileName: string)
   return { tableName, version, packedFileName };
 };
 
-export interface RpfmTsvCell {
-  resolvedKeyValue?: unknown;
-  fields?: Field[];
-}
-
-/**
- * Converts the viewer's resolved cell value to the text shape RPFM expects.
- *
- * Keep this deliberately aligned with the old tree exporter: in particular, a Boolean is emitted
- * as true/false and an absent OptionalStringU8 is emitted as an empty field rather than "0".
- */
-export const formatRpfmTsvCell = (fieldType: SCHEMA_FIELD_TYPE, cell: RpfmTsvCell): string => {
-  const resolvedValue = cell?.resolvedKeyValue;
-  const value =
-    fieldType === "Boolean"
-      ? String(resolvedValue != "0")
-      : fieldType === "OptionalStringU8" && resolvedValue === "0"
-        ? ""
-        : String(resolvedValue ?? "");
-
-  return value.replace(/\t/g, " ").replace(/\r?\n/g, " ");
-};
-
-type RpfmTsvRowCell = RpfmTsvCell | string | number | boolean | null | undefined;
-
-const isRpfmTsvCell = (cell: RpfmTsvRowCell): cell is RpfmTsvCell => typeof cell === "object" && cell !== null;
-
 const isIntegerField = (fieldType: SCHEMA_FIELD_TYPE) =>
   fieldType === "I16" || fieldType === "I32" || fieldType === "I64" || fieldType === "ColourRGB";
 
-const resolveRawCellValue = (fieldType: SCHEMA_FIELD_TYPE, cell: SchemaField): string => {
-  const fields = cell.fields || [];
+/**
+ * The cell's value read straight off its parsed fields.
+ *
+ * Deliberately not `resolveKeyValue`: that helper collapses a present-but-empty OptionalStringU8
+ * and one holding the literal string "0" onto the same "0", because it falls through the empty
+ * string to the length field. Exporting through it therefore cannot tell an empty optional string
+ * from a real "0" - 759 cells across 7 vanilla tables hold that value - so the round trip has to
+ * read the presence byte itself.
+ */
+const resolveRawCellValue = (fieldType: SCHEMA_FIELD_TYPE, cell: SchemaField | undefined): string => {
+  const fields = cell?.fields || [];
   if (isIntegerField(fieldType)) return Number(fields[0]?.val ?? 0).toFixed(0);
   if (fieldType === "F32" || fieldType === "F64") return Number(fields[0]?.val ?? 0).toFixed(3);
 
   if (fieldType === "OptionalStringU8" || fieldType === "StringU8") {
-    if (fields[0]?.val) {
-      return String(fields[2]?.val ?? fields[1]?.val ?? fields[0]?.val ?? "");
-    }
+    // fields[0] is the presence byte (optional) or the length (plain), so a falsy one means absent
+    // or empty. Otherwise the value is the last field present.
+    if (fields[0]?.val) return String(fields[2]?.val ?? fields[1]?.val ?? fields[0]?.val ?? "");
     return "";
   }
 
   return String(fields[1]?.val ?? fields[0]?.val ?? "");
 };
 
-const toRpfmTsvCell = (fieldType: SCHEMA_FIELD_TYPE, cell: RpfmTsvRowCell): RpfmTsvCell => {
-  if (isRpfmTsvCell(cell)) {
-    if (cell.resolvedKeyValue !== undefined || cell.fields === undefined) return cell;
-    return { resolvedKeyValue: resolveRawCellValue(fieldType, cell as SchemaField) };
-  }
+/** Converts one parsed cell to the text shape RPFM expects. */
+export const formatRpfmTsvCell = (fieldType: SCHEMA_FIELD_TYPE, cell: SchemaField | undefined): string => {
+  const rawValue = resolveRawCellValue(fieldType, cell);
+  // Any non-zero byte is true, matching RPFM; a cell that is missing entirely is false rather than
+  // the "true" that comparing an empty string against "0" would give.
+  const value = fieldType === "Boolean" ? String(rawValue !== "" && rawValue !== "0") : rawValue;
 
-  return { resolvedKeyValue: cell ?? "" };
+  return value.replace(/\t/g, " ").replace(/\r?\n/g, " ");
 };
 
 export interface BuildRpfmTsvContentOptions {
@@ -92,7 +75,8 @@ export interface BuildRpfmTsvContentOptions {
   tableName: string;
   version: number;
   schema: DBVersion;
-  rows: RpfmTsvRowCell[][];
+  /** Rows of parsed cells, as `chunkSchemaIntoRows` produces them. */
+  rows: SchemaField[][];
 }
 
 export const buildRpfmTsvContent = ({
@@ -114,7 +98,7 @@ export const buildRpfmTsvContent = ({
   for (const row of rows) {
     lines.push(
       schema.fields
-        .map((field, index) => formatRpfmTsvCell(field.field_type, toRpfmTsvCell(field.field_type, row[index])))
+        .map((field, index) => formatRpfmTsvCell(field.field_type, row[index]))
         .join("\t"),
     );
   }

@@ -12,9 +12,7 @@ export interface PackImportSource {
 
 export interface PackImportDirectoryEntry {
   name: string;
-  kind?: PackImportSourceKind | "directory";
-  isFile?: (() => boolean) | boolean;
-  isDirectory?: (() => boolean) | boolean;
+  kind: PackImportSourceKind;
 }
 
 export type PackImportReadDir = (directoryPath: string) => Promise<PackImportDirectoryEntry[]>;
@@ -37,21 +35,11 @@ export interface PackImportPlan {
   errors: PackImportPlanError[];
 }
 
-export interface ExistingPackFilePathEntry {
-  path: string;
-  source: "pack" | "unsaved";
+/** The two places a destination can already be taken, kept apart so the modal can say which. */
+export interface ExistingPackFilePaths {
+  pack: string[];
+  unsaved: string[];
 }
-
-/** Accepted forms keep the pure planner convenient for both the IPC cascade and unit tests. */
-export type ExistingPackFilePaths =
-  | string[]
-  | ExistingPackFilePathEntry[]
-  | {
-      pack?: string[];
-      unsaved?: string[];
-      packFilePaths?: string[];
-      unsavedFilePaths?: string[];
-    };
 
 export interface PlanPackImportOptions {
   sources: PackImportSource[];
@@ -79,11 +67,6 @@ const hasParentSegment = (value: string) =>
 
 const getDiskBasename = (value: string) => nodePath.basename(value.replace(/[\\/]/g, nodePath.sep));
 
-const isDirectoryEntry = (entry: PackImportDirectoryEntry) => {
-  if (entry.kind === "folder" || entry.kind === "directory") return true;
-  if (typeof entry.isDirectory === "function") return entry.isDirectory();
-  return entry.isDirectory === true;
-};
 
 const defaultReadFileHead: PackImportReadFileHead = async (filePath) => {
   const handle = await fs.open(filePath, "r");
@@ -106,31 +89,10 @@ const defaultReadFileHead: PackImportReadFileHead = async (filePath) => {
   }
 };
 
-const collectExistingPaths = (existing: ExistingPackFilePaths) => {
-  const packPaths = new Set<string>();
-  const unsavedPaths = new Set<string>();
-
-  if (Array.isArray(existing)) {
-    for (const entry of existing) {
-      if (typeof entry === "string") {
-        packPaths.add(normalizePackFilePathKey(entry));
-      } else if (entry.source === "unsaved") {
-        unsavedPaths.add(normalizePackFilePathKey(entry.path));
-      } else {
-        packPaths.add(normalizePackFilePathKey(entry.path));
-      }
-    }
-    return { packPaths, unsavedPaths };
-  }
-
-  for (const path of existing.pack ?? existing.packFilePaths ?? []) {
-    packPaths.add(normalizePackFilePathKey(path));
-  }
-  for (const path of existing.unsaved ?? existing.unsavedFilePaths ?? []) {
-    unsavedPaths.add(normalizePackFilePathKey(path));
-  }
-  return { packPaths, unsavedPaths };
-};
+const collectExistingPaths = (existing: ExistingPackFilePaths) => ({
+  packPaths: new Set(existing.pack.map(normalizePackFilePathKey)),
+  unsavedPaths: new Set(existing.unsaved.map(normalizePackFilePathKey)),
+});
 
 const getRelativeDiskPath = (relativePath: string, entryName: string) =>
   relativePath ? nodePath.join(relativePath, entryName) : entryName;
@@ -192,7 +154,7 @@ export const planPackImport = async ({
     for (const entry of entries) {
       const diskPath = nodePath.join(folderPath, entry.name);
       const nextRelativePath = getRelativeDiskPath(relativePath, entry.name);
-      if (isDirectoryEntry(entry)) {
+      if (entry.kind === "folder") {
         await walkFolder(diskPath, nextRelativePath);
       } else {
         discoveredFiles.push({ diskPath, relativePath: nextRelativePath });
