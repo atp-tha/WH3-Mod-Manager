@@ -440,7 +440,10 @@ const ModsViewer = memo(() => {
       const isJustOpenedSame =
         lastAction && lastAction.key === actionKey && lastAction.openedNew && now - lastAction.at < 350;
 
-      if (options.forceNewTab && isJustOpenedSame && lastAction?.tabId) {
+      // Effects can be replayed before React commits the state update (notably under StrictMode).
+      // Treat an immediate repeat of the same open request as the same tab, regardless of whether
+      // the request came from the tree's double-click path or the default-table opener.
+      if (isJustOpenedSame && lastAction?.tabId) {
         setActiveTabId(lastAction.tabId);
         return;
       }

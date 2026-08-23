@@ -237,6 +237,39 @@ describe("multiple pack viewer tabs", () => {
     });
   });
 
+  it("opens the default main units table only once", async () => {
+    const packPath = "A:\\mods\\default-table.pack";
+    const getPackData = vi.fn();
+    window.api = { getPackData, setViewerActivePack: vi.fn() } as unknown as NonNullable<Window["api"]>;
+    const store = configureStore({
+      reducer: { app: appReducer },
+      preloadedState: {
+        app: {
+          ...initialState,
+          packsData: {
+            [packPath]: {
+              ...pack(packPath, "Default Table"),
+              tables: ["db\\main_units_tables\\data__"],
+            },
+          },
+        },
+      },
+    });
+
+    render(
+      <Provider store={store}>
+        <LocalizationContext.Provider value={{ filter: "Filter" }}>
+          <ModsViewer />
+        </LocalizationContext.Provider>
+      </Provider>,
+    );
+
+    store.dispatch(requestOpenPackTab(packPath));
+
+    await waitFor(() => expect(screen.getAllByText(/main_units_tables\/data__/)).toHaveLength(1));
+    expect(getPackData).toHaveBeenCalledTimes(1);
+  });
+
   it("offers no save actions until a pack tab is open", async () => {
     const user = userEvent.setup();
     const packPath = "A:\\mods\\savegate.pack";
