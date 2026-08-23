@@ -906,6 +906,70 @@ body:not(.disable-row-hover) .row-hover-highlight:hover > div:not(.drop-ghost) {
 .ag-theme-material-dark.pack-tables-grid {
   --ag-odd-row-background-color: rgba(148, 163, 184, 0.07);
   --ag-row-hover-color: rgba(96, 165, 250, 0.12);
+  /* Named because the expanded pinned key value has to composite the same tint itself - see below. */
+  --pack-table-cell-selected-color: rgba(59, 130, 246, 0.22);
+}
+
+/*
+ * The pinned key column is capped at PINNED_KEY_COLUMN_MAX_CONTENT_WIDTH_PX, so its longest values
+ * ellipsise instead of making every column to the right of it pay for them. Hovering the cell shows
+ * the whole value: the span the value is rendered into is lifted out of the cell's clipping and
+ * grown to fit, and the cell is raised over the scrolled columns the span now reaches across.
+ *
+ * ag-grid gives the pinned section no viewport of its own - `getElementParams` in
+ * rowContainerComp.ts only wraps the centre container - so `.ag-pinned-left-cols-container` does not
+ * clip, and the span is free to run out over the table as far as the grid's right edge. Nothing
+ * between the cell and that container makes a stacking context either, so the cell's `z-index` is
+ * enough to beat `.ag-center-cols-viewport`, which would otherwise paint over it as the later
+ * sibling.
+ */
+.pack-tables-grid .pack-table-pinned-key-cell:hover {
+  overflow: visible;
+  z-index: 2;
+}
+
+.pack-tables-grid .pack-table-pinned-key-cell:hover .pack-table-pinned-key-value {
+  /*
+   * Positioned against the cell's padding box, so the offset is the cell's own padding - the text
+   * has to stay exactly where it was drawn before the hover, or the value appears to jump sideways
+   * as the pointer arrives.
+   */
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--ag-cell-horizontal-padding) - 1px);
+  padding-right: calc(var(--ag-cell-horizontal-padding) - 1px);
+  display: flex;
+  align-items: center;
+  width: max-content;
+  /*
+   * The box must not extend the cell's hover area, or pointing at the part of it that overhangs the
+   * table would keep it open while the mouse is really over a data cell - and a drag-selection
+   * crossing it would land on this cell rather than the one underneath.
+   */
+  pointer-events: none;
+  /*
+   * Opaque, or the columns underneath show through the value. Built from the tokens the row itself
+   * is drawn with, in the order the row composites them, so the part of the box still inside the
+   * cell is invisible and only the overhang reads as a box: base colour, the zebra stripe on an odd
+   * row, the hover tint - always on, since the box only exists while the row is hovered - and the
+   * selection tint above that.
+   */
+  --pack-pinned-key-stripe: transparent;
+  --pack-pinned-key-selection: transparent;
+  background-color: var(--ag-background-color);
+  background-image:
+    linear-gradient(var(--pack-pinned-key-selection), var(--pack-pinned-key-selection)),
+    linear-gradient(var(--ag-row-hover-color), var(--ag-row-hover-color)),
+    linear-gradient(var(--pack-pinned-key-stripe), var(--pack-pinned-key-stripe));
+}
+
+.pack-tables-grid .ag-row-odd .pack-table-pinned-key-cell:hover .pack-table-pinned-key-value {
+  --pack-pinned-key-stripe: var(--ag-odd-row-background-color);
+}
+
+.pack-tables-grid .pack-table-cell-selected:hover .pack-table-pinned-key-value {
+  --pack-pinned-key-selection: var(--pack-table-cell-selected-color);
 }
 
 /*
@@ -1002,7 +1066,7 @@ body:not(.disable-row-hover) .row-hover-highlight:hover > div:not(.drop-ghost) {
 }
 
 .pack-tables-grid .pack-table-cell-selected {
-  background: rgba(59, 130, 246, 0.22) !important;
+  background: var(--pack-table-cell-selected-color) !important;
   box-shadow: inset 0 0 0 1px rgba(96, 165, 250, 0.7);
 }
 

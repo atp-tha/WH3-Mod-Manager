@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, memo, useState } from "react";
 import { useAppDispatch, useAppSelector } from "../../hooks";
-import { AgGridReact } from "ag-grid-react";
+import { AgGridReact, type CustomCellRendererProps } from "ag-grid-react";
 import type {
   CellContextMenuEvent,
   CellMouseDownEvent,
@@ -87,6 +87,14 @@ const HEADER_CHROME_FALLBACK_PX = 64;
 /** Ignore a measurement outside this range: the grid was not laid out yet, or the DOM moved on. */
 const HEADER_CHROME_PLAUSIBLE_RANGE_PX = { min: 4, max: 200 };
 const TEXT_COLUMN_WIDTH_MIN_PX = 110;
+/**
+ * How much width the pinned key column may take for its values.
+ *
+ * Pinned, this column is paid for by every column to its right - it is width the table never gets
+ * back however far it is scrolled - so the longest value in it is not allowed to set the width for
+ * all the rest. Past this the value ellipsises, and hovering the cell shows the whole of it.
+ */
+const PINNED_KEY_COLUMN_MAX_CONTENT_WIDTH_PX = 280;
 const GRID_HEADER_FONT = '500 14px "Inter", "Roboto", Arial, sans-serif';
 const KEY_HEADER_ICON_WIDTH_PX = 22;
 const COLUMN_HEADER_DISPLAY_NAMES: Record<string, string> = {
@@ -682,6 +690,17 @@ const getAutoScrollDelta = (pointer: number, start: number, end: number): number
   return 0;
 };
 
+/**
+ * The value of a pinned key cell, in a span of its own.
+ *
+ * The cell element is the full column width, so a background on it would reach across the columns
+ * beside it. The span is only as wide as the text, which is what the hover expansion needs: a box
+ * that covers the value and nothing else.
+ */
+const PinnedKeyCellRenderer = (props: CustomCellRendererProps) => (
+  <span className="pack-table-pinned-key-value">{props.valueFormatted ?? props.value}</span>
+);
+
 const AgGridWrapper = memo(
   ({
     rowData,
@@ -1064,7 +1083,13 @@ const AgGridWrapper = memo(
         const displayHeaderName = getDisplayColumnHeader(fullHeaderName);
         const headerName = (isKey ? "🔑 " : "") + displayHeaderName;
 
-        const width = Math.max(getColumnWidth(colIndex), getHeaderMinWidth(displayHeaderName, isKey, headerChromePx));
+        const isPinnedKeyColumn = pinFirstKeyColumn && colType === "text" && colIndex === firstKeyColumnIndex;
+        // The cap covers the values only. A header squeezed below what it needs would ellipsise with
+        // nothing to reveal the rest of it, and headers are read once rather than scanned.
+        const contentWidth = isPinnedKeyColumn
+          ? Math.min(getColumnWidth(colIndex), PINNED_KEY_COLUMN_MAX_CONTENT_WIDTH_PX)
+          : getColumnWidth(colIndex);
+        const width = Math.max(contentWidth, getHeaderMinWidth(displayHeaderName, isKey, headerChromePx));
         const columnDefaultValue = columnDefaultValues[colIndex];
         defs.push({
           headerName,
@@ -1087,7 +1112,10 @@ const AgGridWrapper = memo(
           // flex share of the leftover space, which on a two-column table made one column as wide as
           // the window with its values stranded at the far left of it.
           width,
-          cellRenderer: colType === "checkbox" ? "agCheckboxCellRenderer" : undefined,
+          // The pinned key column's values are the only ones that need a wrapper element: see
+          // PinnedKeyCellRenderer for why the hover expansion cannot use the cell itself.
+          cellRenderer:
+            colType === "checkbox" ? "agCheckboxCellRenderer" : isPinnedKeyColumn ? PinnedKeyCellRenderer : undefined,
           cellEditor: colType === "checkbox" ? "agCheckboxCellEditor" : undefined,
           field: getColumnFieldKey(colIndex),
           valueFormatter: isFloatColumn ? (p) => formatFloatDisplayValue(p.value) : undefined,
@@ -1098,6 +1126,7 @@ const AgGridWrapper = memo(
             // Use a class rather than cellStyle: AG Grid does not clear old inline styles when a
             // reused column's new definition omits cellStyle.
             if (colType === "checkbox") classes.push("pack-table-cell-checkbox", "text-center");
+            if (isPinnedKeyColumn) classes.push("pack-table-pinned-key-cell");
             // Untouched cells are most of a dense table and none of what the reader is looking for,
             // so they are dimmed to let the values somebody actually set carry the eye.
             if (field && toComparableCellValue(p.value, field.field_type) === columnDefaultValue) {
