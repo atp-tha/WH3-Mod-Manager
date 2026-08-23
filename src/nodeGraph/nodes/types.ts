@@ -1,5 +1,5 @@
 import { DBVersion, SCHEMA_FIELD_TYPE } from "../../packFileTypes";
-import { FlowNodeDataPatch } from "../types";
+import type { FilterMatchMode, FlowNodeDataPatch } from "../types";
 
 export interface NodeData extends Record<string, unknown> {
   label: string;
@@ -139,6 +139,8 @@ export interface FilterRow {
   value: string;
   not: boolean;
   operator: "AND" | "OR";
+  /** Optional so flows saved before match modes existed continue to deserialize unchanged. */
+  matchMode?: FilterMatchMode;
 }
 
 export interface FilterNodeData extends NodeData {

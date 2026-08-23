@@ -286,7 +286,7 @@ const nodeDefinitions: Record<FlowNodeType, NodeDefinition> = {
     createData: ({ label, DBNameToDBVersions }) => ({
       label,
       type: "filter",
-      filters: [{ column: "", value: "", not: false, operator: "AND" }],
+      filters: [{ column: "", value: "", not: false, operator: "AND", matchMode: "full" }],
       inputType: "TableSelection",
       outputType: "TableSelection",
       columnNames: [],

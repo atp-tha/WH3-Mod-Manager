@@ -3,6 +3,20 @@ import type { XYPosition } from "@xyflow/react";
 import { DBVersion } from "../packFileTypes";
 import type { DeepCloneOverride, DeepCloneTreeNode, DeepCloneVariantAxis } from "./nodes/types";
 
+export type FilterMatchMode = "full" | "partial" | "regex";
+
+/** Old filter rows have no mode, which deliberately resolves to the legacy full-match behavior. */
+export const normalizeFilterMatchMode = (mode: unknown): FilterMatchMode =>
+  mode === "partial" || mode === "regex" ? mode : "full";
+
+/** The mode a newly added filter row should start with. */
+export const getNewFilterMatchMode = (filters: ReadonlyArray<{ matchMode?: unknown }>): FilterMatchMode => {
+  if (filters.length === 0) return "full";
+
+  const firstMode = normalizeFilterMatchMode(filters[0].matchMode);
+  return filters.every((filter) => normalizeFilterMatchMode(filter.matchMode) === firstMode) ? firstMode : "full";
+};
+
 export interface BaseFlowOption {
   id: string;
   name: string;
@@ -97,7 +111,14 @@ export interface SerializedNode {
     afterText?: string;
     useCurrentPack?: boolean;
     onlyForMultiple?: boolean;
-    filters?: Array<{ column: string; value: string; not: boolean; operator: "AND" | "OR" }>;
+    filters?: Array<{
+      column: string;
+      value: string;
+      not: boolean;
+      operator: "AND" | "OR";
+      /** Optional for compatibility with flow files saved before match modes existed. */
+      matchMode?: FilterMatchMode;
+    }>;
     splitValues?: Array<{ id: string; value: string; enabled: boolean }>;
     columnNames?: string[];
     dedupeByColumns?: string[];

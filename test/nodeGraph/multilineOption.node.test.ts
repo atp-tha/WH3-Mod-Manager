@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { executeNodeAction } from "../../src/nodeExecutor";
 import { prepareGraphForExecution } from "../../src/nodeGraph/graphSerialization";
 import { substituteFilterOptionValues } from "../../src/nodeGraph/nestedOptionValues";
-import { splitMultilineOptionValue } from "../../src/nodeGraph/types";
+import { getNewFilterMatchMode, splitMultilineOptionValue, type FilterMatchMode } from "../../src/nodeGraph/types";
 import type { AmendedSchemaField, DBField, DBVersion, Pack, PackedFile } from "../../src/packFileTypes";
 
 vi.mock("@mongodb-js/zstd", () => ({
@@ -61,12 +61,14 @@ const createInput = () => ({
   tableCount: 1,
 });
 
-const runFilter = async (value: string, not = false) =>
+const runFilter = async (value: string, not = false, matchMode?: FilterMatchMode) =>
   executeNodeAction({
     nodeId: "filter_1",
     nodeType: "filter",
     textValue: "",
-    config: { filters: [{ column: "unit", value, not, operator: "AND" }] },
+    config: {
+      filters: [{ column: "unit", value, not, operator: "AND", ...(matchMode ? { matchMode } : {}) }],
+    },
     inputData: createInput(),
   });
 
@@ -121,6 +123,40 @@ describe("filter node with a multiline value", () => {
     const result = await runFilter("\n  \n");
 
     expect(unitsOf(result)).toEqual([]);
+  });
+});
+
+describe("filter node match modes", () => {
+  it("uses case-insensitive substring matching in partial mode", async () => {
+    const result = await runFilter("SPEAR", false, "partial");
+
+    expect(unitsOf(result)).toEqual(["emp_spearmen"]);
+  });
+
+  it("uses a case-insensitive regular expression in regex mode", async () => {
+    const result = await runFilter("^EMP_(spearmen|handgunners)$", false, "regex");
+
+    expect(unitsOf(result)).toEqual(["emp_spearmen", "emp_handgunners"]);
+  });
+
+  it("does not let an invalid regular expression crash the node", async () => {
+    const result = await runFilter("[", false, "regex");
+
+    expect(result.success).toBe(true);
+    expect(unitsOf(result)).toEqual([]);
+  });
+});
+
+describe("new filter row match mode", () => {
+  it("inherits a unanimous effective mode", () => {
+    expect(getNewFilterMatchMode([{ matchMode: "partial" }, { matchMode: "partial" }])).toBe("partial");
+    expect(getNewFilterMatchMode([{ matchMode: "regex" }])).toBe("regex");
+  });
+
+  it("defaults to full for legacy, invalid, or mixed modes", () => {
+    expect(getNewFilterMatchMode([{}, {}])).toBe("full");
+    expect(getNewFilterMatchMode([{ matchMode: "unknown" }, { matchMode: "full" }])).toBe("full");
+    expect(getNewFilterMatchMode([{ matchMode: "partial" }, { matchMode: "regex" }])).toBe("full");
   });
 });
 

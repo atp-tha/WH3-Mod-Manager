@@ -54,7 +54,7 @@ import {
   gameToTablesWithNumericIds,
   tablesToIgnore,
 } from "./schema";
-import { splitMultilineOptionValue } from "./nodeGraph/types";
+import { normalizeFilterMatchMode, splitMultilineOptionValue } from "./nodeGraph/types";
 import { TextFileEditRule, applyTextFileEdits, matchesTextFileTarget } from "./nodeGraph/textFileEdits";
 import type { TextFileFormatter } from "./nodeGraph/textFileFormatting";
 import { PackFileOperationRule, planPackCopy, planPackFileOperations } from "./nodeGraph/packFileOperations";
@@ -89,20 +89,41 @@ const hotPathLog = (executionContext: FlowExecutionContext | undefined, ...args:
 /**
  * Compares a cell against a filter value, case-insensitively.
  *
- * A value containing newlines is a list and the row matches if the cell equals any entry — that is
- * how a multiline flow option substituted into the value behaves. A single-line value keeps the
- * original exact-match behaviour.
+ * Full mode keeps the old exact-match behavior. Partial mode treats each value as a case-insensitive
+ * substring, and regex mode uses the value as a case-insensitive JavaScript regular expression.
+ * Full and partial values containing newlines are lists, matching any non-empty line. Regex values
+ * are kept intact so a newline can be part of the expression.
  */
-const matchesFilterValue = (cellValue: string, filterValue: string): boolean => {
-  const loweredCell = cellValue.toLowerCase();
-  if (!filterValue.includes("\n") && !filterValue.includes("\r")) {
-    return loweredCell === filterValue.toLowerCase();
+const matchesFilterValue = (
+  cellValue: string,
+  filterValue: string,
+  matchMode?: unknown,
+  regexCache?: Map<string, RegExp | null>,
+): boolean => {
+  const mode = normalizeFilterMatchMode(matchMode);
+
+  if (mode === "regex") {
+    let regex = regexCache?.get(filterValue);
+    if (!regexCache?.has(filterValue)) {
+      try {
+        regex = new RegExp(filterValue, "i");
+      } catch {
+        // An invalid pattern cannot match. This also keeps a malformed flow from crashing execution.
+        regex = null;
+      }
+      regexCache?.set(filterValue, regex);
+    }
+    return regex?.test(cellValue) ?? false;
   }
 
-  const candidates = splitMultilineOptionValue(filterValue);
+  const loweredCell = cellValue.toLowerCase();
+  const candidates =
+    filterValue.includes("\n") || filterValue.includes("\r") ? splitMultilineOptionValue(filterValue) : [filterValue];
   // A list that resolved to nothing matches nothing, rather than silently matching everything.
   if (candidates.length === 0) return false;
-  return candidates.some((candidate) => candidate.toLowerCase() === loweredCell);
+  return candidates.some((candidate) =>
+    mode === "partial" ? loweredCell.includes(candidate.toLowerCase()) : candidate.toLowerCase() === loweredCell,
+  );
 };
 
 export const CONDITIONAL_BRANCH_TRUE_HANDLE = "output-true";
@@ -1271,7 +1292,13 @@ async function executeFilterNode(
 
   // Parse filters from textValue
   const parsed = getNodeConfig<{
-    filters?: Array<{ column: string; value: string; not: boolean; operator: "AND" | "OR" }>;
+    filters?: Array<{
+      column: string;
+      value: string;
+      not: boolean;
+      operator: "AND" | "OR";
+      matchMode?: unknown;
+    }>;
   }>(config, textValue);
   if (!parsed) {
     return { success: false, error: "Invalid filter configuration" };
@@ -1288,6 +1315,7 @@ async function executeFilterNode(
   }
 
   console.log(`Filter Node ${nodeId}: Applying ${filters.length} filters to ${inputData.tables.length} table(s)`);
+  const regexCache = new Map<string, RegExp | null>();
 
   // Create a filtered version of the input data
   const filteredData: DBTablesNodeData = {
@@ -1328,8 +1356,8 @@ async function executeFilterNode(
         const cellValue = cell.resolvedKeyValue || "";
         const filterValue = filter.value;
 
-        // Case-insensitive exact match, or any-of when the value is a multiline list.
-        let matches = matchesFilterValue(String(cellValue), filterValue);
+        // Full and partial modes support newline-separated any-of lists; regex uses the raw pattern.
+        let matches = matchesFilterValue(String(cellValue), filterValue, filter.matchMode, regexCache);
 
         // Apply NOT if specified
         if (filter.not) {
@@ -1415,8 +1443,8 @@ async function executeFilterNode(
         const cellValue = cell.resolvedKeyValue || "";
         const filterValue = filter.value;
 
-        // Case-insensitive exact match, or any-of when the value is a multiline list.
-        let matches = matchesFilterValue(String(cellValue), filterValue);
+        // Full and partial modes support newline-separated any-of lists; regex uses the raw pattern.
+        let matches = matchesFilterValue(String(cellValue), filterValue, filter.matchMode, regexCache);
 
         // Apply NOT if specified
         if (filter.not) {

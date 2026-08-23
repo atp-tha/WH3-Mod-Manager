@@ -21,6 +21,8 @@ import {
   useDefaultTableVersions,
   useFlowOptions,
 } from "./shared";
+import { getNewFilterMatchMode, normalizeFilterMatchMode } from "../types";
+import type { FilterMatchMode } from "../types";
 import type {
   AddColumnTransformation,
   AddNewColumnNodeData,
@@ -81,6 +83,8 @@ import type {
 import { targetHasPathButMatchesName } from "./types";
 
 const collator = new Intl.Collator("en");
+
+const FILTER_MATCH_MODES: FilterMatchMode[] = ["full", "partial", "regex"];
 
 export const PackFilesDropdownNode: React.FC<{ data: PackFilesDropdownNodeData; id: string }> = ({ data, id }) => {
   const localized = useLocalizations();
@@ -750,7 +754,9 @@ export const FilterNode: React.FC<{ data: FilterNodeData; id: string }> = ({ dat
   const localized = useLocalizations();
   const defaultTableVersions = useDefaultTableVersions();
   const [filters, setFilters] = useState<FilterRow[]>(
-    data.filters && data.filters.length > 0 ? data.filters : [{ column: "", value: "", not: false, operator: "AND" }],
+    data.filters && data.filters.length > 0
+      ? data.filters
+      : [{ column: "", value: "", not: false, operator: "AND", matchMode: "full" }],
   );
   const [columnNames, setColumnNames] = useState<string[]>(data.columnNames || []);
 
@@ -789,18 +795,38 @@ export const FilterNode: React.FC<{ data: FilterNodeData; id: string }> = ({ dat
   };
 
   const handleAddFilter = () => {
-    updateFilters([...filters, { column: "", value: "", not: false, operator: "AND" }]);
+    updateFilters([
+      ...filters,
+      {
+        column: "",
+        value: "",
+        not: false,
+        operator: "AND",
+        matchMode: getNewFilterMatchMode(filters),
+      },
+    ]);
   };
 
   const handleRemoveFilter = (index: number) => {
     const newFilters = filters.filter((_, i) => i !== index);
-    updateFilters(newFilters.length > 0 ? newFilters : [{ column: "", value: "", not: false, operator: "AND" }]);
+    updateFilters(
+      newFilters.length > 0 ? newFilters : [{ column: "", value: "", not: false, operator: "AND", matchMode: "full" }],
+    );
   };
 
   const handleFilterChange = (index: number, field: keyof FilterRow, value: FilterRow[keyof FilterRow]) => {
     const newFilters = [...filters];
     newFilters[index] = { ...newFilters[index], [field]: value };
     updateFilters(newFilters);
+  };
+
+  const filterMatchModeTooltip =
+    localized.nodeEditorFilterMatchModeTooltip ||
+    "Full: case-insensitive whole-value matching (the original filter behavior). Partial: case-insensitive substring matching. Regex: a case-insensitive JavaScript regular expression, matching anywhere unless you use ^ or $.";
+  const filterMatchModeLabels: Record<FilterMatchMode, string> = {
+    full: localized.nodeEditorFilterMatchModeFull || "Full",
+    partial: localized.nodeEditorFilterMatchModePartial || "Partial",
+    regex: localized.nodeEditorFilterMatchModeRegex || "Regex",
   };
 
   return (
@@ -828,6 +854,30 @@ export const FilterNode: React.FC<{ data: FilterNodeData; id: string }> = ({ dat
                 />
                 <span className="text-xs text-gray-300">{localized.nodeEditorNot || "NOT"}</span>
               </label>
+              <div
+                className="inline-flex overflow-hidden rounded-full border border-gray-600 bg-gray-700"
+                role="group"
+                aria-label={localized.nodeEditorFilterMatchMode || "Filter match mode"}
+                title={filterMatchModeTooltip}
+              >
+                {FILTER_MATCH_MODES.map((mode) => {
+                  const selected = normalizeFilterMatchMode(filter.matchMode) === mode;
+                  return (
+                    <button
+                      key={mode}
+                      type="button"
+                      aria-pressed={selected}
+                      title={`${filterMatchModeLabels[mode]}: ${filterMatchModeTooltip}`}
+                      onClick={() => handleFilterChange(index, "matchMode", mode)}
+                      className={`px-2 py-0.5 text-[10px] leading-none transition-colors focus:outline-none focus:ring-1 focus:ring-yellow-400 ${
+                        selected ? "bg-yellow-600 text-white" : "text-gray-300 hover:bg-gray-600"
+                      }`}
+                    >
+                      {filterMatchModeLabels[mode]}
+                    </button>
+                  );
+                })}
+              </div>
               {filters.length > 1 && (
                 <button
                   onClick={() => handleRemoveFilter(index)}
