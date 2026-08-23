@@ -45,6 +45,12 @@ const TABLE_PREP_CACHE_VERSION = 5;
 const ROW_INDEX_COLUMN_MIN_WIDTH = 50;
 const ROW_INDEX_COLUMN_PADDING_PX = 20;
 const SELECTION_AUTO_SCROLL_EDGE_PX = 32;
+/** How far the pointer leaves the middle-button anchor before the table starts moving. */
+const MIDDLE_AUTO_SCROLL_DEAD_ZONE_PX = 12;
+const MIDDLE_AUTO_SCROLL_SPEED = 0.18;
+const MIDDLE_AUTO_SCROLL_MAX_STEP_PX = 40;
+/** Below this the middle button counts as a click, which leaves auto-scroll running after the release. */
+const MIDDLE_AUTO_SCROLL_DRAG_THRESHOLD_PX = 8;
 const SELECTION_AUTO_SCROLL_MAX_STEP_PX = 24;
 // Cells render at `.ag-cell { font-size: 1.1rem }` from index.css, which is 17.6px. Measuring them
 // at anything smaller makes every column narrower than its contents, which shows up as ellipsised
@@ -568,6 +574,42 @@ const filterFullColumnSelections = (ranges: SelectionRange[], rowCount: number):
 const hasAdditiveSelectionModifier = (event?: Pick<MouseEvent, "shiftKey" | "ctrlKey" | "metaKey"> | null): boolean =>
   !!event && (event.shiftKey || event.ctrlKey || event.metaKey);
 
+/**
+ * Scrolling the table sideways from outside ag-grid. The centre viewport is the one that actually
+ * moves; the fake scrollbar under it is mirrored so the scrollbar thumb keeps up, which is the same
+ * pair the drag-selection auto-scroll drives.
+ */
+const scrollGridHorizontally = (gridRoot: HTMLElement, delta: number): void => {
+  const centerViewport = gridRoot.querySelector<HTMLElement>(".ag-center-cols-viewport");
+  if (!centerViewport || delta === 0) return;
+
+  const maxScrollLeft = Math.max(0, centerViewport.scrollWidth - centerViewport.clientWidth);
+  const nextScrollLeft = Math.min(maxScrollLeft, Math.max(0, centerViewport.scrollLeft + delta));
+  if (nextScrollLeft === centerViewport.scrollLeft) return;
+
+  centerViewport.scrollLeft = nextScrollLeft;
+  const horizontalViewport = gridRoot.querySelector<HTMLElement>(".ag-body-horizontal-scroll-viewport");
+  if (horizontalViewport) horizontalViewport.scrollLeft = nextScrollLeft;
+};
+
+const scrollGridVertically = (gridRoot: HTMLElement, delta: number): void => {
+  const bodyViewport = gridRoot.querySelector<HTMLElement>(".ag-body-viewport");
+  if (!bodyViewport || delta === 0) return;
+
+  const maxScrollTop = Math.max(0, bodyViewport.scrollHeight - bodyViewport.clientHeight);
+  const nextScrollTop = Math.min(maxScrollTop, Math.max(0, bodyViewport.scrollTop + delta));
+  if (nextScrollTop !== bodyViewport.scrollTop) bodyViewport.scrollTop = nextScrollTop;
+};
+
+/** One frame of middle-button auto-scroll: still inside the dead zone, or faster the further out. */
+const getMiddleAutoScrollStep = (distance: number): number => {
+  const magnitude = Math.abs(distance) - MIDDLE_AUTO_SCROLL_DEAD_ZONE_PX;
+  if (magnitude <= 0) return 0;
+
+  const step = Math.min(MIDDLE_AUTO_SCROLL_MAX_STEP_PX, magnitude * MIDDLE_AUTO_SCROLL_SPEED);
+  return distance < 0 ? -step : step;
+};
+
 const getAutoScrollDelta = (pointer: number, start: number, end: number): number => {
   const distanceToStart = pointer - start;
   if (distanceToStart < SELECTION_AUTO_SCROLL_EDGE_PX) {
@@ -634,6 +676,19 @@ const AgGridWrapper = memo(
     const dragSelectionRef = useRef<DragSelectionState | null>(null);
     const dragPointerRef = useRef<{ clientX: number; clientY: number } | null>(null);
     const autoScrollFrameRef = useRef<number | null>(null);
+    const middleAutoScrollRef = useRef<{
+      anchorX: number;
+      anchorY: number;
+      pointerX: number;
+      pointerY: number;
+      startedAt: number;
+      hasDragged: boolean;
+      frame: number;
+    } | null>(null);
+    const [middleAutoScrollAnchor, setMiddleAutoScrollAnchor] = useState<{
+      clientX: number;
+      clientY: number;
+    } | null>(null);
 
     const [headerChromePx, setHeaderChromePx] = useState(measuredHeaderChromePx ?? HEADER_CHROME_FALLBACK_PX);
 
@@ -669,10 +724,8 @@ const AgGridWrapper = memo(
      * looks stuck. The pinned section is the left edge of the grid, which is exactly where a hand
      * ends up, so this is the common case rather than an edge one.
      *
-     * Fed to the grid's own horizontal scrollbar rather than to the centre viewport: that scrollbar
-     * is what the viewport, the header and the pinned sections all follow, so scrolling it keeps
-     * them in step. Registered natively because React makes wheel listeners passive, and this one
-     * has to preventDefault to stop the page taking the scroll instead.
+     * Registered natively because React makes wheel listeners passive, and this one has to
+     * preventDefault to stop the scroll going to the page instead.
      */
     useEffect(() => {
       const gridRoot = gridRootRef.current;
@@ -685,16 +738,126 @@ const AgGridWrapper = memo(
         const target = event.target as Element | null;
         if (!target?.closest(".ag-pinned-left-cols-container, .ag-pinned-right-cols-container")) return;
 
-        const scrollViewport = gridRoot.querySelector<HTMLElement>(".ag-body-horizontal-scroll-viewport");
-        if (!scrollViewport) return;
-
-        scrollViewport.scrollLeft += delta;
+        scrollGridHorizontally(gridRoot, delta);
         event.preventDefault();
       };
 
       gridRoot.addEventListener("wheel", onWheel, { passive: false });
       return () => gridRoot.removeEventListener("wheel", onWheel);
     }, []);
+
+    const stopMiddleAutoScroll = useCallback(() => {
+      const autoScroll = middleAutoScrollRef.current;
+      if (!autoScroll) return;
+
+      if (autoScroll.frame !== 0) cancelAnimationFrame(autoScroll.frame);
+      middleAutoScrollRef.current = null;
+      setMiddleAutoScrollAnchor(null);
+    }, []);
+
+    /**
+     * Middle-button auto-scroll over a pinned column, for the same reason as the wheel above: the
+     * browser's own auto-scroll picks the nearest scrollable ancestor, and over a pinned section
+     * that is the body viewport, which only scrolls vertically. Sideways it does nothing at all.
+     *
+     * Modelled on what the browser does, so it does not feel like a different gesture: the table
+     * moves faster the further the pointer is from where the button went down, a release after an
+     * actual drag ends it, and a release without one leaves it running until the next click or Esc.
+     * The anchor marker stands in for the one the browser would have drawn.
+     */
+    const startMiddleAutoScroll = useCallback(
+      (event: React.MouseEvent<HTMLDivElement>): boolean => {
+        const gridRoot = gridRootRef.current;
+        if (!gridRoot) return false;
+
+        // Already running: a second press ends it rather than re-anchoring, as it would in the browser.
+        if (middleAutoScrollRef.current) {
+          event.preventDefault();
+          stopMiddleAutoScroll();
+          return true;
+        }
+
+        if (
+          !(event.target as Element | null)?.closest(".ag-pinned-left-cols-container, .ag-pinned-right-cols-container")
+        )
+          return false;
+
+        // Without this the browser starts its own auto-scroll on top of ours.
+        event.preventDefault();
+
+        const autoScroll = {
+          anchorX: event.clientX,
+          anchorY: event.clientY,
+          pointerX: event.clientX,
+          pointerY: event.clientY,
+          startedAt: event.nativeEvent.timeStamp,
+          hasDragged: false,
+          frame: 0,
+        };
+
+        const runFrame = () => {
+          if (middleAutoScrollRef.current !== autoScroll) return;
+
+          scrollGridHorizontally(gridRoot, getMiddleAutoScrollStep(autoScroll.pointerX - autoScroll.anchorX));
+          scrollGridVertically(gridRoot, getMiddleAutoScrollStep(autoScroll.pointerY - autoScroll.anchorY));
+          autoScroll.frame = requestAnimationFrame(runFrame);
+        };
+
+        middleAutoScrollRef.current = autoScroll;
+        setMiddleAutoScrollAnchor({ clientX: event.clientX, clientY: event.clientY });
+        autoScroll.frame = requestAnimationFrame(runFrame);
+        return true;
+      },
+      [stopMiddleAutoScroll],
+    );
+
+    useEffect(() => {
+      const onWindowMouseMove = (event: MouseEvent) => {
+        const autoScroll = middleAutoScrollRef.current;
+        if (!autoScroll) return;
+
+        autoScroll.pointerX = event.clientX;
+        autoScroll.pointerY = event.clientY;
+        if (
+          Math.abs(event.clientX - autoScroll.anchorX) > MIDDLE_AUTO_SCROLL_DRAG_THRESHOLD_PX ||
+          Math.abs(event.clientY - autoScroll.anchorY) > MIDDLE_AUTO_SCROLL_DRAG_THRESHOLD_PX
+        ) {
+          autoScroll.hasDragged = true;
+        }
+      };
+
+      const onWindowMouseUp = () => {
+        // A release that ends a drag stops it; a release that ends a plain click does not, which is
+        // the browser's own rule.
+        if (middleAutoScrollRef.current?.hasDragged) stopMiddleAutoScroll();
+      };
+
+      const onWindowMouseDown = (event: MouseEvent) => {
+        // Not the press that started it: that one is still propagating when this listener is added.
+        if (middleAutoScrollRef.current && event.timeStamp !== middleAutoScrollRef.current.startedAt) {
+          stopMiddleAutoScroll();
+        }
+      };
+
+      const onWindowKeyDown = (event: KeyboardEvent) => {
+        if (event.key === "Escape") stopMiddleAutoScroll();
+      };
+
+      window.addEventListener("mousemove", onWindowMouseMove);
+      window.addEventListener("mouseup", onWindowMouseUp);
+      window.addEventListener("mousedown", onWindowMouseDown);
+      window.addEventListener("keydown", onWindowKeyDown);
+      window.addEventListener("blur", stopMiddleAutoScroll);
+
+      return () => {
+        window.removeEventListener("mousemove", onWindowMouseMove);
+        window.removeEventListener("mouseup", onWindowMouseUp);
+        window.removeEventListener("mousedown", onWindowMouseDown);
+        window.removeEventListener("keydown", onWindowKeyDown);
+        window.removeEventListener("blur", stopMiddleAutoScroll);
+        stopMiddleAutoScroll();
+      };
+    }, [stopMiddleAutoScroll]);
 
     // Only the row height still varies with table size; column widths come from the contents either
     // way now.
@@ -1287,7 +1450,10 @@ const AgGridWrapper = memo(
         style={{ height: "100%", width: "100%" }}
         onKeyDownCapture={onKeyDownCapture}
         onMouseDownCapture={(ev) => {
-          if (ev.button === 1) ev.stopPropagation();
+          if (ev.button === 1) {
+            ev.stopPropagation();
+            if (startMiddleAutoScroll(ev)) return;
+          }
 
           if (!hasAdditiveSelectionModifier(ev) || rowCount <= 0) return;
           if ((ev.target as Element | null)?.closest(".ag-header-cell-resize")) return;
@@ -1330,6 +1496,20 @@ const AgGridWrapper = memo(
           onCellContextMenu={onCellContextMenu}
           onCellValueChanged={onCellValueChangedCallback}
         />
+
+        {middleAutoScrollAnchor && (
+          <div
+            aria-hidden="true"
+            className="pack-table-autoscroll-anchor"
+            style={{
+              position: "fixed",
+              left: middleAutoScrollAnchor.clientX,
+              top: middleAutoScrollAnchor.clientY,
+            }}
+          >
+            ↔
+          </div>
+        )}
 
         {menuState && (
           <div
