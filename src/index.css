@@ -946,6 +946,12 @@ body:not(.disable-row-hover) .row-hover-highlight:hover > div:not(.drop-ghost) {
   text-align: center;
 }
 
+.pack-tables-grid .pack-table-cell-checkbox {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 /*
  * The strip under the pinned columns is a spacer that lines the horizontal scrollbar up with the
  * scrollable part of the grid, and ag-grid ships it as `overflow-x: scroll`. On a platform that

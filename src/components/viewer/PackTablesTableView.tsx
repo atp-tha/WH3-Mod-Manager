@@ -1032,19 +1032,13 @@ const AgGridWrapper = memo(
           cellEditor: colType === "checkbox" ? "agCheckboxCellEditor" : undefined,
           field: getColumnFieldKey(colIndex),
           valueFormatter: isFloatColumn ? (p) => formatFloatDisplayValue(p.value) : undefined,
-          cellStyle:
-            colType === "checkbox"
-              ? {
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                }
-              : undefined,
           cellClass: (p) => {
             const rowIndex = p.node?.rowIndex;
             const classes: string[] = [];
             if (colType === "numeric") classes.push("text-right", "tabular-nums");
-            if (colType === "checkbox") classes.push("text-center");
+            // Use a class rather than cellStyle: AG Grid does not clear old inline styles when a
+            // reused column's new definition omits cellStyle.
+            if (colType === "checkbox") classes.push("pack-table-cell-checkbox", "text-center");
             // Untouched cells are most of a dense table and none of what the reader is looking for,
             // so they are dimmed to let the values somebody actually set carry the eye.
             if (field && toComparableCellValue(p.value, field.field_type) === columnDefaultValue) {
