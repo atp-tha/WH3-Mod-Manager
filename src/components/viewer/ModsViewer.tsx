@@ -1697,7 +1697,7 @@ const ModsViewer = memo(() => {
 
       <div
         ref={viewerRootRef}
-        className="dark:text-gray-300 explicit-height-without-topbar-and-padding-3rem flex flex-col -mt-8"
+        className="dark:text-gray-300 explicit-height-without-topbar-and-padding-35rem flex flex-col -mt-8"
       >
         {isOpen && (
           <>

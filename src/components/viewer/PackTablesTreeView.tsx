@@ -1130,7 +1130,7 @@ const PackTablesTreeView = React.memo(
       <div
         data-testid="pack-tables-tree"
         onContextMenu={(e) => handleContextMenu(e, visibleActiveTreeTab ?? "empty")}
-        className="relative select-none h-full min-h-full"
+        className="pack-tables-tree relative select-none h-full min-h-full"
       >
         {(hasDBTables || hasFiles) && (
           <div className="sticky top-0 z-10 flex border-b border-gray-700 bg-gray-900/95 mb-2">

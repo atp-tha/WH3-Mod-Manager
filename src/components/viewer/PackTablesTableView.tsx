@@ -1503,7 +1503,6 @@ const AgGridWrapper = memo(
           rowHeight={rowHeight}
           headerHeight={rowHeight}
           animateRows={false}
-          columnHoverHighlight={true}
           onCellMouseDown={onCellMouseDown}
           onCellMouseOver={onCellMouseOver}
           onCellContextMenu={onCellContextMenu}
