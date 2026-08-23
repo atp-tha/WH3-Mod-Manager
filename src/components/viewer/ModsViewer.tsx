@@ -1701,7 +1701,7 @@ const ModsViewer = memo(() => {
       >
         {isOpen && (
           <>
-            <div className="flex items-center py-2 pr-2 bg-gray-800 border-b border-gray-600">
+            <div className="flex items-center py-1 pr-2 bg-gray-800 border-b border-gray-600">
               {/* Clamped to the sidebar so the strip beside it starts exactly where the table view does. */}
               <div
                 className="relative flex items-center shrink-0"
@@ -1720,7 +1720,7 @@ const ModsViewer = memo(() => {
                       aria-controls="mods-viewer-file-menu"
                       className={
                         (isSidebarNarrow ? "px-2" : "px-3") +
-                        " py-2 bg-purple-600 hover:bg-purple-700 text-white font-medium rounded-lg shadow-lg transition-colors duration-200 flex items-center gap-2 shrink-0"
+                        " py-1 text-sm bg-purple-600 hover:bg-purple-700 text-white font-medium rounded-lg shadow-lg transition-colors duration-200 flex items-center gap-2 shrink-0"
                       }
                     >
                       <FontAwesomeIcon icon={faFile} className="w-4 h-4" />
@@ -1821,7 +1821,7 @@ const ModsViewer = memo(() => {
                   aria-label={localized.globalSearch || "Global search"}
                   aria-pressed={isGlobalSearchOpen}
                   className={
-                    "px-3 py-2 rounded-lg text-white font-medium shadow-lg transition-colors duration-200 flex items-center gap-2 " +
+                    "px-2 py-1 text-sm rounded-lg text-white font-medium shadow-lg transition-colors duration-200 flex items-center gap-2 " +
                     (isGlobalSearchOpen ? "bg-blue-700 hover:bg-blue-600" : "bg-gray-700 hover:bg-gray-600")
                   }
                 >
@@ -1834,7 +1834,7 @@ const ModsViewer = memo(() => {
                   {hasUnsavedFiles && !activeViewerPackPath.startsWith("memory://") && (
                     <button
                       onClick={handleSavePack}
-                      className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-medium rounded-lg shadow-lg transition-colors duration-200 flex items-center gap-2"
+                      className="px-3 py-1 text-sm bg-green-600 hover:bg-green-700 text-white font-medium rounded-lg shadow-lg transition-colors duration-200 flex items-center gap-2"
                     >
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path
@@ -1850,7 +1850,7 @@ const ModsViewer = memo(() => {
                   {canSavePackAs && (
                     <button
                       onClick={() => void handleSavePackAs()}
-                      className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg shadow-lg transition-colors duration-200 flex items-center gap-2"
+                      className="px-3 py-1 text-sm bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg shadow-lg transition-colors duration-200 flex items-center gap-2"
                     >
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path
