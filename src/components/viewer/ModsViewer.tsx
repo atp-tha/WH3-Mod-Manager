@@ -2010,7 +2010,7 @@ const ModsViewer = memo(() => {
 
             {isGlobalSearchMounted && (
               <Resizable
-                defaultSize={{ width: "100%", height: 364 }}
+                defaultSize={{ width: "100%", height: 375 }}
                 minHeight={180}
                 maxHeight="70%"
                 enable={{ top: true }}
