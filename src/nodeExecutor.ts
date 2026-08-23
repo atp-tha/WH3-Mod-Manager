@@ -1315,6 +1315,58 @@ async function executeFilterNode(
   console.log(`Filter Node ${nodeId}: Applying ${filters.length} filters to ${inputData.tables.length} table(s)`);
   const regexCache = new Map<string, RegExp | null>();
 
+  /**
+   * Evaluates every active condition against one row and combines them with the stored operators.
+   *
+   * A condition that cannot be evaluated - no column chosen, no value typed, or a column this table
+   * does not have - is dropped from the join rather than forced to a neutral boolean, because `true`
+   * is the identity for AND but not for OR. A row with nothing left to evaluate matches; the else
+   * handle takes the inverse, so it correspondingly takes nothing.
+   */
+  const matchesRow = (row: AmendedSchemaField[]): boolean => {
+    const filterResults: EvaluatedFilterResult[] = [];
+
+    for (const filter of filters) {
+      if (!filter.column || (!filter.value.trim() && !filter.flowOptionResolvedEmpty)) {
+        continue;
+      }
+
+      // Find the cell with matching column name
+      const cell = row.find((c) => c.name === filter.column);
+      if (!cell) continue; // Column not found, skip filter
+
+      const cellValue = cell.resolvedKeyValue || "";
+      const filterValue = filter.value;
+
+      // All modes support newline-separated any-of lists; regex treats each line as a pattern.
+      let matches = filter.flowOptionResolvedEmpty
+        ? false
+        : matchesFilterValue(String(cellValue), filterValue, regexCache, filter.matchMode);
+
+      // Apply NOT if specified
+      if (filter.not) {
+        matches = !matches;
+      }
+
+      filterResults.push({ result: matches, operator: filter.operator });
+    }
+
+    if (filterResults.length === 0) return true;
+
+    let result = filterResults[0].result;
+    for (let i = 1; i < filterResults.length; i++) {
+      // The operator of the preceding *active* condition, so dropped ones do not shift the join.
+      const operator = filterResults[i - 1].operator;
+      if (operator === "AND") {
+        result = result && filterResults[i].result;
+      } else {
+        result = result || filterResults[i].result;
+      }
+    }
+
+    return result;
+  };
+
   // Create a filtered version of the input data
   const filteredData: DBTablesNodeData = {
     ...inputData,
@@ -1334,53 +1386,7 @@ async function executeFilterNode(
     console.log(`Filter Node ${nodeId}: Processing table "${tableData.name}" with ${rows.length} rows`);
 
     // Filter rows based on the filter configuration
-    const filteredRows = rows.filter((row) => {
-      // Evaluate each filter
-      const filterResults: EvaluatedFilterResult[] = [];
-
-      for (const filter of filters) {
-        if (!filter.column || (!filter.value.trim() && !filter.flowOptionResolvedEmpty)) {
-          continue;
-        }
-
-        // Find the cell with matching column name
-        const cell = row.find((c) => c.name === filter.column);
-        if (!cell) {
-          filterResults.push({ result: true, operator: filter.operator }); // Column not found, skip filter
-          continue;
-        }
-
-        const cellValue = cell.resolvedKeyValue || "";
-        const filterValue = filter.value;
-
-        // All modes support newline-separated any-of lists; regex treats each line as a pattern.
-        let matches = filter.flowOptionResolvedEmpty
-          ? false
-          : matchesFilterValue(String(cellValue), filterValue, regexCache, filter.matchMode);
-
-        // Apply NOT if specified
-        if (filter.not) {
-          matches = !matches;
-        }
-
-        filterResults.push({ result: matches, operator: filter.operator });
-      }
-
-      // Combine filter results based on operators
-      if (filterResults.length === 0) return true;
-
-      let result = filterResults[0].result;
-      for (let i = 1; i < filterResults.length; i++) {
-        const operator = filterResults[i - 1].operator;
-        if (operator === "AND") {
-          result = result && filterResults[i].result;
-        } else {
-          result = result || filterResults[i].result;
-        }
-      }
-
-      return result;
-    });
+    const filteredRows = rows.filter(matchesRow);
 
     console.log(
       `Filter Node ${nodeId}: ${filteredRows.length} rows passed filters out of ${rows.length} in table "${tableData.name}"`,
@@ -1422,54 +1428,7 @@ async function executeFilterNode(
     const rows = getRowsForPackedFile(tableData.table);
 
     // Filter rows that DON'T match (inverse of the match filter)
-    const elseRows = rows.filter((row) => {
-      // Evaluate each filter
-      const filterResults: EvaluatedFilterResult[] = [];
-
-      for (const filter of filters) {
-        if (!filter.column || (!filter.value.trim() && !filter.flowOptionResolvedEmpty)) {
-          continue;
-        }
-
-        // Find the cell with matching column name
-        const cell = row.find((c) => c.name === filter.column);
-        if (!cell) {
-          filterResults.push({ result: true, operator: filter.operator }); // Column not found, skip filter
-          continue;
-        }
-
-        const cellValue = cell.resolvedKeyValue || "";
-        const filterValue = filter.value;
-
-        // All modes support newline-separated any-of lists; regex treats each line as a pattern.
-        let matches = filter.flowOptionResolvedEmpty
-          ? false
-          : matchesFilterValue(String(cellValue), filterValue, regexCache, filter.matchMode);
-
-        // Apply NOT if specified
-        if (filter.not) {
-          matches = !matches;
-        }
-
-        filterResults.push({ result: matches, operator: filter.operator });
-      }
-
-      // Combine filter results based on operators
-      if (filterResults.length === 0) return false; // No match = goes to else
-
-      let result = filterResults[0].result;
-      for (let i = 1; i < filterResults.length; i++) {
-        const operator = filterResults[i - 1].operator;
-        if (operator === "AND") {
-          result = result && filterResults[i].result;
-        } else {
-          result = result || filterResults[i].result;
-        }
-      }
-
-      // Return the INVERSE for else output
-      return !result;
-    });
+    const elseRows = rows.filter((row) => !matchesRow(row));
 
     if (elseRows.length > 0) {
       // Flatten else rows back into schemaFields array

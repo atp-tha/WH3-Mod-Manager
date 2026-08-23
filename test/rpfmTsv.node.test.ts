@@ -69,9 +69,15 @@ describe("RPFM TSV serialization", () => {
     expect(formatRpfmTsvCell("Boolean", boolCell(0))).toBe("false");
     expect(formatRpfmTsvCell("Boolean", boolCell(1))).toBe("true");
     expect(formatRpfmTsvCell("Boolean", undefined)).toBe("false");
-    expect(formatRpfmTsvCell("StringU8", { type: "StringU8", fields: [{ type: "Int16", val: 5 }, { type: "String", val: "a\tb\nc" }] })).toBe(
-      "a b c",
-    );
+    expect(
+      formatRpfmTsvCell("StringU8", {
+        type: "StringU8",
+        fields: [
+          { type: "Int16", val: 5 },
+          { type: "String", val: "a\tb\nc" },
+        ],
+      }),
+    ).toBe("a b c");
   });
 
   it("tells an absent optional string from one holding the literal '0'", () => {

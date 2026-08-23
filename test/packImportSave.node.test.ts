@@ -78,7 +78,14 @@ describe("importing an RPFM TSV and saving the pack", () => {
       const savedTable = saved.packedFiles.find((packedFile) => packedFile.name === "db\\example_tables\\data__");
       expect(savedTable?.file_size).toBeGreaterThan(0);
       expect(savedTable?.version).toBe(3);
-      expect(savedTable?.schemaFields?.map((cell) => cell.fields.at(-1)?.val)).toEqual(["unit_a", 17, 1, "unit_b", 4, 0]);
+      expect(savedTable?.schemaFields?.map((cell) => cell.fields.at(-1)?.val)).toEqual([
+        "unit_a",
+        17,
+        1,
+        "unit_b",
+        4,
+        0,
+      ]);
     } finally {
       appData.currentGame = previousGame;
       if (previousSchemas) DBNameToDBVersions.wh3.example_tables = previousSchemas;

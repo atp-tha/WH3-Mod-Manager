@@ -254,6 +254,25 @@ describe("filter node match modes", () => {
     expect(unitsOf(result, "elseData")).toEqual(["emp_greatswords", "emp_handgunners"]);
   });
 
+  it("drops a row whose column this table lacks from an OR join", async () => {
+    const result = await runFilterRows([
+      { column: "unit", value: "emp_spearmen", not: false, operator: "OR", matchMode: "full" },
+      { column: "nosuchcolumn", value: "x", not: false, operator: "AND", matchMode: "full" },
+    ]);
+
+    expect(unitsOf(result)).toEqual(["emp_spearmen"]);
+    expect(unitsOf(result, "elseData")).toEqual(["emp_greatswords", "emp_handgunners"]);
+  });
+
+  it("passes every row through when the only column is missing from the table", async () => {
+    const result = await runFilterRows([
+      { column: "nosuchcolumn", value: "x", not: false, operator: "AND", matchMode: "full" },
+    ]);
+
+    expect(unitsOf(result)).toEqual(["emp_spearmen", "emp_greatswords", "emp_handgunners"]);
+    expect(unitsOf(result, "elseData")).toEqual([]);
+  });
+
   it("uses the preceding active row's operator across inactive rows", async () => {
     const result = await runFilterRows([
       { column: "", value: "", not: false, operator: "AND", matchMode: "full" },

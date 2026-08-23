@@ -96,11 +96,7 @@ export const buildRpfmTsvContent = ({
   ];
 
   for (const row of rows) {
-    lines.push(
-      schema.fields
-        .map((field, index) => formatRpfmTsvCell(field.field_type, row[index]))
-        .join("\t"),
-    );
+    lines.push(schema.fields.map((field, index) => formatRpfmTsvCell(field.field_type, row[index])).join("\t"));
   }
 
   return lines.join("\n");
@@ -139,9 +135,7 @@ export const convertRpfmTsvToPackedFile = (
   if (isLoc && !isLocPackedFilePath(metadata.packedFileName)) {
     throw new Error(`RPFM Loc TSV does not name a .loc file in ${sourcePath}: ${metadata.packedFileName}`);
   }
-  const packedFileName = isLoc
-    ? `${metadata.packedFileName.slice(0, -".loc".length)}.loc`
-    : metadata.packedFileName;
+  const packedFileName = isLoc ? `${metadata.packedFileName.slice(0, -".loc".length)}.loc` : metadata.packedFileName;
 
   const schema = isLoc
     ? LocVersion

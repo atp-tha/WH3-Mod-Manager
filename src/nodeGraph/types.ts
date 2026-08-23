@@ -12,7 +12,12 @@ export interface FilterRow {
   not: boolean;
   operator: "AND" | "OR";
   matchMode?: FilterMatchMode;
-  /** Execution-only marker for a flow option that resolved to an empty value. */
+  /**
+   * Execution-only marker for a flow option that resolved to an empty value, which must stay a
+   * non-match rather than becoming an unfilled row. Never persisted: `prepareGraphForExecution`
+   * copies the node data before substitution and the prepared graph goes straight to the backend,
+   * so `getSerializableNodeData` only ever sees the original rows.
+   */
   flowOptionResolvedEmpty?: boolean;
 }
 

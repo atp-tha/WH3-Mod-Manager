@@ -1491,7 +1491,13 @@ const AgGridWrapper = memo(
               }
             : undefined;
 
-        if (!onAddRow && !onDeleteRows && (!canDeepCloneTable || keyColumnSet.size === 0) && !onCopyRowsInto && !reference) {
+        if (
+          !onAddRow &&
+          !onDeleteRows &&
+          (!canDeepCloneTable || keyColumnSet.size === 0) &&
+          !onCopyRowsInto &&
+          !reference
+        ) {
           setMenuState(undefined);
           return;
         }
@@ -2079,12 +2085,7 @@ const PackTablesTableView = memo((props: PackTablesTableViewProps) => {
 
     // The table component stays mounted while the active tab changes. Do not inspect the previous
     // table's prepared data during that handoff.
-    if (
-      !currentSchema ||
-      !activePreparedTableData ||
-      !openedTableKey ||
-      hydratedTableKey !== openedTableKey
-    ) {
+    if (!currentSchema || !activePreparedTableData || !openedTableKey || hydratedTableKey !== openedTableKey) {
       return;
     }
 
