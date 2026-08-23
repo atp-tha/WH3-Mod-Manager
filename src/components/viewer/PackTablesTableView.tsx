@@ -1754,7 +1754,7 @@ const AgGridWrapper = memo(
                 sourcePackPath={sourcePackPath}
                 otherOpenPacks={otherOpenPacks}
                 showDialog={showDialog}
-                label="Copy rows into"
+                label={menuState.copyRows.length === 1 ? "Copy row into" : "Copy rows into"}
                 onSelectTarget={(targetPackPath, openAfterCopy) => {
                   const selectedRows = menuState.copyRows;
                   setMenuState(undefined);
