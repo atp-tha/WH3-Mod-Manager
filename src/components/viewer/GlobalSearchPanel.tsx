@@ -12,7 +12,6 @@ import {
   GLOBAL_SEARCH_RESULT_KINDS,
   MAX_GLOBAL_SEARCH_QUERY_LENGTH,
   getGlobalSearchResultFilePath,
-  globalSearchKindLabels,
   type GlobalSearchDbResult,
   type GlobalSearchKinds,
   type GlobalSearchProgress,
@@ -100,6 +99,15 @@ const describeFileGroup = (result: GlobalSearchResult, filePath: string): { labe
 const GlobalSearchPanel = memo(
   ({ isOpen, openPacks, onOpenDbResult, onOpenFileResult, onClose }: GlobalSearchPanelProps) => {
     const localized: Record<string, string> = useContext(localizationContext);
+    const kindLabels = useMemo<Record<GlobalSearchResultKind, string>>(
+      () => ({
+        db: localized.globalSearchDbTables || "DB tables",
+        loc: localized.globalSearchLocTables || "Loc tables",
+        text: localized.globalSearchTextFiles || "Text files",
+        rigidModel: localized.globalSearchRigidModels || "Rigid models",
+      }),
+      [localized],
+    );
 
     const [query, setQuery] = useState("");
     const [caseSensitive, setCaseSensitive] = useState(false);
@@ -239,11 +247,11 @@ const GlobalSearchPanel = memo(
         if (activeSearchIdRef.current !== searchId) return;
 
         if (!response) {
-          setError("The search backend did not respond.");
+          setError(localized.globalSearchBackendNoResponse || "The search backend did not respond.");
           return;
         }
         if (!response.success) {
-          setError(response.error || "The search failed.");
+          setError(response.error || localized.globalSearchFailed || "The search failed.");
           return;
         }
 
@@ -260,7 +268,8 @@ const GlobalSearchPanel = memo(
         // Until the main-process handler exists, `invoke` rejects with "No handler registered".
         setError(
           message.includes("No handler registered")
-            ? "Global search is not available in this build: the main-process handler is not registered yet."
+            ? localized.globalSearchUnavailableBuild ||
+                "Global search is not available in this build: the main-process handler is not registered yet."
             : message,
         );
       } finally {
@@ -269,7 +278,7 @@ const GlobalSearchPanel = memo(
           activeSearchIdRef.current = null;
         }
       }
-    }, [canSearch, caseSensitive, isRegex, kinds, query, sources]);
+    }, [canSearch, caseSensitive, isRegex, kinds, localized, query, sources]);
 
     const handleStop = useCallback(() => {
       window.api?.cancelGlobalSearch();
@@ -411,7 +420,7 @@ const GlobalSearchPanel = memo(
                 <span className="truncate text-base font-medium text-gray-50">{row.label}</span>
                 {row.sublabel && <span className="shrink-0 truncate text-xs text-gray-400">{row.sublabel}</span>}
                 <span className="ml-auto shrink-0 text-[11px] uppercase tracking-wide text-gray-500">
-                  {globalSearchKindLabels[row.kind]}
+                  {kindLabels[row.kind]}
                 </span>
                 <span className="shrink-0 tabular-nums text-gray-400">{row.count}</span>
               </button>
@@ -427,7 +436,12 @@ const GlobalSearchPanel = memo(
               type="button"
               onClick={() => openResult(result)}
               disabled={!isOpenable}
-              title={isOpenable ? undefined : "Rigid models have no viewer; use the path to locate the file."}
+              title={
+                isOpenable
+                  ? undefined
+                  : localized.globalSearchRigidModelTitle ||
+                    "Rigid models have no viewer; use the path to locate the file."
+              }
               className={
                 "flex w-full items-center gap-3 pl-9 pr-2 text-left text-sm " +
                 // The colours live on the spans below, so a row that cannot be opened is dimmed as a
@@ -438,7 +452,7 @@ const GlobalSearchPanel = memo(
               {result.kind === "db" && (
                 <>
                   <span className="shrink-0 whitespace-nowrap text-gray-400">
-                    {result.columnName} · row {result.rowIndex}
+                    {result.columnName} · {localized.globalSearchRow || "row"} {result.rowIndex}
                   </span>
                   <span className="truncate font-mono text-gray-50">
                     {renderHighlighted(result.value, result.matchStart, result.matchEnd)}
@@ -447,7 +461,11 @@ const GlobalSearchPanel = memo(
               )}
               {result.kind === "loc" && (
                 <>
-                  <span className="shrink-0 whitespace-nowrap text-gray-400">{result.matchedIn}</span>
+                  <span className="shrink-0 whitespace-nowrap text-gray-400">
+                    {result.matchedIn === "key"
+                      ? localized.globalSearchKey || "key"
+                      : localized.globalSearchValue || "value"}
+                  </span>
                   <span className="truncate font-mono text-gray-50">
                     {result.matchedIn === "key"
                       ? renderHighlighted(result.key, result.matchStart, result.matchEnd)
@@ -477,7 +495,7 @@ const GlobalSearchPanel = memo(
           </div>
         );
       },
-      [collapsedKeys, openResult, rows, toggleCollapsed],
+      [collapsedKeys, kindLabels, localized, openResult, rows, toggleCollapsed],
     );
 
     const checkboxClass = "flex shrink-0 items-center gap-1.5 text-sm text-gray-200";
@@ -597,8 +615,10 @@ const GlobalSearchPanel = memo(
             {GLOBAL_SEARCH_RESULT_KINDS.map((kind) => (
               <label key={kind} className={checkboxClass}>
                 <input type="checkbox" checked={kinds[kind]} onChange={() => toggleKind(kind)} />
-                {globalSearchKindLabels[kind]}
-                {kind === "rigidModel" && <span className="text-gray-400">(slow)</span>}
+                {kindLabels[kind]}
+                {kind === "rigidModel" && (
+                  <span className="text-gray-400">{localized.globalSearchSlow || "(slow)"}</span>
+                )}
               </label>
             ))}
           </div>
@@ -620,7 +640,11 @@ const GlobalSearchPanel = memo(
                 type="checkbox"
                 checked={includeEnabledMods || includeAllMods}
                 disabled={includeAllMods}
-                title={includeAllMods ? "Already covered by All mods" : undefined}
+                title={
+                  includeAllMods
+                    ? localized.globalSearchAlreadyCoveredByAllMods || "Already covered by All mods"
+                    : undefined
+                }
                 onChange={(event) => setIncludeEnabledMods(event.target.checked)}
               />
               {localized.globalSearchEnabledMods || "Enabled mods"}
@@ -666,12 +690,18 @@ const GlobalSearchPanel = memo(
               {progress && (
                 <>
                   <span className="tabular-nums">
-                    {progress.targetsDone}/{progress.targetsTotal} packs
+                    {progress.targetsDone}/{progress.targetsTotal} {localized.globalSearchPacks || "packs"}
                   </span>
-                  {progress.filesScanned > 0 && <span className="tabular-nums">{progress.filesScanned} files</span>}
+                  {progress.filesScanned > 0 && (
+                    <span className="tabular-nums">
+                      {progress.filesScanned} {localized.globalSearchFiles || "files"}
+                    </span>
+                  )}
                 </>
               )}
-              <span className="ml-auto shrink-0 tabular-nums">{results.length} matches</span>
+              <span className="ml-auto shrink-0 tabular-nums">
+                {results.length} {localized.globalSearchMatches || "matches"}
+              </span>
               {progress?.currentLabel && <span className="w-full truncate">{progress.currentLabel}</span>}
             </div>
           )}
@@ -680,9 +710,25 @@ const GlobalSearchPanel = memo(
 
           {(isTruncated || wasCanceled || skippedFiles.length > 0) && (
             <div className="border-t border-gray-700 pt-2 text-xs text-gray-300">
-              {isTruncated && <span className="mr-3">Showing the first {results.length} matches.</span>}
-              {wasCanceled && <span className="mr-3">Search stopped early.</span>}
-              {skippedFiles.length > 0 && <span>{skippedFiles.length} file(s) skipped.</span>}
+              {isTruncated && (
+                <span className="mr-3">
+                  {(localized.globalSearchShowingFirst || "Showing the first {{count}} matches.").replace(
+                    "{{count}}",
+                    String(results.length),
+                  )}
+                </span>
+              )}
+              {wasCanceled && (
+                <span className="mr-3">{localized.globalSearchStoppedEarly || "Search stopped early."}</span>
+              )}
+              {skippedFiles.length > 0 && (
+                <span>
+                  {(localized.globalSearchSkippedFiles || "{{count}} file(s) skipped.").replace(
+                    "{{count}}",
+                    String(skippedFiles.length),
+                  )}
+                </span>
+              )}
             </div>
           )}
 

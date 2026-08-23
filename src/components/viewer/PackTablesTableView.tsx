@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, memo, useState } from "react";
+import React, { useCallback, useContext, useEffect, useMemo, useRef, memo, useState } from "react";
 import { useAppDispatch, useAppSelector } from "../../hooks";
 import { AgGridReact, type CustomCellRendererProps } from "ag-grid-react";
 import type {
@@ -38,6 +38,7 @@ import { isDBCloneTableIgnored } from "@/src/utility/dbCloneTableRouting";
 import CopyIntoSubmenu from "./CopyIntoSubmenu";
 import type { CopyIntoSource, ViewerPackTarget } from "./PackTablesTreeView";
 import { getFullySelectedRowIndices, getRowsForCopy, getSelectedRowIndices } from "./copyRows";
+import localizationContext from "../../localizationContext";
 
 const BIG_TABLE_ROW_THRESHOLD = 20000;
 const BIG_TABLE_CELL_THRESHOLD = 2000000;
@@ -106,13 +107,13 @@ const PINNED_KEY_COLUMN_TARGET_PERCENTILE = 0.95;
 const GRID_HEADER_FONT = '500 14px "Inter", "Roboto", Arial, sans-serif';
 const KEY_HEADER_ICON_WIDTH_PX = 22;
 const COLUMN_HEADER_DISPLAY_NAMES: Record<string, string> = {
-  "additional building requirement": "building req.",
-  "campaign cap": "camp. cap",
-  "create time": "creation time",
-  "multiplayer cap": "MP cap",
-  "multiplayer cost": "MP cost",
-  "num men": "men",
-  "num ships": "ships",
+  "additional building requirement": "viewerColumnBuildingRequirement",
+  "campaign cap": "viewerColumnCampaignCap",
+  "create time": "viewerColumnCreationTime",
+  "multiplayer cap": "viewerColumnMultiplayerCap",
+  "multiplayer cost": "viewerColumnMultiplayerCost",
+  "num men": "viewerColumnMen",
+  "num ships": "viewerColumnShips",
 };
 
 const AG_GRID_MODULES_KEY = "__whmmAgGridModulesRegistered";
@@ -306,11 +307,30 @@ const toggleButtonClass = (isActive: boolean): string =>
     ? "bg-blue-700 border-blue-500 text-white hover:bg-blue-600"
     : "bg-gray-700 border-gray-600 text-gray-200 hover:bg-gray-600");
 
-const getDisplayColumnHeader = (headerName: string): string => {
-  return COLUMN_HEADER_DISPLAY_NAMES[headerName] ?? headerName;
+const getDisplayColumnHeader = (headerName: string, localized: Record<string, string>): string => {
+  const localizationKey = COLUMN_HEADER_DISPLAY_NAMES[headerName];
+  return (
+    (localizationKey && localized[localizationKey]) ||
+    (localizationKey
+      ? ({
+          viewerColumnBuildingRequirement: "building req.",
+          viewerColumnCampaignCap: "camp. cap",
+          viewerColumnCreationTime: "creation time",
+          viewerColumnMultiplayerCap: "MP cap",
+          viewerColumnMultiplayerCost: "MP cost",
+          viewerColumnMen: "men",
+          viewerColumnShips: "ships",
+        }[localizationKey] ?? headerName)
+      : headerName)
+  );
 };
 
-const getColumnHeaderTooltip = (tableName: string, field: DBVersion["fields"][number], headerName: string): string => {
+const getColumnHeaderTooltip = (
+  tableName: string,
+  field: DBVersion["fields"][number],
+  headerName: string,
+  localized: Record<string, string>,
+): string => {
   const referencingTables = [
     ...new Set(
       (dataFromBackend.DBFieldsReferencedBy?.[tableName]?.[field.name] ?? [])
@@ -320,12 +340,12 @@ const getColumnHeaderTooltip = (tableName: string, field: DBVersion["fields"][nu
   ];
 
   if (referencingTables.length > 0) {
-    return `${headerName}\nReferenced by tables:\n${referencingTables.join("\n")}`;
+    return `${headerName}\n${localized.viewerReferencedByTables || "Referenced by tables:"}\n${referencingTables.join("\n")}`;
   }
 
   const referencedTable = field.is_reference?.[0];
   if (referencedTable) {
-    return `${headerName}\nReferences table:\n${referencedTable}`;
+    return `${headerName}\n${localized.viewerReferencesTable || "References table:"}\n${referencedTable}`;
   }
 
   return headerName;
@@ -804,6 +824,7 @@ const AgGridWrapper = memo(
     hiddenColumnIndexes: ReadonlySet<number>;
     pinFirstKeyColumn: boolean;
   }) => {
+    const localized: Record<string, string> = useContext(localizationContext);
     const keyColumnSet = useMemo(() => new Set(keyColumnNamesUnderscore), [keyColumnNamesUnderscore]);
     const gridRef = useRef<AgGridReact<RowData>>(null);
     const gridRootRef = useRef<HTMLDivElement | null>(null);
@@ -1167,7 +1188,7 @@ const AgGridWrapper = memo(
         const isFloatColumn = field?.field_type === "F32" || field?.field_type === "F64";
         const isKey = !!field && keyColumnSet.has(field.name);
         const fullHeaderName = columnHeaders[colIndex] ?? "";
-        const displayHeaderName = getDisplayColumnHeader(fullHeaderName);
+        const displayHeaderName = getDisplayColumnHeader(fullHeaderName, localized);
         const headerName = (isKey ? "🔑 " : "") + displayHeaderName;
 
         const isPinnedKeyColumn = pinFirstKeyColumn && colType === "text" && colIndex === firstKeyColumnIndex;
@@ -1180,7 +1201,7 @@ const AgGridWrapper = memo(
         const columnDefaultValue = columnDefaultValues[colIndex];
         defs.push({
           headerName,
-          headerTooltip: getColumnHeaderTooltip(tableName, field, fullHeaderName),
+          headerTooltip: getColumnHeaderTooltip(tableName, field, fullHeaderName, localized),
           hide: hiddenColumnIndexes.has(colIndex),
           // Beside the row number, so a row keeps its name however far right the table is scrolled.
           //
@@ -1248,6 +1269,7 @@ const AgGridWrapper = memo(
       pinFirstKeyColumn,
       pinnedKeyContentWidth,
       pinnedKeyPrefix,
+      localized,
       tableName,
     ]);
 
@@ -1506,7 +1528,11 @@ const AgGridWrapper = memo(
           clickedField && keyColumnSet.has(clickedField.name) ? clickedColIndex : firstKeyColumnIndex;
         const canShowDeepClone = canDeepCloneTable && keyColumnSet.size > 0 && deepCloneColIndex !== -1;
         const deepCloneValue = canShowDeepClone ? ev.data?.[getColumnFieldKey(deepCloneColIndex)] : undefined;
-        const label = canShowDeepClone ? `Deep clone ${deepCloneValue ?? ""}`.trimEnd() : undefined;
+        const label = canShowDeepClone
+          ? (localized.viewerDeepClone || "Deep clone {{value}}")
+              .replace("{{value}}", String(deepCloneValue ?? ""))
+              .trimEnd()
+          : undefined;
         const mouse = ev.event as MouseEvent | undefined;
         setMenuState({
           clientX: mouse?.clientX ?? 0,
@@ -1528,6 +1554,7 @@ const AgGridWrapper = memo(
         onCopyRowsInto,
         sourceDBFolder,
         sourcePackPath,
+        localized,
         sourceDBSubname,
       ],
     );
@@ -1793,7 +1820,7 @@ const AgGridWrapper = memo(
                   void onAddRow();
                 }}
               >
-                Add new row
+                {localized.viewerAddNewRow || "Add new row"}
               </button>
             )}
             {onDeleteRows && menuState.copyRows.length > 0 && (
@@ -1808,7 +1835,9 @@ const AgGridWrapper = memo(
                   }
                 }}
               >
-                {menuState.copyRows.length === 1 ? "Delete row" : "Delete rows"}
+                {menuState.copyRows.length === 1
+                  ? localized.viewerDeleteRow || "Delete row"
+                  : localized.viewerDeleteRows || "Delete rows"}
               </button>
             )}
             {menuState.reference && onGoToReference && (
@@ -1822,7 +1851,7 @@ const AgGridWrapper = memo(
                   onGoToReference(reference);
                 }}
               >
-                Go to reference
+                {localized.viewerGoToReference || "Go to reference"}
               </button>
             )}
             {menuState.label && (
@@ -1842,7 +1871,11 @@ const AgGridWrapper = memo(
                 sourcePackPath={sourcePackPath}
                 otherOpenPacks={otherOpenPacks}
                 showDialog={showDialog}
-                label={menuState.copyRows.length === 1 ? "Copy row into" : "Copy rows into"}
+                label={
+                  menuState.copyRows.length === 1
+                    ? localized.viewerCopyRowInto || "Copy row into"
+                    : localized.viewerCopyRowsInto || "Copy rows into"
+                }
                 onSelectTarget={(targetPackPath, openAfterCopy) => {
                   const selectedRows = menuState.copyRows;
                   setMenuState(undefined);
@@ -1870,6 +1903,7 @@ const PackTablesTableView = memo((props: PackTablesTableViewProps) => {
   const { showDialog, otherOpenPacks, onCopyInto, onGoToReference, referenceNavigation, onReferenceNavigationHandled } =
     props;
   const dispatch = useAppDispatch();
+  const localized: Record<string, string> = useContext(localizationContext);
   const currentDBTableSelection = useAppSelector((state) => state.app.currentDBTableSelection);
   const isFeaturesForModdersEnabled = useAppSelector((state) => state.app.isFeaturesForModdersEnabled);
   const startArgs = useAppSelector((state) => state.app.startArgs);
@@ -2152,7 +2186,7 @@ const PackTablesTableView = memo((props: PackTablesTableViewProps) => {
   /** Which columns went missing, named, so the toggle can say what it took away. */
   const hiddenColumnsTooltip = useMemo(() => {
     if (hiddenColumnIndexes.size === 0 || !activePreparedTableData) {
-      return "Hide columns where every row still holds the schema default";
+      return localized.viewerHideDefaultColumnsTooltip || "Hide columns where every row still holds the schema default";
     }
 
     const hiddenNames = [...hiddenColumnIndexes]
@@ -2161,8 +2195,13 @@ const PackTablesTableView = memo((props: PackTablesTableViewProps) => {
     const namedColumns = hiddenNames.slice(0, HIDDEN_COLUMN_TOOLTIP_LIMIT).join("\n");
     const remaining = hiddenNames.length - HIDDEN_COLUMN_TOOLTIP_LIMIT;
 
-    return `Hidden columns:\n${namedColumns}` + (remaining > 0 ? `\n+${remaining} more` : "");
-  }, [activePreparedTableData, hiddenColumnIndexes]);
+    return (
+      `${localized.viewerHiddenColumns || "Hidden columns:"}\n${namedColumns}` +
+      (remaining > 0
+        ? `\n${(localized.viewerMoreColumns || "+{{count}} more").replace("{{count}}", String(remaining))}`
+        : "")
+    );
+  }, [activePreparedTableData, hiddenColumnIndexes, localized]);
 
   const handleContextMenuCallback = useCallback(
     (row: number, col: number) => {
@@ -2229,7 +2268,9 @@ const PackTablesTableView = memo((props: PackTablesTableViewProps) => {
       try {
         const result = await window.api?.saveDBTableEdits(packPath, nextPackFile);
         if (!result?.success) {
-          throw new Error(result?.error || "Failed to store DB table edits");
+          throw new Error(
+            result?.error || localized.viewerFailedToStoreDbTableEdits || "Failed to store DB table edits",
+          );
         }
 
         if (historyMode === "push") {
@@ -2254,13 +2295,17 @@ const PackTablesTableView = memo((props: PackTablesTableViewProps) => {
         clearPreparedTableForPackedFile(packPath, previousPackFile.name);
         setWorkingPackFile(previousPackFile);
         setWorkingPreparedTableData(previousPreparedTableData);
-        showDialog(`Failed to save DB table edits: ${error instanceof Error ? error.message : "Unknown error"}`, {
-          title: "Save Failed",
-        });
+        showDialog(
+          (localized.viewerFailedToSaveDbTableEdits || "Failed to save DB table edits: {{error}}").replace(
+            "{{error}}",
+            error instanceof Error ? error.message : localized.viewerUnknownError || "Unknown error",
+          ),
+          { title: localized.viewerSaveFailed || "Save Failed" },
+        );
         return false;
       }
     },
-    [applyPackFileLocally, currentSchema, packPath, showDialog, syncHistorySize],
+    [applyPackFileLocally, currentSchema, localized, packPath, showDialog, syncHistorySize],
   );
 
   const handleCellValueChangedCallback = useCallback(
@@ -2506,28 +2551,28 @@ const PackTablesTableView = memo((props: PackTablesTableViewProps) => {
             <button
               type="button"
               onClick={() => void handleAddRow()}
-              title="Add Row (Ctrl/Cmd+Shift+A)"
+              title={localized.viewerAddRowShortcut || "Add Row (Ctrl/Cmd+Shift+A)"}
               className="px-3 py-2 text-sm rounded bg-blue-600 hover:bg-blue-700 text-white"
             >
-              Add Row
+              {localized.viewerAddRow || "Add Row"}
             </button>
             <button
               type="button"
               onClick={() => void handleUndo()}
               disabled={historySize.past === 0}
-              title="Undo (Ctrl/Cmd+Z)"
+              title={localized.viewerUndoShortcut || "Undo (Ctrl/Cmd+Z)"}
               className="px-3 py-2 text-sm rounded bg-gray-700 hover:bg-gray-600 text-white disabled:opacity-50 disabled:hover:bg-gray-700"
             >
-              Undo
+              {localized.viewerUndo || "Undo"}
             </button>
             <button
               type="button"
               onClick={() => void handleRedo()}
               disabled={historySize.future === 0}
-              title="Redo (Ctrl/Cmd+Y or Ctrl/Cmd+Shift+Z)"
+              title={localized.viewerRedoShortcut || "Redo (Ctrl/Cmd+Y or Ctrl/Cmd+Shift+Z)"}
               className="px-3 py-2 text-sm rounded bg-gray-700 hover:bg-gray-600 text-white disabled:opacity-50 disabled:hover:bg-gray-700"
             >
-              Redo
+              {localized.viewerRedo || "Redo"}
             </button>
           </>
         )}
@@ -2544,7 +2589,7 @@ const PackTablesTableView = memo((props: PackTablesTableViewProps) => {
         </select>
         <input
           value={tableFilterInput}
-          placeholder={"filter by selected column"}
+          placeholder={localized.viewerFilterSelectedColumn || "filter by selected column"}
           onChange={(e) => onFilterInputChange(e.target.value)}
           className="bg-gray-50 w-48 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block px-2 py-1 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white dark:focus:ring-blue-500 dark:focus:border-blue-500 focus:outline-none"
         />
@@ -2552,10 +2597,12 @@ const PackTablesTableView = memo((props: PackTablesTableViewProps) => {
           type="button"
           onClick={() => setPinFirstKeyColumn((isPinned) => !isPinned)}
           aria-pressed={pinFirstKeyColumn}
-          title="Keep the first key column beside the row numbers when scrolling right"
+          title={
+            localized.viewerPinKeyColumnTitle || "Keep the first key column beside the row numbers when scrolling right"
+          }
           className={toggleButtonClass(pinFirstKeyColumn)}
         >
-          Pin key column
+          {localized.viewerPinKeyColumn || "Pin key column"}
         </button>
         {canHideDefaultColumns && (
           <button
@@ -2566,8 +2613,11 @@ const PackTablesTableView = memo((props: PackTablesTableViewProps) => {
             className={toggleButtonClass(hideDefaultColumns)}
           >
             {hideDefaultColumns && hiddenColumnIndexes.size > 0
-              ? `Empty columns hidden (${hiddenColumnIndexes.size})`
-              : "Hide empty columns"}
+              ? (localized.viewerEmptyColumnsHidden || "Empty columns hidden ({{count}})").replace(
+                  "{{count}}",
+                  String(hiddenColumnIndexes.size),
+                )
+              : localized.viewerHideEmptyColumns || "Hide empty columns"}
           </button>
         )}
       </div>

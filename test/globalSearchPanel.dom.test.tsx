@@ -18,6 +18,7 @@ vi.mock("react-virtualized", () => ({
 }));
 
 import GlobalSearchPanel from "../src/components/viewer/GlobalSearchPanel";
+import LocalizationContext from "../src/localizationContext";
 import type { GlobalSearchRequest, GlobalSearchResponse, GlobalSearchResult } from "../src/globalSearch/types";
 
 const dbResult: GlobalSearchResult = {
@@ -122,6 +123,30 @@ describe("GlobalSearchPanel", () => {
     expect(screen.getByRole("checkbox", { name: /Text files/ })).toBeChecked();
     expect(screen.getByRole("checkbox", { name: /Rigid models/ })).not.toBeChecked();
     expect(screen.getByRole("checkbox", { name: /Vanilla packs/ })).toBeChecked();
+  });
+
+  it("uses localized result-kind labels from the viewer context", () => {
+    render(
+      <LocalizationContext.Provider
+        value={{
+          globalSearchDbTables: "Localized DB tables",
+          globalSearchLocTables: "Localized loc tables",
+          globalSearchTextFiles: "Localized text files",
+          globalSearchRigidModels: "Localized rigid models",
+        }}
+      >
+        <GlobalSearchPanel
+          isOpen
+          openPacks={[]}
+          onOpenDbResult={vi.fn()}
+          onOpenFileResult={vi.fn()}
+          onClose={vi.fn()}
+        />
+      </LocalizationContext.Provider>,
+    );
+
+    expect(screen.getByRole("checkbox", { name: /Localized DB tables/ })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: /Localized loc tables/ })).toBeChecked();
   });
 
   it("keeps its query and results when it is closed and reopened", async () => {

@@ -1,6 +1,7 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useContext, useEffect, useMemo, useState } from "react";
 
 import { Modal } from "../../flowbite";
+import localizationContext from "../../localizationContext";
 import {
   planPackFileRename,
   type PackFileRenameEntry,
@@ -32,6 +33,7 @@ const PackFileRenameModal: React.FC<PackFileRenameModalProps> = ({
   onClose,
   onApply,
 }) => {
+  const localized: Record<string, string> = useContext(localizationContext);
   const [find, setFind] = useState("");
   const [replace, setReplace] = useState("");
   const [useRegex, setUseRegex] = useState(false);
@@ -98,11 +100,18 @@ const PackFileRenameModal: React.FC<PackFileRenameModalProps> = ({
 
   return (
     <Modal onClose={() => !isApplying && onClose()} show={show} size="4xl" position="center">
-      <Modal.Header>{mode === "rename" ? "Rename files" : "Move files"}</Modal.Header>
+      <Modal.Header>
+        {mode === "rename"
+          ? localized.viewerRenameFilesTitle || "Rename files"
+          : localized.viewerMoveFilesTitle || "Move files"}
+      </Modal.Header>
       <Modal.Body>
         <div data-testid="pack-file-rename-modal" className="text-sm text-gray-200">
           <p className="mb-4">
-            {paths.length} file{paths.length === 1 ? "" : "s"} selected. Enter a pattern to preview the result.
+            {(
+              localized.viewerSelectedFilesPattern ||
+              "{{count}} file(s) selected. Enter a pattern to preview the result."
+            ).replace("{{count}}", String(paths.length))}
           </p>
 
           <label className="mb-3 flex items-center gap-2 text-white">
@@ -112,14 +121,14 @@ const PackFileRenameModal: React.FC<PackFileRenameModalProps> = ({
               onChange={(event) => setUseRegex(event.target.checked)}
               className="h-4 w-4"
             />
-            Use regular expression
+            {localized.viewerUseRegularExpression || "Use regular expression"}
           </label>
 
           <div className="grid gap-3 md:grid-cols-2">
             <label className="block">
-              <span className="mb-1 block text-gray-300">Find</span>
+              <span className="mb-1 block text-gray-300">{localized.viewerFind || "Find"}</span>
               <input
-                aria-label="Find"
+                aria-label={localized.viewerFind || "Find"}
                 value={find}
                 onChange={(event) => setFind(event.target.value)}
                 className="w-full rounded border border-gray-600 bg-gray-700 px-3 py-2 text-white focus:border-blue-400 focus:outline-none"
@@ -127,9 +136,9 @@ const PackFileRenameModal: React.FC<PackFileRenameModalProps> = ({
               />
             </label>
             <label className="block">
-              <span className="mb-1 block text-gray-300">Replace with</span>
+              <span className="mb-1 block text-gray-300">{localized.viewerReplaceWith || "Replace with"}</span>
               <input
-                aria-label="Replace with"
+                aria-label={localized.viewerReplaceWith || "Replace with"}
                 value={replace}
                 onChange={(event) => setReplace(event.target.value)}
                 className="w-full rounded border border-gray-600 bg-gray-700 px-3 py-2 text-white focus:border-blue-400 focus:outline-none"
@@ -145,19 +154,21 @@ const PackFileRenameModal: React.FC<PackFileRenameModalProps> = ({
                 onChange={(event) => setReplaceFileName(event.target.checked)}
                 className="h-4 w-4"
               />
-              Also replace the file name
+              {localized.viewerAlsoReplaceFileName || "Also replace the file name"}
             </label>
           )}
 
           {previewPlan.invalidRegex && (
             <p data-testid="rename-invalid-regex" className="mt-4 text-red-300">
-              Invalid regular expression: {previewPlan.invalidRegex}
+              {localized.viewerInvalidRegularExpression || "Invalid regular expression:"} {previewPlan.invalidRegex}
             </p>
           )}
 
           {previewPlan.errors.length > 0 && (
             <div data-testid="rename-errors" className="mt-4 rounded border border-red-700 bg-red-950/30 p-3">
-              <div className="font-medium text-red-300">Invalid destination paths</div>
+              <div className="font-medium text-red-300">
+                {localized.viewerInvalidDestinationPaths || "Invalid destination paths"}
+              </div>
               <ul className="mt-2 list-disc space-y-1 pl-5 text-red-200">
                 {previewPlan.errors.map((error) => (
                   <li key={`${error.path}-${error.message}`}>
@@ -170,11 +181,12 @@ const PackFileRenameModal: React.FC<PackFileRenameModalProps> = ({
 
           {previewPlan.conflicts.length > 0 && (
             <div data-testid="rename-conflicts" className="mt-4 rounded border border-amber-700 bg-amber-950/30 p-3">
-              <div className="font-medium text-amber-300">Conflicts</div>
+              <div className="font-medium text-amber-300">{localized.viewerConflicts || "Conflicts"}</div>
               <ul className="mt-2 list-disc space-y-1 pl-5 text-amber-200">
                 {previewPlan.conflicts.map((conflict) => (
                   <li key={`${conflict.with}-${conflict.newPath}`}>
-                    <span className="break-all">{conflict.newPath}</span> conflicts with {conflict.with}
+                    <span className="break-all">{conflict.newPath}</span>{" "}
+                    {localized.viewerConflictsWith || "conflicts with"} {conflict.with}
                   </li>
                 ))}
               </ul>
@@ -182,10 +194,12 @@ const PackFileRenameModal: React.FC<PackFileRenameModalProps> = ({
           )}
 
           <div className="mt-4">
-            <div className="mb-2 font-medium text-white">Preview</div>
+            <div className="mb-2 font-medium text-white">{localized.preview || "Preview"}</div>
             <div data-testid="rename-preview" className="max-h-[35vh] overflow-auto rounded border border-gray-700">
               {previewPlan.entries.length === 0 ? (
-                <div className="p-3 text-gray-400">No changes to preview.</div>
+                <div className="p-3 text-gray-400">
+                  {localized.viewerNoChangesToPreview || "No changes to preview."}
+                </div>
               ) : (
                 previewPlan.entries.map((entry) => (
                   <div
@@ -200,7 +214,12 @@ const PackFileRenameModal: React.FC<PackFileRenameModalProps> = ({
               )}
             </div>
             {previewPlan.unchangedCount > 0 && (
-              <p className="mt-2 text-xs text-gray-400">{previewPlan.unchangedCount} file(s) would remain unchanged.</p>
+              <p className="mt-2 text-xs text-gray-400">
+                {(localized.viewerFilesRemainUnchanged || "{{count}} file(s) would remain unchanged.").replace(
+                  "{{count}}",
+                  String(previewPlan.unchangedCount),
+                )}
+              </p>
             )}
           </div>
         </div>
@@ -212,7 +231,7 @@ const PackFileRenameModal: React.FC<PackFileRenameModalProps> = ({
           disabled={isApplying}
           className="rounded bg-gray-600 px-4 py-2 font-medium text-white hover:bg-gray-500 disabled:opacity-50"
         >
-          Cancel
+          {localized.cancel || "Cancel"}
         </button>
         <button
           type="button"
@@ -220,7 +239,7 @@ const PackFileRenameModal: React.FC<PackFileRenameModalProps> = ({
           disabled={!canApply}
           className="rounded bg-blue-600 px-4 py-2 font-medium text-white hover:bg-blue-700 disabled:opacity-50"
         >
-          {isApplying ? "Applying…" : "Apply"}
+          {isApplying ? localized.viewerApplying || "Applying…" : localized.viewerApply || "Apply"}
         </button>
       </Modal.Footer>
     </Modal>

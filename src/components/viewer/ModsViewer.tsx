@@ -355,9 +355,12 @@ const ModsViewer = memo(() => {
 
   const localized: Record<string, string> = useContext(localizationContext);
 
-  const showDialog = useCallback<ShowViewerDialog>((message, options) => {
-    setMessageDialog({ title: options?.title ?? "Message", message });
-  }, []);
+  const showDialog = useCallback<ShowViewerDialog>(
+    (message, options) => {
+      setMessageDialog({ title: options?.title ?? localized.viewerMessage ?? "Message", message });
+    },
+    [localized.viewerMessage],
+  );
 
   /** For outcomes worth confirming but not worth a click to dismiss, like a successful save. */
   const showToast = useCallback((message: string) => {
@@ -533,18 +536,21 @@ const ModsViewer = memo(() => {
     };
   }, []);
 
-  const buildFlowTabCandidate = useCallback((flowFile: string, packPath: string): ViewerTabCandidate => {
-    const packLabel = getPackNameFromPath(packPath) ?? packPath;
-    const shortFlowName = flowFile.replace(/^whmmflows[\\/]/, "");
-    const flowLabel = shortFlowName ? `Flow:${shortFlowName}` : flowFile;
-    return {
-      fileKey: `flow|${packPath}|${flowFile}`,
-      title: `${flowLabel}${packLabel ? ` | ${packLabel}` : ""}`,
-      kind: "flow",
-      packPath,
-      flowFile,
-    };
-  }, []);
+  const buildFlowTabCandidate = useCallback(
+    (flowFile: string, packPath: string): ViewerTabCandidate => {
+      const packLabel = getPackNameFromPath(packPath) ?? packPath;
+      const shortFlowName = flowFile.replace(/^whmmflows[\\/]/, "");
+      const flowLabel = shortFlowName ? `${localized.viewerFlowPrefix || "Flow:"}${shortFlowName}` : flowFile;
+      return {
+        fileKey: `flow|${packPath}|${flowFile}`,
+        title: `${flowLabel}${packLabel ? ` | ${packLabel}` : ""}`,
+        kind: "flow",
+        packPath,
+        flowFile,
+      };
+    },
+    [localized.viewerFlowPrefix],
+  );
 
   const buildPackedFileTabCandidate = useCallback((filePath: string, packPath: string): ViewerTabCandidate => {
     const packLabel = getPackNameFromPath(packPath) ?? packPath;
@@ -972,9 +978,13 @@ const ModsViewer = memo(() => {
             if (destinationFilePath) {
               const destinationTableName = getDBTableNameForCopy(destinationFilePath);
               if (destinationTableName && hasTableName(destinationTableName)) {
-                showDialog(`The destination already contains a table named "${destinationTableName}"`, {
-                  title: "Table Already Exists",
-                });
+                showDialog(
+                  (
+                    localized.viewerTableDestinationExists ||
+                    'The destination already contains a table named "{{name}}"'
+                  ).replace("{{name}}", destinationTableName),
+                  { title: localized.viewerTableAlreadyExists || "Table Already Exists" },
+                );
                 return;
               }
             }
@@ -1011,7 +1021,10 @@ const ModsViewer = memo(() => {
 
         if (source.kind === "dbRows") {
           if (!source.rows || !source.tableSchema) {
-            result = { success: false, error: "The selected rows do not have a table schema" };
+            result = {
+              success: false,
+              error: localized.viewerSelectedRowsNoSchema || "The selected rows do not have a table schema",
+            };
           } else {
             const copiedFile: PackedFile = {
               name: destinationFilePath || source.filePath,
@@ -1025,7 +1038,10 @@ const ModsViewer = memo(() => {
             const saveResult = await window.api?.saveDBTableEdits(targetPackPath, copiedFile);
             result = saveResult?.success
               ? { success: true, targetPackPath, filePath: copiedFile.name }
-              : { success: false, error: saveResult?.error || "Failed to save copied rows" };
+              : {
+                  success: false,
+                  error: saveResult?.error || localized.viewerFailedToSaveCopiedRows || "Failed to save copied rows",
+                };
           }
         } else if (destinationFilePath) {
           result = await window.api?.copyPackedFileToPack(
@@ -1066,9 +1082,12 @@ const ModsViewer = memo(() => {
           return;
         }
         if (!result?.success) {
-          showDialog(`Failed to copy ${source.filePath}: ${result?.error || "Unknown error"}`, {
-            title: "Copy Failed",
-          });
+          showDialog(
+            (localized.viewerFailedToCopyFile || "Failed to copy {{path}}: {{error}}")
+              .replace("{{path}}", source.filePath)
+              .replace("{{error}}", result?.error || localized.viewerUnknownError || "Unknown error"),
+            { title: localized.viewerCopyFailed || "Copy Failed" },
+          );
           return;
         }
 
@@ -1108,9 +1127,15 @@ const ModsViewer = memo(() => {
         }
       } catch (error) {
         console.error("Error copying packed file into another pack:", error);
-        showDialog(`Failed to copy ${source.filePath}: ${error instanceof Error ? error.message : "Unknown error"}`, {
-          title: "Copy Failed",
-        });
+        showDialog(
+          (localized.viewerFailedToCopyFile || "Failed to copy {{path}}: {{error}}")
+            .replace("{{path}}", source.filePath)
+            .replace(
+              "{{error}}",
+              error instanceof Error ? error.message : localized.viewerUnknownError || "Unknown error",
+            ),
+          { title: localized.viewerCopyFailed || "Copy Failed" },
+        );
       } finally {
         setIsCopyProcessing(false);
       }
@@ -1122,6 +1147,7 @@ const ModsViewer = memo(() => {
       getTargetPackFileNames,
       openOrActivatePackTab,
       packTabs,
+      localized,
       showDialog,
     ],
   );
@@ -1144,41 +1170,63 @@ const ModsViewer = memo(() => {
         const result = await window.api?.applyPackImportFromDisk?.(importConflictRequest.packPath, items);
         const errors = [
           ...importConflictRequest.plan.errors.map((error) => `${error.diskPath || "Import"}: ${error.message}`),
-          ...(result?.errors ?? []).map((error) => `${error.diskPath || "Import"}: ${error.message}`),
+          ...(result?.errors ?? []).map(
+            (error) => `${error.diskPath || localized.viewerImport || "Import"}: ${error.message}`,
+          ),
         ];
-        if (!result?.success && errors.length === 0) errors.push("Unknown import error");
+        if (!result?.success && errors.length === 0) {
+          errors.push(localized.viewerImportUnknownError || "Unknown import error");
+        }
         if (errors.length > 0) {
           showDialog(
-            `Imported ${result?.importedCount ?? 0} file(s), but ${errors.length} file(s) failed:\n${errors.join("\n")}`,
-            { title: "Import Finished With Errors" },
+            (
+              localized.viewerImportedWithErrors ||
+              "Imported {{imported}} file(s), but {{failed}} file(s) failed:\n{{errors}}"
+            )
+              .replace("{{imported}}", String(result?.importedCount ?? 0))
+              .replace("{{failed}}", String(errors.length))
+              .replace("{{errors}}", errors.join("\n")),
+            { title: localized.viewerImportFinishedWithErrors || "Import Finished With Errors" },
           );
         } else {
-          showDialog(`Imported ${result?.importedCount ?? 0} file(s). Press Save to write the pack.`, {
-            title: "Import Complete",
-          });
+          showDialog(
+            (localized.viewerImportedSuccess || "Imported {{count}} file(s). Press Save to write the pack.").replace(
+              "{{count}}",
+              String(result?.importedCount ?? 0),
+            ),
+            { title: localized.viewerImportComplete || "Import Complete" },
+          );
         }
       } catch (error) {
         console.error("Error importing files after conflict confirmation:", error);
-        showDialog(`Error importing packed files: ${error instanceof Error ? error.message : "Unknown error"}`, {
-          title: "Import Failed",
-        });
+        showDialog(
+          (localized.viewerErrorImportingPackedFiles || "Error importing packed files: {{error}}").replace(
+            "{{error}}",
+            error instanceof Error ? error.message : localized.viewerUnknownError || "Unknown error",
+          ),
+          { title: localized.viewerImportFailed || "Import Failed" },
+        );
       } finally {
         setIsImportProcessing(false);
         setImportConflictRequest(null);
       }
     },
-    [importConflictRequest, isImportProcessing, showDialog],
+    [importConflictRequest, isImportProcessing, localized, showDialog],
   );
 
   const handleCopyTableWithNewName = useCallback(() => {
     if (!copyTableNameRequest || isCopyProcessing) return;
     if (copyTableName.trim().toLowerCase() === copyTableNameRequest.tableName.trim().toLowerCase()) {
-      showDialog("Enter a different table name for the copy", { title: "Table Name Unchanged" });
+      showDialog(localized.viewerTableNameUnchanged || "Enter a different table name for the copy", {
+        title: localized.viewerTableNameUnchangedTitle || "Table Name Unchanged",
+      });
       return;
     }
     const destinationFilePath = getRenamedDBTablePath(copyTableNameRequest.filePath, copyTableName);
     if (!destinationFilePath) {
-      showDialog("Enter a valid table name without slashes", { title: "Invalid Table Name" });
+      showDialog(localized.viewerInvalidTableName || "Enter a valid table name without slashes", {
+        title: localized.viewerInvalidTableNameTitle || "Invalid Table Name",
+      });
       return;
     }
 
@@ -1189,7 +1237,7 @@ const ModsViewer = memo(() => {
       false,
       destinationFilePath,
     );
-  }, [copyTableName, copyTableNameRequest, handleCopyInto, isCopyProcessing, showDialog]);
+  }, [copyTableName, copyTableNameRequest, handleCopyInto, isCopyProcessing, localized, showDialog]);
 
   const handleOverwriteOriginalTable = useCallback(() => {
     if (!copyTableNameRequest || isCopyProcessing || !copyTableNameRequest.exactFileExists) return;
@@ -1515,21 +1563,36 @@ const ModsViewer = memo(() => {
         console.log("Pack saved successfully:", result.savedPath);
         // A warning is something to read, so it keeps the dialog; a plain success does not.
         if (result.warning) {
-          showDialog(`${result.warning}\n\nSaved to: ${result.savedPath}`, { title: "Pack Saved" });
+          showDialog(
+            `${result.warning}\n\n${(localized.viewerSavedTo || "Saved to: {{path}}").replace("{{path}}", result.savedPath ?? "")}`,
+            { title: localized.viewerPackSaved || "Pack Saved" },
+          );
         } else {
-          showToast(`Pack saved to: ${result.savedPath}`);
+          showToast(
+            (localized.viewerPackSavedTo || "Pack saved to: {{path}}").replace("{{path}}", result.savedPath ?? ""),
+          );
         }
       } else {
         console.error("Failed to save pack:", result?.error);
-        showDialog(`Failed to save pack: ${result?.error || "Unknown error"}`, { title: "Save Failed" });
+        showDialog(
+          (localized.viewerSavePackError || "Failed to save pack: {{error}}").replace(
+            "{{error}}",
+            result?.error || localized.viewerUnknownError || "Unknown error",
+          ),
+          { title: localized.viewerSaveFailed || "Save Failed" },
+        );
       }
     } catch (error) {
       console.error("Error saving pack:", error);
-      showDialog(`Error saving pack: ${error instanceof Error ? error.message : "Unknown error"}`, {
-        title: "Save Failed",
-      });
+      showDialog(
+        (localized.viewerSavePackException || "Error saving pack: {{error}}").replace(
+          "{{error}}",
+          error instanceof Error ? error.message : localized.viewerUnknownError || "Unknown error",
+        ),
+        { title: localized.viewerSaveFailed || "Save Failed" },
+      );
     }
-  }, [activeViewerPackPath, hasUnsavedFiles, showDialog, showToast]);
+  }, [activeViewerPackPath, hasUnsavedFiles, localized, showDialog, showToast]);
 
   const handleSavePackAs = useCallback(async () => {
     // Deliberately not gated on unsaved changes: Save As on an untouched pack saves a copy of it.
@@ -1548,7 +1611,9 @@ const ModsViewer = memo(() => {
   const handleSaveAsConfirm = useCallback(
     async (overwriteExisting = false) => {
       if (!saveAsPackName.trim() || !saveAsDirectory) {
-        showDialog("Please enter a pack name and select a directory", { title: "Missing Information" });
+        showDialog(localized.viewerMissingInformation || "Please enter a pack name and select a directory", {
+          title: localized.viewerMissingInformationTitle || "Missing Information",
+        });
         return;
       }
 
@@ -1571,26 +1636,41 @@ const ModsViewer = memo(() => {
           setSaveAsPackName("");
           setSaveAsDirectory(undefined);
           if (result.warning) {
-            showDialog(`${result.warning}\n\nPack: ${result.savedPath}`, { title: "Pack Saved" });
+            showDialog(
+              `${result.warning}\n\n${(localized.viewerPackPath || "Pack: {{path}}").replace("{{path}}", result.savedPath ?? "")}`,
+              {
+                title: localized.viewerPackSaved || "Pack Saved",
+              },
+            );
           } else {
-            showToast(`Pack saved to: ${result.savedPath}`);
+            showToast(
+              (localized.viewerPackSavedTo || "Pack saved to: {{path}}").replace("{{path}}", result.savedPath ?? ""),
+            );
           }
         } else {
           console.error("Failed to save pack as:", result?.error);
-          showDialog(`Failed to save pack as: ${result?.error || "Unknown error"}`, {
-            title: "Save Failed",
-          });
+          showDialog(
+            (localized.viewerSavePackAsError || "Failed to save pack as: {{error}}").replace(
+              "{{error}}",
+              result?.error || localized.viewerUnknownError || "Unknown error",
+            ),
+            { title: localized.viewerSaveFailed || "Save Failed" },
+          );
         }
       } catch (error) {
         console.error("Error saving pack as:", error);
-        showDialog(`Error saving pack as: ${error instanceof Error ? error.message : "Unknown error"}`, {
-          title: "Save Failed",
-        });
+        showDialog(
+          (localized.viewerSavePackAsException || "Error saving pack as: {{error}}").replace(
+            "{{error}}",
+            error instanceof Error ? error.message : localized.viewerUnknownError || "Unknown error",
+          ),
+          { title: localized.viewerSaveFailed || "Save Failed" },
+        );
       } finally {
         setIsSaveAsProcessing(false);
       }
     },
-    [activeViewerPackPath, saveAsDirectory, saveAsPackName, showDialog, showToast],
+    [activeViewerPackPath, localized, saveAsDirectory, saveAsPackName, showDialog, showToast],
   );
 
   const handleSelectSaveAsDirectory = useCallback(async () => {
@@ -1605,11 +1685,15 @@ const ModsViewer = memo(() => {
       saveAsPackNameInputRef.current?.focus();
     } catch (error) {
       console.error("Error selecting directory:", error);
-      showDialog(`Error selecting directory: ${error instanceof Error ? error.message : "Unknown error"}`, {
-        title: "Directory Selection Failed",
-      });
+      showDialog(
+        (localized.viewerDirectorySelectionError || "Error selecting directory: {{error}}").replace(
+          "{{error}}",
+          error instanceof Error ? error.message : localized.viewerUnknownError || "Unknown error",
+        ),
+        { title: localized.viewerDirectorySelectionFailed || "Directory Selection Failed" },
+      );
     }
-  }, [saveAsDirectory, showDialog]);
+  }, [localized, saveAsDirectory, showDialog]);
 
   const handleNewPack = () => {
     if (!isFeaturesForModdersEnabled) return;
@@ -1631,7 +1715,9 @@ const ModsViewer = memo(() => {
 
   const handleNewPackConfirm = useCallback(async () => {
     if (!newPackName.trim()) {
-      showDialog("Please enter a pack name", { title: "Missing Name" });
+      showDialog(localized.viewerMissingPackName || "Please enter a pack name", {
+        title: localized.viewerMissingName || "Missing Name",
+      });
       return;
     }
 
@@ -1656,13 +1742,17 @@ const ModsViewer = memo(() => {
       setNewPackName("");
     } catch (error) {
       console.error("Error creating pack:", error);
-      showDialog(`Error creating pack: ${error instanceof Error ? error.message : "Unknown error"}`, {
-        title: "Create Failed",
-      });
+      showDialog(
+        (localized.viewerCreatePackError || "Error creating pack: {{error}}").replace(
+          "{{error}}",
+          error instanceof Error ? error.message : localized.viewerUnknownError || "Unknown error",
+        ),
+        { title: localized.viewerCreateFailed || "Create Failed" },
+      );
     } finally {
       setIsNewPackProcessing(false);
     }
-  }, [dispatch, newPackName, openOrActivatePackTab, showDialog]);
+  }, [dispatch, localized, newPackName, openOrActivatePackTab, showDialog]);
 
   const closePackTab = useCallback(
     (packPath: string) => {
@@ -1794,7 +1884,7 @@ const ModsViewer = memo(() => {
           position="top-center"
           explicitClasses={["mt-8", "!max-w-7xl", "md:!h-full", "overflow-hidden", "modalDontOverflowWindowHeight"]}
         >
-          <Modal.Header>Deep Cloning...</Modal.Header>
+          <Modal.Header>{localized.viewerDeepCloning || "Deep Cloning..."}</Modal.Header>
           <Modal.Body>
             <div className="text-center mt-8">
               <DBDuplication launchSource="modsViewer" />
@@ -1805,31 +1895,35 @@ const ModsViewer = memo(() => {
 
       {/* Save As Modal */}
       <Modal onClose={() => setIsSaveAsModalOpen(false)} show={isSaveAsModalOpen} size="md" position="center">
-        <Modal.Header>Save Pack As</Modal.Header>
+        <Modal.Header>{localized.viewerSavePackAs || "Save Pack As"}</Modal.Header>
         <Modal.Body>
           <div className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-2">
-                Pack Name (without .pack extension)
+                {localized.viewerPackNameWithoutExtension || "Pack Name (without .pack extension)"}
               </label>
               <input
                 ref={saveAsPackNameInputRef}
                 type="text"
                 value={saveAsPackName}
                 onChange={(e) => setSaveAsPackName(e.target.value)}
-                placeholder="e.g. my_custom_pack"
+                placeholder={localized.viewerPackNamePlaceholder || "e.g. my_custom_pack"}
                 className="w-full px-3 py-2 bg-gray-700 text-white border border-gray-600 rounded-lg focus:outline-none focus:border-blue-500"
                 disabled={isSaveAsProcessing}
               />
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-300 mb-2">Save Location</label>
+              <label className="block text-sm font-medium text-gray-300 mb-2">
+                {localized.viewerSaveLocation || "Save Location"}
+              </label>
               <div className="flex gap-2">
                 <input
                   type="text"
                   value={saveAsDirectory || ""}
-                  placeholder="Loading data folder, or click Browse to pick another"
+                  placeholder={
+                    localized.viewerSaveLocationLoading || "Loading data folder, or click Browse to pick another"
+                  }
                   readOnly
                   className="flex-1 px-3 py-2 bg-gray-700 text-gray-400 border border-gray-600 rounded-lg focus:outline-none"
                 />
@@ -1838,7 +1932,7 @@ const ModsViewer = memo(() => {
                   disabled={isSaveAsProcessing}
                   className="px-4 py-2 bg-gray-600 hover:bg-gray-500 text-white font-medium rounded-lg transition-colors duration-200 disabled:opacity-50"
                 >
-                  Browse
+                  {localized.viewerBrowse || "Browse"}
                 </button>
               </div>
               {saveAsDirectory && <p className="text-xs text-gray-400 mt-1 truncate">{saveAsDirectory}</p>}
@@ -1851,7 +1945,7 @@ const ModsViewer = memo(() => {
             disabled={isSaveAsProcessing}
             className="px-4 py-2 bg-gray-600 hover:bg-gray-500 text-white font-medium rounded-lg transition-colors duration-200 disabled:opacity-50"
           >
-            Cancel
+            {localized.cancel || "Cancel"}
           </button>
           <button
             // Not passed directly: the click event would arrive as the overwrite argument.
@@ -1859,7 +1953,7 @@ const ModsViewer = memo(() => {
             disabled={isSaveAsProcessing || !saveAsPackName.trim() || !saveAsDirectory}
             className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {isSaveAsProcessing ? "Saving..." : "Save"}
+            {isSaveAsProcessing ? localized.viewerSaving || "Saving..." : localized.save || "Save"}
           </button>
         </Modal.Footer>
       </Modal>
@@ -1873,13 +1967,13 @@ const ModsViewer = memo(() => {
         size="md"
         position="center"
       >
-        <Modal.Header>File Already Exists</Modal.Header>
+        <Modal.Header>{localized.viewerFileAlreadyExists || "File Already Exists"}</Modal.Header>
         <Modal.Body>
           <div className="text-sm text-gray-200">
-            The destination pack already contains:
+            {localized.viewerDestinationContains || "The destination pack already contains:"}
             <div className="mt-2 break-all text-gray-400">{copyOverwriteRequest?.filePath}</div>
             <div className="mt-2 break-all text-gray-400">{copyOverwriteRequest?.targetPackPath}</div>
-            <div className="mt-3">Overwrite it with the copied file?</div>
+            <div className="mt-3">{localized.viewerOverwriteCopiedFile || "Overwrite it with the copied file?"}</div>
           </div>
         </Modal.Body>
         <Modal.Footer>
@@ -1888,14 +1982,14 @@ const ModsViewer = memo(() => {
             disabled={isCopyProcessing}
             className="px-4 py-2 bg-gray-600 hover:bg-gray-500 text-white font-medium rounded-lg transition-colors duration-200 disabled:opacity-50"
           >
-            Cancel
+            {localized.cancel || "Cancel"}
           </button>
           <button
             onClick={handleConfirmCopyOverwrite}
             disabled={isCopyProcessing}
             className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-medium rounded-lg transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {isCopyProcessing ? "Overwriting..." : "Overwrite"}
+            {isCopyProcessing ? localized.viewerOverwriting || "Overwriting..." : localized.overwrite || "Overwrite"}
           </button>
         </Modal.Footer>
       </Modal>
@@ -1921,15 +2015,15 @@ const ModsViewer = memo(() => {
         size="md"
         position="center"
       >
-        <Modal.Header>Table Already Exists</Modal.Header>
+        <Modal.Header>{localized.viewerTableAlreadyExists || "Table Already Exists"}</Modal.Header>
         <Modal.Body>
           <div className="space-y-3 text-sm text-gray-200">
             <div>
-              The destination pack already contains a table named:
+              {localized.viewerDestinationContainsTable || "The destination pack already contains a table named:"}
               <div className="mt-2 break-all text-gray-400">{copyTableNameRequest?.tableName}</div>
             </div>
             <label className="block">
-              <span className="mb-1 block text-gray-300">New table name</span>
+              <span className="mb-1 block text-gray-300">{localized.viewerTableName || "New table name"}</span>
               <input
                 ref={copyTableNameInputRef}
                 type="text"
@@ -1940,10 +2034,15 @@ const ModsViewer = memo(() => {
                 }}
                 className="w-full rounded-lg border border-gray-600 bg-gray-700 px-3 py-2 text-white focus:border-blue-500 focus:outline-none"
                 disabled={isCopyProcessing}
-                aria-label="New table name"
+                aria-label={localized.viewerTableName || "New table name"}
               />
             </label>
-            <div className="break-all text-xs text-gray-500">Destination: {copyTableNameRequest?.targetPackPath}</div>
+            <div className="break-all text-xs text-gray-500">
+              {(localized.viewerDestination || "Destination: {{path}}").replace(
+                "{{path}}",
+                copyTableNameRequest?.targetPackPath || "",
+              )}
+            </div>
           </div>
         </Modal.Body>
         <Modal.Footer>
@@ -1955,7 +2054,7 @@ const ModsViewer = memo(() => {
             disabled={isCopyProcessing}
             className="px-4 py-2 bg-gray-600 hover:bg-gray-500 text-white font-medium rounded-lg transition-colors duration-200 disabled:opacity-50"
           >
-            Cancel
+            {localized.cancel || "Cancel"}
           </button>
           {copyTableNameRequest?.exactFileExists && copyTableNameRequest.source.kind === "db" && (
             <button
@@ -1963,7 +2062,9 @@ const ModsViewer = memo(() => {
               disabled={isCopyProcessing}
               className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-medium rounded-lg transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {isCopyProcessing ? "Copying..." : "Overwrite Original"}
+              {isCopyProcessing
+                ? localized.viewerCopying || "Copying..."
+                : localized.viewerOverwriteOriginal || "Overwrite Original"}
             </button>
           )}
           <button
@@ -1971,19 +2072,22 @@ const ModsViewer = memo(() => {
             disabled={isCopyProcessing || !copyTableName.trim()}
             className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {isCopyProcessing ? "Copying..." : "Copy with New Name"}
+            {isCopyProcessing
+              ? localized.viewerCopying || "Copying..."
+              : localized.viewerCopyWithNewName || "Copy with New Name"}
           </button>
         </Modal.Footer>
       </Modal>
 
       {/* Overwrite confirmation, shown over the Save As modal so Cancel goes back to it */}
       <Modal onClose={() => setOverwriteConfirmPath(null)} show={!!overwriteConfirmPath} size="md" position="center">
-        <Modal.Header>Pack Already Exists</Modal.Header>
+        <Modal.Header>{localized.viewerPackAlreadyExists || "Pack Already Exists"}</Modal.Header>
         <Modal.Body>
           <div className="text-sm text-gray-200">
-            A pack already exists at:
+            {localized.viewerPackExistsAt || "A pack already exists at:"}
             <div className="mt-2 mb-3 break-all text-gray-400">{overwriteConfirmPath}</div>
-            Overwrite it? The existing pack will be replaced and cannot be recovered.
+            {localized.viewerOverwritePackWarning ||
+              "Overwrite it? The existing pack will be replaced and cannot be recovered."}
           </div>
         </Modal.Body>
         <Modal.Footer>
@@ -1992,30 +2096,32 @@ const ModsViewer = memo(() => {
             disabled={isSaveAsProcessing}
             className="px-4 py-2 bg-gray-600 hover:bg-gray-500 text-white font-medium rounded-lg transition-colors duration-200 disabled:opacity-50"
           >
-            Cancel
+            {localized.cancel || "Cancel"}
           </button>
           <button
             onClick={() => void handleSaveAsConfirm(true)}
             disabled={isSaveAsProcessing}
             className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-medium rounded-lg transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {isSaveAsProcessing ? "Overwriting..." : "Overwrite"}
+            {isSaveAsProcessing ? localized.viewerOverwriting || "Overwriting..." : localized.overwrite || "Overwrite"}
           </button>
         </Modal.Footer>
       </Modal>
 
       {/* New Pack Modal */}
       <Modal onClose={() => setIsNewPackModalOpen(false)} show={isNewPackModalOpen} size="md" position="center">
-        <Modal.Header>Create New Pack</Modal.Header>
+        <Modal.Header>{localized.viewerCreateNewPack || "Create New Pack"}</Modal.Header>
         <Modal.Body>
           <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">Pack Name (without .pack extension)</label>
+            <label className="block text-sm font-medium text-gray-300 mb-2">
+              {localized.viewerPackNameWithoutExtension || "Pack Name (without .pack extension)"}
+            </label>
             <input
               ref={newPackNameInputRef}
               type="text"
               value={newPackName}
               onChange={(e) => setNewPackName(e.target.value)}
-              placeholder="e.g. new_mod_pack"
+              placeholder={localized.viewerNewPackNamePlaceholder || "e.g. new_mod_pack"}
               className="w-full px-3 py-2 bg-gray-700 text-white border border-gray-600 rounded-lg focus:outline-none focus:border-blue-500"
               disabled={isNewPackProcessing}
             />
@@ -2027,30 +2133,34 @@ const ModsViewer = memo(() => {
             disabled={isNewPackProcessing}
             className="px-4 py-2 bg-gray-600 hover:bg-gray-500 text-white font-medium rounded-lg transition-colors duration-200 disabled:opacity-50"
           >
-            Cancel
+            {localized.cancel || "Cancel"}
           </button>
           <button
             onClick={handleNewPackConfirm}
             disabled={isNewPackProcessing || !newPackName.trim()}
             className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {isNewPackProcessing ? "Creating..." : "Create"}
+            {isNewPackProcessing ? localized.viewerCreating || "Creating..." : localized.viewerCreate || "Create"}
           </button>
         </Modal.Footer>
       </Modal>
 
       {/* Discard confirmation for a dirty pack tab */}
       <Modal onClose={() => setPackCloseConfirmPath(null)} show={!!packCloseConfirmPath} size="md" position="center">
-        <Modal.Header>Close Pack</Modal.Header>
+        <Modal.Header>{localized.viewerClosePack || "Close Pack"}</Modal.Header>
         <Modal.Body>
           <div className="text-sm text-gray-200">
-            This pack has unsaved changes. Closing it will discard:
+            {localized.viewerUnsavedChanges || "This pack has unsaved changes. Closing it will discard:"}
             <ul className="mt-2 max-h-48 overflow-auto list-disc list-inside text-gray-400 break-all">
               {(packCloseConfirmPath ? (unsavedPacksDataByPath[packCloseConfirmPath] ?? []) : []).map((file) => (
-                <li key={`unsaved-${file.name}`}>Unsaved: {file.name}</li>
+                <li key={`unsaved-${file.name}`}>
+                  {localized.viewerUnsavedPrefix || "Unsaved:"} <span>{file.name}</span>
+                </li>
               ))}
               {(packCloseConfirmPath ? (deletedPackFilePathsByPath[packCloseConfirmPath] ?? []) : []).map((path) => (
-                <li key={`deleted-${path}`}>Deleted: {path}</li>
+                <li key={`deleted-${path}`}>
+                  {localized.viewerDeletedPrefix || "Deleted:"} <span>{path}</span>
+                </li>
               ))}
             </ul>
           </div>
@@ -2060,7 +2170,7 @@ const ModsViewer = memo(() => {
             onClick={() => setPackCloseConfirmPath(null)}
             className="px-4 py-2 bg-gray-600 hover:bg-gray-500 text-white font-medium rounded-lg transition-colors duration-200"
           >
-            Cancel
+            {localized.cancel || "Cancel"}
           </button>
           <button
             onClick={() => {
@@ -2069,7 +2179,7 @@ const ModsViewer = memo(() => {
             }}
             className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-medium rounded-lg transition-colors duration-200"
           >
-            Discard and Close
+            {localized.viewerDiscardAndClose || "Discard and Close"}
           </button>
         </Modal.Footer>
       </Modal>
@@ -2086,7 +2196,7 @@ const ModsViewer = memo(() => {
       )}
 
       <Modal onClose={() => setMessageDialog(null)} show={!!messageDialog} size="md" position="center">
-        <Modal.Header>{messageDialog?.title ?? "Message"}</Modal.Header>
+        <Modal.Header>{messageDialog?.title ?? localized.viewerMessage ?? "Message"}</Modal.Header>
         <Modal.Body>
           <div className="whitespace-pre-wrap text-sm text-gray-200">{messageDialog?.message}</div>
         </Modal.Body>
@@ -2095,7 +2205,7 @@ const ModsViewer = memo(() => {
             onClick={() => setMessageDialog(null)}
             className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors duration-200"
           >
-            OK
+            {localized.viewerOk || "OK"}
           </button>
         </Modal.Footer>
       </Modal>
@@ -2119,8 +2229,8 @@ const ModsViewer = memo(() => {
                       type="button"
                       ref={fileMenuButtonRef}
                       onClick={() => setIsFileMenuOpen((isOpen) => !isOpen)}
-                      title="File"
-                      aria-label="File"
+                      title={localized.viewerFile || "File"}
+                      aria-label={localized.viewerFile || "File"}
                       aria-haspopup="menu"
                       aria-expanded={isFileMenuOpen}
                       aria-controls="mods-viewer-file-menu"
@@ -2130,7 +2240,7 @@ const ModsViewer = memo(() => {
                       }
                     >
                       <FontAwesomeIcon icon={faFile} className="w-4 h-4" />
-                      {!isSidebarNarrow && <span>File</span>}
+                      {!isSidebarNarrow && <span>{localized.viewerFile || "File"}</span>}
                       {!isSidebarNarrow && <FontAwesomeIcon icon={faChevronDown} className="w-3 h-3" />}
                     </button>
 
@@ -2138,7 +2248,7 @@ const ModsViewer = memo(() => {
                       <div
                         id="mods-viewer-file-menu"
                         role="menu"
-                        aria-label="File"
+                        aria-label={localized.viewerFile || "File"}
                         className="absolute left-0 top-full z-50 mt-1 min-w-[10rem] overflow-hidden rounded-md border border-gray-600 bg-gray-800 py-1 shadow-xl"
                       >
                         <button
@@ -2147,7 +2257,7 @@ const ModsViewer = memo(() => {
                           onClick={handleNewPack}
                           className="block w-full whitespace-nowrap px-3 py-2 text-left text-sm text-gray-200 hover:bg-gray-700"
                         >
-                          New Pack
+                          {localized.viewerNewPack || "New Pack"}
                         </button>
                         <button
                           type="button"
@@ -2155,7 +2265,7 @@ const ModsViewer = memo(() => {
                           onClick={handleAddNewFlow}
                           className="block w-full whitespace-nowrap px-3 py-2 text-left text-sm text-gray-200 hover:bg-gray-700"
                         >
-                          Add New Flow
+                          {localized.viewerAddNewFlow || "Add New Flow"}
                         </button>
                         <button
                           type="button"
@@ -2167,7 +2277,7 @@ const ModsViewer = memo(() => {
                             (isDBPackOpen ? "cursor-not-allowed text-gray-500" : "text-gray-200 hover:bg-gray-700")
                           }
                         >
-                          open db.pack
+                          {localized.viewerOpenDbPack || "open db.pack"}
                         </button>
                       </div>
                     )}
@@ -2212,7 +2322,7 @@ const ModsViewer = memo(() => {
                           requestClosePackTab(packTab.packPath);
                         }}
                         className="px-1 pr-2 text-gray-400 hover:text-white"
-                        aria-label={`Close ${packLabel}`}
+                        aria-label={(localized.viewerCloseTab || "Close {{name}}").replace("{{name}}", packLabel)}
                       >
                         <FontAwesomeIcon icon={faXmark} />
                       </button>
@@ -2252,7 +2362,7 @@ const ModsViewer = memo(() => {
                           d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3-3m0 0l-3 3m3-3v12"
                         />
                       </svg>
-                      Save Pack
+                      {localized.viewerSavePack || "Save Pack"}
                     </button>
                   )}
                   {canSavePackAs && (
@@ -2268,7 +2378,7 @@ const ModsViewer = memo(() => {
                           d="M12 19l9 2-9-18-9 18 9-2m0 0v-8m0 8l-6-4m6 4l6-4"
                         />
                       </svg>
-                      Save As
+                      {localized.viewerSaveAs || "Save As"}
                     </button>
                   )}
                 </div>
@@ -2342,7 +2452,7 @@ const ModsViewer = memo(() => {
               <div style={{ width: "100%", minWidth: "1px", height: "100%" }} className="flex flex-col">
                 <div className="flex items-center gap-1 border-b border-gray-700 bg-gray-900/60 px-2 py-1 overflow-x-auto">
                   {openTabs.length === 0 ? (
-                    <span className="text-xs text-gray-400">No files open</span>
+                    <span className="text-xs text-gray-400">{localized.viewerNoFilesOpen || "No files open"}</span>
                   ) : (
                     openTabs.map((tab) => {
                       const isActive = tab.id === activeTabId;
@@ -2371,7 +2481,7 @@ const ModsViewer = memo(() => {
                               handleCloseTab(tab.id);
                             }}
                             className="px-1 pr-2 text-gray-400 hover:text-white"
-                            aria-label={`Close ${tab.title}`}
+                            aria-label={(localized.viewerCloseTab || "Close {{name}}").replace("{{name}}", tab.title)}
                           >
                             <FontAwesomeIcon icon={faXmark} />
                           </button>
@@ -2382,13 +2492,15 @@ const ModsViewer = memo(() => {
                 </div>
                 <div className="flex-1 min-h-0">
                   {!currentPackData ? (
-                    <div className="h-full flex items-center justify-center text-sm text-gray-400">Loading pack…</div>
+                    <div className="h-full flex items-center justify-center text-sm text-gray-400">
+                      {localized.viewerLoadingPack || "Loading pack…"}
+                    </div>
                   ) : activeTab ? (
                     activeTab.kind === "db" && !activeTab.dbName && !activeTab.dbSubname ? (
                       <div className="h-full flex items-center justify-center text-sm text-gray-400">
                         {packFileInventory?.isEmpty
-                          ? "Empty pack. Add a flow or create/edit files to populate it."
-                          : "Select a file to view"}
+                          ? localized.viewerEmptyPack || "Empty pack. Add a flow or create/edit files to populate it."
+                          : localized.viewerSelectFile || "Select a file to view"}
                       </div>
                     ) : activeTab.kind === "flow" && activeTab.flowFile ? (
                       <NodeEditor currentFile={activeTab.flowFile} currentPack={activeTab.packPath} />
@@ -2411,8 +2523,8 @@ const ModsViewer = memo(() => {
                   ) : (
                     <div className="h-full flex items-center justify-center text-sm text-gray-400">
                       {packFileInventory?.isEmpty
-                        ? "Empty pack. Add a flow or create/edit files to populate it."
-                        : "Select a file to view"}
+                        ? localized.viewerEmptyPack || "Empty pack. Add a flow or create/edit files to populate it."
+                        : localized.viewerSelectFile || "Select a file to view"}
                     </div>
                   )}
                 </div>

@@ -1,4 +1,4 @@
-import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import CodeMirror from "@uiw/react-codemirror";
 import { xml } from "@codemirror/lang-xml";
 import { StreamLanguage } from "@codemirror/language";
@@ -9,6 +9,7 @@ import { makeSelectCurrentPackData, makeSelectCurrentPackUnsavedFiles } from "./
 import type { ShowViewerDialog } from "./viewerDialogs";
 import { getPackNameFromPath } from "@/src/utility/packFileHelpers";
 import { vanillaPackNames } from "@/src/supportedGames";
+import localizationContext from "@/src/localizationContext";
 import {
   decodePackedTextBuffer,
   getPackedFileLowerExtension,
@@ -36,6 +37,7 @@ type LoadState =
   | { status: "error"; error: string };
 
 const PackFileView = memo(({ packPath, filePath, showDialog }: PackFileViewProps) => {
+  const localized: Record<string, string> = useContext(localizationContext);
   const selectCurrentPackData = useMemo(makeSelectCurrentPackData, []);
   const selectCurrentPackUnsavedFiles = useMemo(makeSelectCurrentPackUnsavedFiles, []);
   const packData = useAppSelector((state) => selectCurrentPackData(state, packPath));
@@ -91,7 +93,13 @@ const PackFileView = memo(({ packPath, filePath, showDialog }: PackFileViewProps
 
     const load = async () => {
       if (!viewerKind) {
-        setLoadState({ status: "error", error: `Unsupported file type: ${filePath}` });
+        setLoadState({
+          status: "error",
+          error: (localized.viewerUnsupportedFileTypeWithPath || "Unsupported file type: {{path}}").replace(
+            "{{path}}",
+            filePath,
+          ),
+        });
         return;
       }
 
@@ -111,15 +119,23 @@ const PackFileView = memo(({ packPath, filePath, showDialog }: PackFileViewProps
       if (isCancelled) return;
 
       if (!result?.success) {
-        const error = result?.error || "Failed to read file from pack";
+        const error = result?.error || localized.viewerFailedToReadFile || "Failed to read file from pack";
         setLoadState({ status: "error", error });
-        showDialog(`Failed to read ${filePath}: ${error}`, { title: "Read Failed" });
+        showDialog(
+          (localized.viewerFailedToReadFileAtPath || "Failed to read {{path}}: {{error}}")
+            .replace("{{path}}", filePath)
+            .replace("{{error}}", error),
+          { title: localized.viewerReadFailed || "Read Failed" },
+        );
         return;
       }
 
       if (viewerKind === "image") {
         if (!result.base64) {
-          setLoadState({ status: "error", error: "Image data is unavailable" });
+          setLoadState({
+            status: "error",
+            error: localized.viewerImageDataUnavailable || "Image data is unavailable.",
+          });
           return;
         }
         const mimeType = result.mimeType || getPackedFileMimeType(filePath) || "application/octet-stream";
@@ -134,7 +150,7 @@ const PackFileView = memo(({ packPath, filePath, showDialog }: PackFileViewProps
     return () => {
       isCancelled = true;
     };
-  }, [filePath, openedFileKey, packPath, packedFile?.buffer, packedFile?.text, showDialog, viewerKind]);
+  }, [filePath, localized, openedFileKey, packPath, packedFile?.buffer, packedFile?.text, showDialog, viewerKind]);
 
   useEffect(() => {
     latestWorkingTextRef.current = workingText;
@@ -170,7 +186,9 @@ const PackFileView = memo(({ packPath, filePath, showDialog }: PackFileViewProps
       try {
         const result = await window.api?.saveTextPackedFileEdits(packPath, filePath, nextText);
         if (!result?.success) {
-          throw new Error(result?.error || "Failed to store text file edits");
+          throw new Error(
+            result?.error || localized.viewerFailedToStoreTextFileEdits || "Failed to store text file edits",
+          );
         }
 
         if (requestId === saveRequestIdRef.current) {
@@ -184,14 +202,20 @@ const PackFileView = memo(({ packPath, filePath, showDialog }: PackFileViewProps
           setIsPersisting(false);
         }
         if (!options?.suppressDialog) {
-          showDialog(`Failed to save ${filePath}: ${error instanceof Error ? error.message : "Unknown error"}`, {
-            title: "Save Failed",
-          });
+          showDialog(
+            (localized.viewerFailedToSaveFile || "Failed to save {{path}}: {{error}}")
+              .replace("{{path}}", filePath)
+              .replace(
+                "{{error}}",
+                error instanceof Error ? error.message : localized.viewerUnknownError || "Unknown error",
+              ),
+            { title: localized.viewerSaveFailed || "Save Failed" },
+          );
         }
         return false;
       }
     },
-    [canEditTextFile, filePath, packPath, showDialog],
+    [canEditTextFile, filePath, localized, packPath, showDialog],
   );
 
   useEffect(() => {
@@ -228,7 +252,11 @@ const PackFileView = memo(({ packPath, filePath, showDialog }: PackFileViewProps
   );
 
   if (!viewerKind) {
-    return <div className="h-full flex items-center justify-center text-sm text-gray-400">Unsupported file type.</div>;
+    return (
+      <div className="h-full flex items-center justify-center text-sm text-gray-400">
+        {localized.viewerUnsupportedFileType || "Unsupported file type."}
+      </div>
+    );
   }
 
   if (
@@ -237,7 +265,11 @@ const PackFileView = memo(({ packPath, filePath, showDialog }: PackFileViewProps
     // Loaded, but it is the file we just navigated away from.
     (loadState.status === "loaded" && loadState.fileKey !== openedFileKey)
   ) {
-    return <div className="h-full flex items-center justify-center text-sm text-gray-400">Loading file...</div>;
+    return (
+      <div className="h-full flex items-center justify-center text-sm text-gray-400">
+        {localized.viewerLoadingFile || "Loading file..."}
+      </div>
+    );
   }
 
   if (loadState.status === "error") {
@@ -259,7 +291,9 @@ const PackFileView = memo(({ packPath, filePath, showDialog }: PackFileViewProps
           {loadedState.imageSrc ? (
             <img src={loadedState.imageSrc} alt={filePath} className="max-w-full max-h-full object-contain" />
           ) : (
-            <div className="text-sm text-gray-400">Image data is unavailable.</div>
+            <div className="text-sm text-gray-400">
+              {localized.viewerImageDataUnavailable || "Image data is unavailable."}
+            </div>
           )}
         </div>
       </div>
@@ -273,11 +307,11 @@ const PackFileView = memo(({ packPath, filePath, showDialog }: PackFileViewProps
         <span className="shrink-0 text-[11px] uppercase tracking-wide text-gray-500">
           {canEditTextFile
             ? isPersisting
-              ? "Saving..."
+              ? localized.viewerSaving || "Saving..."
               : hasPendingTextChanges
-                ? "Modified"
-                : "Editable"
-            : "Read Only"}
+                ? localized.viewerModified || "Modified"
+                : localized.viewerEditable || "Editable"
+            : localized.viewerReadOnly || "Read Only"}
         </span>
       </div>
       <div className="flex-1 min-h-0 overflow-hidden">

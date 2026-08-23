@@ -1,6 +1,7 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useContext, useEffect, useMemo, useState } from "react";
 
 import { Modal } from "../../flowbite";
+import localizationContext from "../../localizationContext";
 
 type ImportConflictsModalProps = {
   request: PackImportConflictRequest | null;
@@ -15,6 +16,7 @@ const ImportConflictsModal: React.FC<ImportConflictsModalProps> = ({
   onCancel,
   onImport,
 }) => {
+  const localized: Record<string, string> = useContext(localizationContext);
   const conflictIndexes = useMemo(
     () =>
       request?.plan.items.reduce<number[]>((indexes, item, index) => {
@@ -38,19 +40,27 @@ const ImportConflictsModal: React.FC<ImportConflictsModalProps> = ({
 
   return (
     <Modal onClose={() => !isProcessing && onCancel()} show={!!request} size="4xl" position="center">
-      <Modal.Header>Import Conflicts</Modal.Header>
+      <Modal.Header>{localized.viewerImportConflicts || "Import Conflicts"}</Modal.Header>
       <Modal.Body>
         <div className="text-sm text-gray-200">
           {request && (
             <>
               <p>
-                {conflictIndexes.length} file(s) already exist in the destination. Checked files will overwrite the
-                current contents.
+                {(
+                  localized.viewerImportConflictExisting ||
+                  "{{count}} file(s) already exist in the destination. Checked files will overwrite the current contents."
+                ).replace("{{count}}", String(conflictIndexes.length))}
               </p>
               {(request.plan.items.length - conflictIndexes.length > 0 || request.plan.errors.length > 0) && (
                 <p className="mt-2 text-gray-400">
-                  {request.plan.items.length - conflictIndexes.length} new file(s) will be imported automatically.
-                  {request.plan.errors.length > 0 && ` ${request.plan.errors.length} path(s) could not be planned.`}
+                  {(
+                    localized.viewerImportConflictNew || "{{count}} new file(s) will be imported automatically."
+                  ).replace("{{count}}", String(request.plan.items.length - conflictIndexes.length))}
+                  {request.plan.errors.length > 0 &&
+                    ` ${(localized.viewerImportConflictUnplanned || "{{count}} path(s) could not be planned.").replace(
+                      "{{count}}",
+                      String(request.plan.errors.length),
+                    )}`}
                 </p>
               )}
               <div className="mt-3 flex gap-2">
@@ -60,7 +70,7 @@ const ImportConflictsModal: React.FC<ImportConflictsModalProps> = ({
                   disabled={isProcessing}
                   className="rounded bg-gray-600 px-3 py-1 text-xs text-white hover:bg-gray-500 disabled:opacity-50"
                 >
-                  Select all
+                  {localized.viewerSelectAll || "Select all"}
                 </button>
                 <button
                   type="button"
@@ -68,7 +78,7 @@ const ImportConflictsModal: React.FC<ImportConflictsModalProps> = ({
                   disabled={isProcessing}
                   className="rounded bg-gray-600 px-3 py-1 text-xs text-white hover:bg-gray-500 disabled:opacity-50"
                 >
-                  Select none
+                  {localized.viewerSelectNone || "Select none"}
                 </button>
               </div>
               <div className="mt-4 max-h-[50vh] overflow-auto rounded border border-gray-700">
@@ -92,14 +102,19 @@ const ImportConflictsModal: React.FC<ImportConflictsModalProps> = ({
                           })
                         }
                         disabled={isProcessing}
-                        aria-label={`Overwrite ${item.packFilePath}`}
+                        aria-label={(localized.viewerOverwritePath || "Overwrite {{path}}").replace(
+                          "{{path}}",
+                          item.packFilePath,
+                        )}
                         className="mt-1"
                       />
                       <span className="min-w-0">
                         <span className="block break-all text-white">{item.packFilePath}</span>
                         <span className="mt-1 block break-all text-xs text-gray-400">
-                          {item.diskPath} · conflicts with{" "}
-                          {item.conflictsWith === "unsaved" ? "an unsaved file" : "a pack file"}
+                          {item.diskPath} {localized.viewerConflictsWith || "· conflicts with"}{" "}
+                          {item.conflictsWith === "unsaved"
+                            ? localized.viewerUnsavedFile || "an unsaved file"
+                            : localized.viewerPackFile || "a pack file"}
                         </span>
                       </span>
                     </label>
@@ -117,7 +132,7 @@ const ImportConflictsModal: React.FC<ImportConflictsModalProps> = ({
           disabled={isProcessing}
           className="rounded bg-gray-600 px-4 py-2 font-medium text-white hover:bg-gray-500 disabled:opacity-50"
         >
-          Cancel
+          {localized.cancel || "Cancel"}
         </button>
         <button
           type="button"
@@ -125,7 +140,7 @@ const ImportConflictsModal: React.FC<ImportConflictsModalProps> = ({
           disabled={isProcessing || !request}
           className="rounded bg-blue-600 px-4 py-2 font-medium text-white hover:bg-blue-700 disabled:opacity-50"
         >
-          {isProcessing ? "Importing…" : "Import"}
+          {isProcessing ? localized.viewerImporting || "Importing…" : localized.viewerImport || "Import"}
         </button>
       </Modal.Footer>
     </Modal>

@@ -1,4 +1,4 @@
-import React, { useEffect, useImperativeHandle, useMemo } from "react";
+import React, { useContext, useEffect, useImperativeHandle, useMemo } from "react";
 import { Modal } from "../../flowbite";
 import { setUnsavedPacksData } from "../../appSlice";
 import { useAppDispatch, useAppSelector } from "../../hooks";
@@ -29,6 +29,7 @@ import type { ExistingPackFilePaths } from "../../utility/packImportPlan";
 import type { PackFileRenameEntry } from "../../utility/packFileRenamePlan";
 import { clearPackDataStoreForPack } from "./packDataStore";
 import { clearPreparedTableForPackedFile } from "./tablePrepCache";
+import localizationContext from "../../localizationContext";
 
 type PackTablesTreeViewProps = {
   packPath: string;
@@ -202,6 +203,7 @@ const getNodeFullPath = (element: INode, nodeById: Map<INode["id"], INode>): str
 const PackTablesTreeView = React.memo(
   React.forwardRef<PackTablesTreeViewHandle, PackTablesTreeViewProps>((props: PackTablesTreeViewProps, ref) => {
     const dispatch = useAppDispatch();
+    const localized: Record<string, string> = useContext(localizationContext);
     const currentGame = useAppSelector((state) => state.app.currentGame);
     const selectCurrentPackData = useMemo(makeSelectCurrentPackData, []);
     const selectCurrentPackUnsavedFiles = useMemo(makeSelectCurrentPackUnsavedFiles, []);
@@ -801,9 +803,15 @@ const PackTablesTreeView = React.memo(
       try {
         const result = await window.api?.deletePackedFiles?.(packPath, paths);
         if (!result?.success) {
-          props.showDialog(`Failed to delete packed files: ${result?.error || "Unknown error"}`, {
-            title: "Delete Failed",
-          });
+          props.showDialog(
+            (localized.viewerDeletePackedFilesError || "Failed to delete packed files: {{error}}").replace(
+              "{{error}}",
+              result?.error || localized.viewerUnknownError || "Unknown error",
+            ),
+            {
+              title: localized.viewerDeleteFailed || "Delete Failed",
+            },
+          );
           return;
         }
         const removedPaths = result.removedPaths ?? paths;
@@ -811,9 +819,13 @@ const PackTablesTreeView = React.memo(
         props.onPackFilePathsRemoved?.(packPath, removedPaths);
       } catch (error) {
         console.error("Error deleting packed files:", error);
-        props.showDialog(`Error deleting packed files: ${error instanceof Error ? error.message : "Unknown error"}`, {
-          title: "Delete Failed",
-        });
+        props.showDialog(
+          (localized.viewerDeletePackedFilesException || "Error deleting packed files: {{error}}").replace(
+            "{{error}}",
+            error instanceof Error ? error.message : localized.viewerUnknownError || "Unknown error",
+          ),
+          { title: localized.viewerDeleteFailed || "Delete Failed" },
+        );
       }
     };
 
@@ -828,9 +840,13 @@ const PackTablesTreeView = React.memo(
       try {
         const result = await window.api?.renamePackedFilesInPack?.(packPath, entries);
         if (!result?.success) {
-          props.showDialog(`Failed to rename packed files: ${result?.error || "Unknown error"}`, {
-            title: "Rename Failed",
-          });
+          props.showDialog(
+            (localized.viewerRenamePackedFilesError || "Failed to rename packed files: {{error}}").replace(
+              "{{error}}",
+              result?.error || localized.viewerUnknownError || "Unknown error",
+            ),
+            { title: localized.viewerRenameFailed || "Rename Failed" },
+          );
           return;
         }
         const removedPaths = result.removedPaths ?? entries.map((entry) => entry.originalPath);
@@ -839,9 +855,13 @@ const PackTablesTreeView = React.memo(
         setRenameRequest(null);
       } catch (error) {
         console.error("Error renaming packed files:", error);
-        props.showDialog(`Error renaming packed files: ${error instanceof Error ? error.message : "Unknown error"}`, {
-          title: "Rename Failed",
-        });
+        props.showDialog(
+          (localized.viewerRenamePackedFilesException || "Error renaming packed files: {{error}}").replace(
+            "{{error}}",
+            error instanceof Error ? error.message : localized.viewerUnknownError || "Unknown error",
+          ),
+          { title: localized.viewerRenameFailed || "Rename Failed" },
+        );
       }
     };
 
@@ -899,7 +919,9 @@ const PackTablesTreeView = React.memo(
 
         const tableNames = Object.keys(resolvedTableVersions).toSorted((first, second) => first.localeCompare(second));
         if (tableNames.length === 0) {
-          props.showDialog("No vanilla DB tables are available for this game", { title: "No Tables" });
+          props.showDialog(localized.viewerNoVanillaTables || "No vanilla DB tables are available for this game", {
+            title: localized.viewerNoTables || "No Tables",
+          });
           return;
         }
 
@@ -913,8 +935,13 @@ const PackTablesTreeView = React.memo(
       } catch (error) {
         console.error("Error loading vanilla DB table definitions:", error);
         props.showDialog(
-          `Failed to load vanilla DB table definitions: ${error instanceof Error ? error.message : "Unknown error"}`,
-          { title: "Error" },
+          (
+            localized.viewerLoadVanillaDefinitionsError || "Failed to load vanilla DB table definitions: {{error}}"
+          ).replace(
+            "{{error}}",
+            error instanceof Error ? error.message : localized.viewerUnknownError || "Unknown error",
+          ),
+          { title: localized.viewerError || "Error" },
         );
       } finally {
         setIsLoadingNewTableOptions(false);
@@ -923,22 +950,30 @@ const PackTablesTreeView = React.memo(
 
     const showExportResult = (result: PackExportResult | undefined, outputDirectory: string) => {
       if (!result?.success) {
-        props.showDialog(`Failed to export packed files: ${result?.error || "Unknown error"}`, {
-          title: "Export Failed",
-        });
+        props.showDialog(
+          (localized.viewerFailedToExportPackedFiles || "Failed to export packed files: {{error}}").replace(
+            "{{error}}",
+            result?.error || localized.viewerUnknownError || "Unknown error",
+          ),
+          { title: localized.viewerExportFailed || "Export Failed" },
+        );
         return;
       }
 
       const skipped = result.skipped ?? [];
       const skippedMessage =
         skipped.length > 0
-          ? `\nSkipped ${skipped.length} file(s):\n${skipped
-              .map((entry) => `${entry.name}: ${entry.reason}`)
-              .join("\n")}`
+          ? (localized.viewerExportSkipped || "\nSkipped {{count}} file(s):\n{{files}}")
+              .replace("{{count}}", String(skipped.length))
+              .replace("{{files}}", skipped.map((entry) => `${entry.name}: ${entry.reason}`).join("\n"))
           : "";
-      props.showDialog(`Exported ${result.writtenCount} file(s) to: ${outputDirectory}.${skippedMessage}`, {
-        title: "Export Complete",
-      });
+      props.showDialog(
+        (localized.viewerExportResult || "Exported {{count}} file(s) to: {{path}}.{{skipped}}")
+          .replace("{{count}}", String(result.writtenCount))
+          .replace("{{path}}", outputDirectory)
+          .replace("{{skipped}}", skippedMessage),
+        { title: localized.viewerExportComplete || "Export Complete" },
+      );
     };
 
     const handleExportSelection = async () => {
@@ -953,9 +988,13 @@ const PackTablesTreeView = React.memo(
         showExportResult(result, outputDirectory);
       } catch (error) {
         console.error("Error exporting selected packed files:", error);
-        props.showDialog(`Error exporting packed files: ${error instanceof Error ? error.message : "Unknown error"}`, {
-          title: "Export Failed",
-        });
+        props.showDialog(
+          (localized.viewerErrorExportingPackedFiles || "Error exporting packed files: {{error}}").replace(
+            "{{error}}",
+            error instanceof Error ? error.message : localized.viewerUnknownError || "Unknown error",
+          ),
+          { title: localized.viewerExportFailed || "Export Failed" },
+        );
       } finally {
         setIsExportingSelection(false);
       }
@@ -973,9 +1012,13 @@ const PackTablesTreeView = React.memo(
         showExportResult(result, outputDirectory);
       } catch (error) {
         console.error("Error exporting whole packed file:", error);
-        props.showDialog(`Error exporting packed files: ${error instanceof Error ? error.message : "Unknown error"}`, {
-          title: "Export Failed",
-        });
+        props.showDialog(
+          (localized.viewerErrorExportingPackedFiles || "Error exporting packed files: {{error}}").replace(
+            "{{error}}",
+            error instanceof Error ? error.message : localized.viewerUnknownError || "Unknown error",
+          ),
+          { title: localized.viewerExportFailed || "Export Failed" },
+        );
       } finally {
         setIsExportingWholePack(false);
       }
@@ -986,25 +1029,43 @@ const PackTablesTreeView = React.memo(
       try {
         const result = await window.api?.applyPackImportFromDisk?.(packPath, items);
         const errors = [
-          ...planningErrors.map((error) => `${error.diskPath || "Import"}: ${error.message}`),
-          ...(result?.errors ?? []).map((error) => `${error.diskPath || "Import"}: ${error.message}`),
+          ...planningErrors.map((error) => `${error.diskPath || localized.viewerImport || "Import"}: ${error.message}`),
+          ...(result?.errors ?? []).map(
+            (error) => `${error.diskPath || localized.viewerImport || "Import"}: ${error.message}`,
+          ),
         ];
-        if (!result?.success && errors.length === 0) errors.push("Unknown import error");
+        if (!result?.success && errors.length === 0) {
+          errors.push(localized.viewerImportUnknownError || "Unknown import error");
+        }
         if (errors.length > 0) {
           props.showDialog(
-            `Imported ${result?.importedCount ?? 0} file(s), but ${errors.length} file(s) failed:\n${errors.join("\n")}`,
-            { title: "Import Finished With Errors" },
+            (
+              localized.viewerImportedWithErrors ||
+              "Imported {{imported}} file(s), but {{failed}} file(s) failed:\n{{errors}}"
+            )
+              .replace("{{imported}}", String(result?.importedCount ?? 0))
+              .replace("{{failed}}", String(errors.length))
+              .replace("{{errors}}", errors.join("\n")),
+            { title: localized.viewerImportFinishedWithErrors || "Import Finished With Errors" },
           );
         } else {
-          props.showDialog(`Imported ${result?.importedCount ?? 0} file(s). Press Save to write the pack.`, {
-            title: "Import Complete",
-          });
+          props.showDialog(
+            (localized.viewerImportedSuccess || "Imported {{count}} file(s). Press Save to write the pack.").replace(
+              "{{count}}",
+              String(result?.importedCount ?? 0),
+            ),
+            { title: localized.viewerImportComplete || "Import Complete" },
+          );
         }
       } catch (error) {
         console.error("Error importing packed files:", error);
-        props.showDialog(`Error importing packed files: ${error instanceof Error ? error.message : "Unknown error"}`, {
-          title: "Import Failed",
-        });
+        props.showDialog(
+          (localized.viewerErrorImportingPackedFiles || "Error importing packed files: {{error}}").replace(
+            "{{error}}",
+            error instanceof Error ? error.message : localized.viewerUnknownError || "Unknown error",
+          ),
+          { title: localized.viewerImportFailed || "Import Failed" },
+        );
       } finally {
         setIsImporting(false);
       }
@@ -1027,12 +1088,16 @@ const PackTablesTreeView = React.memo(
           targetFolder,
         );
         if (!plan) {
-          props.showDialog("Could not plan the import", { title: "Import Failed" });
+          props.showDialog(localized.viewerCouldNotPlanImport || "Could not plan the import", {
+            title: localized.viewerImportFailed || "Import Failed",
+          });
           return;
         }
         if (plan.items.length === 0) {
           const errors = plan.errors.map((error) => `${error.diskPath || "Import"}: ${error.message}`).join("\n");
-          props.showDialog(errors || "No files were found to import", { title: "Nothing To Import" });
+          props.showDialog(errors || localized.viewerNoFilesToImport || "No files were found to import", {
+            title: localized.viewerNothingToImport || "Nothing To Import",
+          });
           return;
         }
         if (plan.items.some((item) => item.conflictsWith)) {
@@ -1042,9 +1107,13 @@ const PackTablesTreeView = React.memo(
         await applyImportItems(plan.items, plan.errors);
       } catch (error) {
         console.error("Error planning packed file import:", error);
-        props.showDialog(`Error importing packed files: ${error instanceof Error ? error.message : "Unknown error"}`, {
-          title: "Import Failed",
-        });
+        props.showDialog(
+          (localized.viewerErrorImportingPackedFiles || "Error importing packed files: {{error}}").replace(
+            "{{error}}",
+            error instanceof Error ? error.message : localized.viewerUnknownError || "Unknown error",
+          ),
+          { title: localized.viewerImportFailed || "Import Failed" },
+        );
       } finally {
         setIsImporting(false);
       }
@@ -1052,7 +1121,9 @@ const PackTablesTreeView = React.memo(
 
     const handleCreateNewFlow = async () => {
       if (!newFlowName.trim()) {
-        props.showDialog("Please enter a valid flow name", { title: "Missing Name" });
+        props.showDialog(localized.viewerEnterValidFlowName || "Please enter a valid flow name", {
+          title: localized.viewerMissingName || "Missing Name",
+        });
         return;
       }
 
@@ -1090,21 +1161,30 @@ const PackTablesTreeView = React.memo(
       const trimmedTableName = newTableName.trim();
       const trimmedSuffix = newTableSuffix.trim();
       if (!trimmedTableName) {
-        props.showDialog("Please choose a table", { title: "Missing Table" });
+        props.showDialog(localized.viewerChooseTable || "Please choose a table", {
+          title: localized.viewerMissingTableTitle || "Missing Table",
+        });
         return;
       }
       if (!trimmedSuffix) {
-        props.showDialog("Please enter the table name suffix", { title: "Missing Suffix" });
+        props.showDialog(localized.viewerEnterTableSuffix || "Please enter the table name suffix", {
+          title: localized.viewerMissingSuffixTitle || "Missing Suffix",
+        });
         return;
       }
       if (/[\\/]/.test(trimmedSuffix)) {
-        props.showDialog("Enter only the xxx portion of db/table_name/xxx", { title: "Invalid Suffix" });
+        props.showDialog(localized.viewerInvalidTableSuffix || "Enter only the xxx portion of db/table_name/xxx", {
+          title: localized.viewerInvalidSuffixTitle || "Invalid Suffix",
+        });
         return;
       }
 
       const schema = selectedNewTableSchema;
       if (!schema) {
-        props.showDialog(`No schema found for ${trimmedTableName}`, { title: "Schema Missing" });
+        props.showDialog(
+          (localized.viewerNoSchemaFor || "No schema found for {{table}}").replace("{{table}}", trimmedTableName),
+          { title: localized.viewerSchemaMissing || "Schema Missing" },
+        );
         return;
       }
 
@@ -1115,9 +1195,13 @@ const PackTablesTreeView = React.memo(
         Boolean(packData.packedFiles?.[packedFileName]) ||
         unsavedFiles.some((file) => file.name === packedFileName);
       if (alreadyExistsInPack) {
-        props.showDialog(`A table already exists at ${packedFileName.replaceAll("\\", "/")}`, {
-          title: "Table Exists",
-        });
+        props.showDialog(
+          (localized.viewerTableExistsAt || "A table already exists at {{path}}").replace(
+            "{{path}}",
+            packedFileName.replaceAll("\\", "/"),
+          ),
+          { title: localized.viewerTableExists || "Table Exists" },
+        );
         return;
       }
 
@@ -1134,7 +1218,7 @@ const PackTablesTreeView = React.memo(
 
         const result = await window.api?.saveDBTableEdits(packData.packPath, nextPackedFile);
         if (!result?.success) {
-          throw new Error(result?.error || "Failed to create DB table");
+          throw new Error(result?.error || localized.viewerFailedToCreateDbTable || "Failed to create DB table");
         }
 
         dispatch(
@@ -1152,9 +1236,13 @@ const PackTablesTreeView = React.memo(
         closeNewTableDialog();
       } catch (error) {
         console.error("Error creating DB table:", error);
-        props.showDialog(`Failed to create DB table: ${error instanceof Error ? error.message : "Unknown error"}`, {
-          title: "Create Failed",
-        });
+        props.showDialog(
+          (localized.viewerCreateDbTableError || "Failed to create DB table: {{error}}").replace(
+            "{{error}}",
+            error instanceof Error ? error.message : localized.viewerUnknownError || "Unknown error",
+          ),
+          { title: localized.viewerCreateFailed || "Create Failed" },
+        );
         setIsCreatingNewTable(false);
       }
     };
@@ -1171,7 +1259,11 @@ const PackTablesTreeView = React.memo(
       <TreeView
         key={`${treeTab}|${packPath}|${data.length}`}
         data={data}
-        aria-label={treeTab === "db" ? "DB files tree" : "Packed files tree"}
+        aria-label={
+          treeTab === "db"
+            ? localized.viewerDbFilesTree || "DB files tree"
+            : localized.viewerPackedFilesTree || "Packed files tree"
+        }
         defaultExpandedIds={defaultExpandedIds}
         multiSelect={true}
         clickAction="EXCLUSIVE_SELECT"
@@ -1330,13 +1422,39 @@ const PackTablesTreeView = React.memo(
     );
     const showImportInContext = Boolean(contextMenu && !isVanillaPackOpen);
     const showPackFileActionsInContext = Boolean(contextMenu && !isVanillaPackOpen && selectedExportPaths.length > 0);
-    const deleteLabel = selectedExportPaths.length === 1 ? "Delete file" : `Delete ${selectedExportPaths.length} files`;
+    const deleteLabel =
+      selectedExportPaths.length === 1
+        ? localized.viewerDeleteFile || "Delete file"
+        : (localized.viewerDeleteFiles || "Delete {{count}} files").replace(
+            "{{count}}",
+            String(selectedExportPaths.length),
+          );
     const renameLabel =
-      selectedExportPaths.length === 1 ? "Rename file…" : `Rename ${selectedExportPaths.length} files…`;
-    const moveLabel = selectedExportPaths.length === 1 ? "Move file…" : `Move ${selectedExportPaths.length} files…`;
+      selectedExportPaths.length === 1
+        ? localized.viewerRenameFile || "Rename file…"
+        : (localized.viewerRenameFiles || "Rename {{count}} files…").replace(
+            "{{count}}",
+            String(selectedExportPaths.length),
+          );
+    const moveLabel =
+      selectedExportPaths.length === 1
+        ? localized.viewerMoveFile || "Move file…"
+        : (localized.viewerMoveFiles || "Move {{count}} files…").replace(
+            "{{count}}",
+            String(selectedExportPaths.length),
+          );
     const importAnchor = contextMenu?.target?.kind === "folder" ? contextMenu.target.folderPath : "";
-    const importLabel = (kind: "file" | "folder") =>
-      `${kind === "file" ? "Import Files" : "Import Folders"}${importAnchor ? ` into ${importAnchor}` : ""}…`;
+    const importLabel = (kind: "file" | "folder") => {
+      const label =
+        kind === "file"
+          ? localized.viewerImportFiles || "Import Files"
+          : localized.viewerImportFolders || "Import Folders";
+      return importAnchor
+        ? (localized.viewerImportInto || "{{label}} into {{path}}…")
+            .replace("{{label}}", label)
+            .replace("{{path}}", importAnchor)
+        : `${label}…`;
+    };
     const showCopyIntoInContext = Boolean(
       contextMenu?.target && contextMenu.target.kind !== "folder" && props.onCopyInto,
     );
@@ -1360,7 +1478,7 @@ const PackTablesTreeView = React.memo(
                     : "text-gray-400 border-transparent hover:text-white hover:bg-gray-800/60")
                 }
               >
-                DB Tables
+                {localized.viewerDbTables || "DB Tables"}
               </button>
             )}
             {hasFiles && (
@@ -1374,7 +1492,7 @@ const PackTablesTreeView = React.memo(
                     : "text-gray-400 border-transparent hover:text-white hover:bg-gray-800/60")
                 }
               >
-                Files
+                {localized.files || "Files"}
               </button>
             )}
           </div>
@@ -1421,7 +1539,7 @@ const PackTablesTreeView = React.memo(
                 onClick={handleAddNewFlow}
                 className="w-full text-left px-4 py-2 hover:bg-gray-700 text-white text-sm"
               >
-                Add New Flow
+                {localized.viewerAddNewFlow || "Add New Flow"}
               </button>
             )}
             {showAddNewTableInContext && (
@@ -1430,7 +1548,9 @@ const PackTablesTreeView = React.memo(
                 disabled={isLoadingNewTableOptions}
                 className="w-full text-left px-4 py-2 hover:bg-gray-700 text-white text-sm disabled:opacity-50"
               >
-                {isLoadingNewTableOptions ? "Loading Tables..." : "Add New Table"}
+                {isLoadingNewTableOptions
+                  ? localized.viewerLoadingTables || "Loading Tables..."
+                  : localized.viewerAddNewTable || "Add New Table"}
               </button>
             )}
             {showImportInContext && (
@@ -1440,14 +1560,14 @@ const PackTablesTreeView = React.memo(
                   disabled={isImporting}
                   className="w-full text-left px-4 py-2 hover:bg-gray-700 text-white text-sm disabled:opacity-50"
                 >
-                  {isImporting ? "Importing…" : importLabel("file")}
+                  {isImporting ? localized.viewerImporting || "Importing…" : importLabel("file")}
                 </button>
                 <button
                   onClick={() => void handleImport("folder")}
                   disabled={isImporting}
                   className="w-full text-left px-4 py-2 hover:bg-gray-700 text-white text-sm disabled:opacity-50"
                 >
-                  {isImporting ? "Importing…" : importLabel("folder")}
+                  {isImporting ? localized.viewerImporting || "Importing…" : importLabel("folder")}
                 </button>
               </>
             )}
@@ -1479,7 +1599,9 @@ const PackTablesTreeView = React.memo(
                 disabled={isExportingSelection || isExportingWholePack}
                 className="w-full text-left px-4 py-2 hover:bg-gray-700 text-white text-sm disabled:opacity-50"
               >
-                {isExportingSelection ? "Exporting…" : "Export Selection…"}
+                {isExportingSelection
+                  ? localized.viewerExporting || "Exporting…"
+                  : localized.viewerExportSelection || "Export Selection…"}
               </button>
             )}
             <button
@@ -1487,18 +1609,22 @@ const PackTablesTreeView = React.memo(
               disabled={isExportingSelection || isExportingWholePack}
               className="w-full text-left px-4 py-2 hover:bg-gray-700 text-white text-sm disabled:opacity-50"
             >
-              {isExportingWholePack ? "Exporting…" : "Export Whole Pack…"}
+              {isExportingWholePack
+                ? localized.viewerExporting || "Exporting…"
+                : localized.viewerExportWholePack || "Export Whole Pack…"}
             </button>
           </div>
         )}
 
         <Modal onClose={() => setDeleteConfirm(null)} show={!!deleteConfirm} size="md" position="center">
-          <Modal.Header>Delete packed files</Modal.Header>
+          <Modal.Header>{localized.viewerDeletePackedFiles || "Delete packed files"}</Modal.Header>
           <Modal.Body>
             <div className="text-sm text-gray-200">
               <p>
-                Delete {deleteConfirm?.length ?? 0} file{deleteConfirm?.length === 1 ? "" : "s"} from this pack? The
-                change will be staged until you save.
+                {(
+                  localized.viewerDeleteFromPack ||
+                  "Delete {{count}} file(s) from this pack? The change will be staged until you save."
+                ).replace("{{count}}", String(deleteConfirm?.length ?? 0))}
               </p>
               <ul className="mt-3 max-h-48 list-disc space-y-1 overflow-auto pl-5 text-gray-400 break-all">
                 {(deleteConfirm ?? []).slice(0, 5).map((path) => (
@@ -1506,7 +1632,12 @@ const PackTablesTreeView = React.memo(
                 ))}
               </ul>
               {(deleteConfirm?.length ?? 0) > 5 && (
-                <p className="mt-2 text-xs text-gray-500">…and {(deleteConfirm?.length ?? 0) - 5} more.</p>
+                <p className="mt-2 text-xs text-gray-500">
+                  {(localized.viewerAndMore || "…and {{count}} more.").replace(
+                    "{{count}}",
+                    String((deleteConfirm?.length ?? 0) - 5),
+                  )}
+                </p>
               )}
             </div>
           </Modal.Body>
@@ -1516,14 +1647,14 @@ const PackTablesTreeView = React.memo(
               onClick={() => setDeleteConfirm(null)}
               className="rounded bg-gray-600 px-4 py-2 font-medium text-white hover:bg-gray-500"
             >
-              Cancel
+              {localized.cancel || "Cancel"}
             </button>
             <button
               type="button"
               onClick={() => void handleDeleteConfirm()}
               className="rounded bg-red-600 px-4 py-2 font-medium text-white hover:bg-red-700"
             >
-              Delete
+              {localized.delete || "Delete"}
             </button>
           </Modal.Footer>
         </Modal>
@@ -1541,10 +1672,14 @@ const PackTablesTreeView = React.memo(
         {isNewFlowDialogOpen && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
             <div className="bg-gray-800 rounded-lg p-6 w-full max-w-md">
-              <h2 className="text-xl font-bold text-white mb-4">Create New Flow</h2>
+              <h2 className="text-xl font-bold text-white mb-4">
+                {localized.viewerCreateNewFlow || "Create New Flow"}
+              </h2>
 
               <div className="mb-4">
-                <label className="block text-white text-sm font-medium mb-2">Flow Name</label>
+                <label className="block text-white text-sm font-medium mb-2">
+                  {localized.viewerFlowName || "Flow Name"}
+                </label>
                 <input
                   type="text"
                   value={newFlowName}
@@ -1558,7 +1693,7 @@ const PackTablesTreeView = React.memo(
                     }
                   }}
                   className="w-full p-2 bg-gray-700 text-white border border-gray-600 rounded focus:outline-none focus:border-blue-400"
-                  placeholder="Enter flow name..."
+                  placeholder={localized.viewerFlowNamePlaceholder || "Enter flow name..."}
                   autoFocus
                 />
               </div>
@@ -1571,13 +1706,13 @@ const PackTablesTreeView = React.memo(
                   }}
                   className="px-4 py-2 bg-gray-600 hover:bg-gray-500 text-white rounded"
                 >
-                  Cancel
+                  {localized.cancel || "Cancel"}
                 </button>
                 <button
                   onClick={handleCreateNewFlow}
                   className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded"
                 >
-                  Create
+                  {localized.viewerCreate || "Create"}
                 </button>
               </div>
             </div>
@@ -1587,10 +1722,14 @@ const PackTablesTreeView = React.memo(
         {isNewTableDialogOpen && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
             <div className="bg-gray-800 rounded-lg p-6 w-full max-w-md">
-              <h2 className="text-xl font-bold text-white mb-4">Create New DB Table</h2>
+              <h2 className="text-xl font-bold text-white mb-4">
+                {localized.viewerCreateNewDbTable || "Create New DB Table"}
+              </h2>
 
               <div className="mb-4">
-                <label className="block text-white text-sm font-medium mb-2">Vanilla Table</label>
+                <label className="block text-white text-sm font-medium mb-2">
+                  {localized.viewerVanillaTable || "Vanilla Table"}
+                </label>
                 <Select
                   options={vanillaTableOptions}
                   value={selectedNewTableOption}
@@ -1606,7 +1745,7 @@ const PackTablesTreeView = React.memo(
                       zIndex: 70,
                     }),
                   }}
-                  placeholder="Search tables..."
+                  placeholder={localized.viewerSearchTables || "Search tables..."}
                   isClearable={false}
                   menuPortalTarget={document.body}
                   menuPosition="fixed"
@@ -1614,7 +1753,9 @@ const PackTablesTreeView = React.memo(
               </div>
 
               <div className="mb-2">
-                <label className="block text-white text-sm font-medium mb-2">Table Suffix</label>
+                <label className="block text-white text-sm font-medium mb-2">
+                  {localized.viewerTableSuffix || "Table Suffix"}
+                </label>
                 <input
                   type="text"
                   value={newTableSuffix}
@@ -1627,7 +1768,7 @@ const PackTablesTreeView = React.memo(
                     }
                   }}
                   className="w-full p-2 bg-gray-700 text-white border border-gray-600 rounded focus:outline-none focus:border-blue-400"
-                  placeholder="xxx"
+                  placeholder={localized.viewerTableSuffixPlaceholder || "xxx"}
                   autoFocus
                 />
               </div>
@@ -1640,28 +1781,32 @@ const PackTablesTreeView = React.memo(
                     onChange={(event) => setNewTableIsUnused(event.target.checked)}
                     className="w-4 h-4 shrink-0"
                   />
-                  <span className="text-sm text-white">Create it under {UNUSED_DB_TABLE_ROOT}/</span>
+                  <span className="text-sm text-white">
+                    {(localized.viewerCreateUnderUnused || "Create it under {{root}}/").replace(
+                      "{{root}}",
+                      UNUSED_DB_TABLE_ROOT,
+                    )}
+                  </span>
                   <HelpBadge
-                    text={
-                      `The game only reads tables out of db/, so a table kept in ${UNUSED_DB_TABLE_ROOT}/ is inert: ` +
-                      "it does not load, does not override anything, and is not reported as a conflict with other mods.\n\n" +
-                      "Use it to keep a variant beside the live table - a reworked balance pass, a version for a " +
-                      "different submod - and edit it here like any other table.\n\n" +
-                      "A flow can copy it over the live table with the Move Or Copy Files node, so which variant " +
-                      "ships becomes a flow option rather than a manual file swap."
-                    }
+                    text={(
+                      localized.viewerUnusedTableHelp ||
+                      "The game only reads tables out of db/, so a table kept in {{root}}/ is inert: it does not load, does not override anything, and is not reported as a conflict with other mods.\n\nUse it to keep a variant beside the live table - a reworked balance pass, a version for a different submod - and edit it here like any other table.\n\nA flow can copy it over the live table with the Move Or Copy Files node, so which variant ships becomes a flow option rather than a manual file swap."
+                    ).replaceAll("{{root}}", UNUSED_DB_TABLE_ROOT)}
                   />
                 </label>
               </div>
 
               <div className="mb-4 text-sm text-gray-300">
                 <div>
-                  Path:{" "}
+                  {localized.viewerPath || "Path:"}{" "}
                   {newTableName
                     ? `${newTableIsUnused ? UNUSED_DB_TABLE_ROOT : DEFAULT_DB_TABLE_ROOT}/${newTableName}/${newTableSuffix || "xxx"}`
                     : `${newTableIsUnused ? UNUSED_DB_TABLE_ROOT : DEFAULT_DB_TABLE_ROOT}/.../xxx`}
                 </div>
-                <div>Version: {selectedNewTableSchema?.version ?? "Unknown"}</div>
+                <div>
+                  {localized.viewerVersion || "Version:"}{" "}
+                  {selectedNewTableSchema?.version ?? (localized.viewerUnknown || "Unknown")}
+                </div>
               </div>
 
               <div className="flex gap-2 justify-end">
@@ -1670,14 +1815,14 @@ const PackTablesTreeView = React.memo(
                   disabled={isCreatingNewTable}
                   className="px-4 py-2 bg-gray-600 hover:bg-gray-500 text-white rounded disabled:opacity-50"
                 >
-                  Cancel
+                  {localized.cancel || "Cancel"}
                 </button>
                 <button
                   onClick={handleCreateNewTable}
                   disabled={!newTableName || isCreatingNewTable}
                   className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded disabled:opacity-50"
                 >
-                  {isCreatingNewTable ? "Creating..." : "Create"}
+                  {isCreatingNewTable ? localized.viewerCreating || "Creating..." : localized.viewerCreate || "Create"}
                 </button>
               </div>
             </div>

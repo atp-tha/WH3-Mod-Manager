@@ -159,13 +159,6 @@ export const MAX_GLOBAL_SEARCH_QUERY_LENGTH = 512;
 
 export const GLOBAL_SEARCH_RESULT_KINDS: GlobalSearchResultKind[] = ["db", "loc", "text", "rigidModel"];
 
-export const globalSearchKindLabels: Record<GlobalSearchResultKind, string> = {
-  db: "DB tables",
-  loc: "Loc tables",
-  text: "Text files",
-  rigidModel: "Rigid models",
-};
-
 /** The file a result lives in, for grouping and for opening it. DB results name their table file. */
 export const getGlobalSearchResultFilePath = (result: GlobalSearchResult): string =>
   result.kind === "db" ? result.packedFilePath : result.filePath;

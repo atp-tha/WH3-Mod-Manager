@@ -43,7 +43,15 @@ const getAllNodesInTree = (tree: IViewerTreeNodeWithData | IViewerTreeNode) => {
 
 const MemoizedFloatingOverlay = memo(FloatingOverlay);
 
-const DBCloneOperationOverlay = ({ statusText, onCancel }: { statusText: string; onCancel?: () => void }) => (
+const DBCloneOperationOverlay = ({
+  statusText,
+  cancelLabel,
+  onCancel,
+}: {
+  statusText: string;
+  cancelLabel: string;
+  onCancel?: () => void;
+}) => (
   <MemoizedFloatingOverlay
     className="absolute h-full w-full z-50 dark flex justify-center bg-black opacity-25"
     id="DBDuplicationOverlay"
@@ -58,7 +66,7 @@ const DBCloneOperationOverlay = ({ statusText, onCancel }: { statusText: string;
           className="bg-red-700 border-red-500 border-2 hover:bg-red-800 text-white font-medium text-sm px-4 rounded h-8"
           onClick={onCancel}
         >
-          Cancel
+          {cancelLabel}
         </button>
       )}
     </div>
@@ -80,9 +88,15 @@ export type DBDuplicationProps = {
 };
 
 const DBDuplication = memo(({ launchSource, onSaveToBuildings }: DBDuplicationProps) => {
+  const localized = useLocalizations();
   const canSaveToMemory = SOURCES_WITH_PENDING_ROWS.includes(launchSource);
-  const memoryTargetName = launchSource === "ancillaries" ? "Ancillaries" : "Buildings";
-  const memoryActionLabel = canSaveToMemory ? `Add to ${memoryTargetName} panel` : "Save to memory";
+  const memoryTargetName =
+    launchSource === "ancillaries"
+      ? localized.viewerAncillaries || "Ancillaries"
+      : localized.viewerBuildings || "Buildings";
+  const memoryActionLabel = canSaveToMemory
+    ? (localized.viewerAddToPanel || "Add to {{name}} panel").replace("{{name}}", memoryTargetName)
+    : localized.viewerSaveToMemory || "Save to memory";
   const currentDBTableSelection = useAppSelector((state) => state.app.currentDBTableSelection);
   const packsData = useAppSelector((state) => state.app.packsData);
   // important to reload the component
@@ -113,7 +127,6 @@ const DBDuplication = memo(({ launchSource, onSaveToBuildings }: DBDuplicationPr
   const isProgressSubscribed = useRef(false);
   const treeBuildRequestId = useRef(0);
 
-  const localized = useLocalizations();
   const displayedTreeData = useMemo(
     () => (treeData && hideRepeatedIndirectTables ? filterDBCloneRedundantIndirectReferences(treeData) : treeData),
     [hideRepeatedIndirectTables, treeData],
@@ -199,7 +212,7 @@ const DBDuplication = memo(({ launchSource, onSaveToBuildings }: DBDuplicationPr
           setSelectedNodesByName(preselectedNodeNames);
           setExpandedNodesByName(getDBCloneExpandedNodeNamesForSelection(treeNodeResult, preselectedNodeNames));
         } else {
-          setDuplicationError("DB Clone could not build the reference tree.");
+          setDuplicationError(localized.viewerDbCloneBuildFailed || "DB Clone could not build the reference tree.");
         }
       } catch (error) {
         if (!isCurrentRequest || requestId !== treeBuildRequestId.current) return;
@@ -214,7 +227,7 @@ const DBDuplication = memo(({ launchSource, onSaveToBuildings }: DBDuplicationPr
     return () => {
       isCurrentRequest = false;
     };
-  }, [currentDBTableSelection, deepCloneTarget, launchSource, packPath]);
+  }, [currentDBTableSelection, deepCloneTarget, launchSource, localized, packPath]);
   // }, [currentDBTableSelection, deepCloneTarget, selectedNodesByName, packPath]);
 
   if (!currentDBTableSelection) {
@@ -292,11 +305,19 @@ const DBDuplication = memo(({ launchSource, onSaveToBuildings }: DBDuplicationPr
     if (duplicationError) {
       return (
         <div className="m-8 rounded border border-red-600 bg-red-950/50 p-4 text-red-100" role="alert">
-          Failed to load DB Clone references: {duplicationError}
+          {(localized.viewerDbCloneLoadFailed || "Failed to load DB Clone references: {{error}}").replace(
+            "{{error}}",
+            duplicationError,
+          )}
         </div>
       );
     }
-    return <DBCloneOperationOverlay statusText="Loading references..." />;
+    return (
+      <DBCloneOperationOverlay
+        statusText={localized.viewerLoadingReferences || "Loading references..."}
+        cancelLabel={localized.cancel || "Cancel"}
+      />
+    );
   }
 
   const data = flattenTree(displayedTreeData);
@@ -510,16 +531,16 @@ const DBDuplication = memo(({ launchSource, onSaveToBuildings }: DBDuplicationPr
   };
 
   const getProgressLabel = (progress: DBDuplicationProgress | null) => {
-    if (!progress) return "Working...";
+    if (!progress) return localized.viewerWorking || "Working...";
     const stageToLabel = {
-      validating: "Validating",
-      discovering_indirect: "Discovering indirect refs",
-      cloning: "Cloning rows",
-      localizing: "Generating localization",
-      writing: "Writing pack",
-      done: "Done",
-      error: "Error",
-      canceled: "Canceled",
+      validating: localized.viewerValidating || "Validating",
+      discovering_indirect: localized.viewerDiscoveringIndirectRefs || "Discovering indirect refs",
+      cloning: localized.viewerCloningRows || "Cloning rows",
+      localizing: localized.viewerGeneratingLocalization || "Generating localization",
+      writing: localized.viewerWritingPack || "Writing pack",
+      done: localized.viewerDone || "Done",
+      error: localized.viewerErrorStatus || "Error",
+      canceled: localized.viewerCanceled || "Canceled",
     } as Record<DBDuplicationStage, string>;
 
     const stageLabel = stageToLabel[progress.stage] ?? progress.stage;
@@ -536,11 +557,13 @@ const DBDuplication = memo(({ launchSource, onSaveToBuildings }: DBDuplicationPr
     window.api?.cancelDBDuplication();
     setDuplicationProgress({
       stage: "canceled",
-      message: "Cancel requested",
+      message: localized.viewerCancelRequested || "Cancel requested",
     });
   };
 
-  const overlayStatusText = isSaving ? getProgressLabel(duplicationProgress) : "Loading references...";
+  const overlayStatusText = isSaving
+    ? getProgressLabel(duplicationProgress)
+    : localized.viewerLoadingReferences || "Loading references...";
 
   const onSave = async (destination: DBCloneSaveOptions["destination"]) => {
     console.log("SAVING");
@@ -573,7 +596,7 @@ const DBDuplication = memo(({ launchSource, onSaveToBuildings }: DBDuplicationPr
       setIsSuccessOpen(false);
       setDuplicationProgress({
         stage: "validating",
-        message: "Starting clone",
+        message: localized.viewerStartingClone || "Starting clone",
       });
       const result = await window.api?.executeDBDuplication(
         packData.packPath,
@@ -586,17 +609,27 @@ const DBDuplication = memo(({ launchSource, onSaveToBuildings }: DBDuplicationPr
       );
 
       if (!result?.ok) {
-        console.error("executeDBDuplication failed:", result?.error ?? "Unknown error");
-        setDuplicationError(result?.error ?? "Unknown duplication error");
+        console.error(
+          "executeDBDuplication failed:",
+          result?.error ?? (localized.viewerUnknownError || "Unknown error"),
+        );
+        setDuplicationError(result?.error ?? (localized.viewerUnknownDuplicationError || "Unknown duplication error"));
         setIsErrorOpen(true);
       } else if (destination == "memory") {
         if (!result.generatedPackedFiles) {
-          setDuplicationError("DB Clone completed without returning any generated rows.");
+          setDuplicationError(
+            localized.viewerCloneMissingRows || "DB Clone completed without returning any generated rows.",
+          );
           setIsErrorOpen(true);
           return;
         }
         if (!onSaveToBuildings) {
-          setDuplicationError(`The ${memoryTargetName} tab is not available to receive the generated rows.`);
+          setDuplicationError(
+            (
+              localized.viewerCloneMemoryTargetUnavailable ||
+              "The {{name}} tab is not available to receive the generated rows."
+            ).replace("{{name}}", memoryTargetName),
+          );
           setIsErrorOpen(true);
           return;
         }
@@ -607,7 +640,9 @@ const DBDuplication = memo(({ launchSource, onSaveToBuildings }: DBDuplicationPr
           window.api?.openPack(result.outputPackPath);
         }
         setDuplicationSuccessMessage(
-          result.outputPackPath ? `Created pack:\n${result.outputPackPath}` : "Clone completed successfully.",
+          result.outputPackPath
+            ? (localized.viewerCreatedPack || "Created pack:\n{{path}}").replace("{{path}}", result.outputPackPath)
+            : localized.viewerCloneCompleted || "Clone completed successfully.",
         );
         setIsSuccessOpen(true);
       }
@@ -665,57 +700,60 @@ const DBDuplication = memo(({ launchSource, onSaveToBuildings }: DBDuplicationPr
           <Modal.Body>
             <div className="flex flex-col gap-8">
               <p>
-                Deep DB Cloning allows you to clone a row in a table. We can only clone tables that have a key column
-                that uniquely identifies that row, for example for the main_units_table that would be the "unit" column.
+                {localized.viewerDbCloneHelpIntro ||
+                  'Deep DB Cloning allows you to clone a row in a table. We can only clone tables that have a key column that uniquely identifies that row, for example for the main_units_table that would be the "unit" column.'}
               </p>
               <p>
-                We look at the row we're cloning and look at all the tables that are referenced from that row, for
-                main_units those would be: unit_castes_tables, land_units_tables, naval_units_tables,
-                unit_weights_tables, ui_unit_groupings_tables, unit_porthole_camera_settings_tables,
-                audio_vo_actor_groups_tables.
+                {localized.viewerDbCloneHelpReferences ||
+                  "We look at the row we're cloning and look at all the tables that are referenced from that row, for main_units those would be: unit_castes_tables, land_units_tables, naval_units_tables, unit_weights_tables, ui_unit_groupings_tables, unit_porthole_camera_settings_tables, audio_vo_actor_groups_tables."}
               </p>
               <p>
-                So we look inside each of those tables and find the rows that references the main_unit we're aiming to
-                clone. We then in turn find all the refences to other tables in those rows, and so on.
+                {localized.viewerDbCloneHelpReverseReferences ||
+                  "So we look inside each of those tables and find the rows that reference the main_unit we're aiming to clone. We then in turn find all the references to other tables in those rows, and so on."}
               </p>
               <p>
-                We end up with a tree of refences and we select what refences we want to clone and which ones should be
-                left the same. So for example we could also clone the land_unit of our main_unit but leave the
-                unit_castes_tables the same.
+                {localized.viewerDbCloneHelpTree ||
+                  "We end up with a tree of references and we select what references we want to clone and which ones should be left the same. So for example we could also clone the land_unit of our main_unit but leave the unit_castes_tables the same."}
               </p>
               <p>
-                References in <span className="text-amber-500">yellow</span> are non-direct references. These are from
-                tables that reference the key we're duplicating but they're not directly referenced from the table we're
-                cloning. For example units_to_groupings_military_permissions_tables refences the main_units table but
-                the main_units table doesn't reference it.
+                {localized.viewerDbCloneHelpNonDirectBefore || "References in"}{" "}
+                <span className="text-amber-500">{localized.viewerDbCloneHelpYellow || "yellow"}</span>{" "}
+                {localized.viewerDbCloneHelpNonDirectAfter ||
+                  "are non-direct references. These are from tables that reference the key we're duplicating but they're not directly referenced from the table we're cloning. For example units_to_groupings_military_permissions_tables references the main_units table but the main_units table doesn't reference it."}
               </p>
               <p>
-                Non-direct references are selectable and are resolved with the rest of the dependency tree when the
-                clone window opens.
+                {localized.viewerDbCloneHelpNonDirectResolved ||
+                  "Non-direct references are selectable and are resolved with the rest of the dependency tree when the clone window opens."}
               </p>
               <p>
-                With "Append Existing Pack" enabled we will append an existing pack file instead of creating a new one,
-                using the pack name from "(Optional) Name for new pack".
+                {localized.viewerDbCloneHelpAppend ||
+                  'With "Append Existing Pack" enabled we will append an existing pack file instead of creating a new one, using the pack name from "(Optional) Name for new pack".'}
               </p>
-              <p>"Open in Windows" opens the newly created pack with the operating system after the clone is saved.</p>
+              <p>
+                {localized.viewerDbCloneHelpOpenWindows ||
+                  '"Open in Windows" opens the newly created pack with the operating system after the clone is saved.'}
+              </p>
               {canSaveToMemory && (
                 <p>
-                  "{memoryActionLabel}" adds every generated DB and localization row to the {memoryTargetName} tab. The
-                  generated tables can be inspected and edited under New rows before you save them to a pack.
+                  {(
+                    localized.viewerDbCloneHelpMemory ||
+                    '"{{action}}" adds every generated DB and localization row to the {{target}} tab. The generated tables can be inspected and edited under New rows before you save them to a pack.'
+                  )
+                    .replace("{{action}}", memoryActionLabel)
+                    .replace("{{target}}", memoryTargetName)}
                 </p>
               )}
               <p>
-                "New key for all cloned keys" assigns one replacement key to every selected direct key and hides the
-                individual key inputs. Leave it empty to rename each selected key separately.
+                {localized.viewerDbCloneHelpGlobalKey ||
+                  '"New key for all cloned keys" assigns one replacement key to every selected direct key and hides the individual key inputs. Leave it empty to rename each selected key separately.'}
               </p>
               <p>
-                "(Optional) Name for new tables" specifices what name the new DB tables will have. Leave it blank for an
-                automaitc name with a timestamp (e.g. dbclone_140925_152525_).
+                {localized.viewerDbCloneHelpNewTables ||
+                  '"(Optional) Name for new tables" specifies what name the new DB tables will have. Leave it blank for an automatic name with a timestamp (e.g. dbclone_140925_152525_).'}
               </p>
               <p>
-                "(Optional) Name for new pack" specifices what name the new pack will have. Leave it blank for an
-                automaitc name with a timestamp (e.g. dbclone_140925_152525.pack). WARNING: Using an existing pack name
-                WITHOUT "Append Existing Pack" enabled will OVERWRITE the existing pack.
+                {localized.viewerDbCloneHelpNewPack ||
+                  '"(Optional) Name for new pack" specifies what name the new pack will have. Leave it blank for an automatic name with a timestamp (e.g. dbclone_140925_152525.pack). WARNING: Using an existing pack name WITHOUT "Append Existing Pack" enabled will OVERWRITE the existing pack.'}
               </p>
             </div>
           </Modal.Body>
@@ -730,10 +768,10 @@ const DBDuplication = memo(({ launchSource, onSaveToBuildings }: DBDuplicationPr
           explicitClasses={["mt-8", "modalDontOverflowWindowHeight"]}
         >
           <Modal.Header>
-            <span>DB Clone Error</span>
+            <span>{localized.viewerDbCloneErrorTitle || "DB Clone Error"}</span>
           </Modal.Header>
           <Modal.Body>
-            <p>{duplicationError || "Unknown duplication error"}</p>
+            <p>{duplicationError || localized.viewerUnknownDuplicationError || "Unknown duplication error"}</p>
           </Modal.Body>
         </Modal>
       )}
@@ -746,16 +784,19 @@ const DBDuplication = memo(({ launchSource, onSaveToBuildings }: DBDuplicationPr
           explicitClasses={["mt-8", "modalDontOverflowWindowHeight"]}
         >
           <Modal.Header>
-            <span>DB Clone Complete</span>
+            <span>{localized.viewerDbCloneCompleteTitle || "DB Clone Complete"}</span>
           </Modal.Header>
           <Modal.Body>
-            <p className="whitespace-pre-wrap">{duplicationSuccessMessage || "Clone completed successfully."}</p>
+            <p className="whitespace-pre-wrap">
+              {duplicationSuccessMessage || localized.viewerCloneCompleted || "Clone completed successfully."}
+            </p>
           </Modal.Body>
         </Modal>
       )}
       {pendingOperations > 0 && (
         <DBCloneOperationOverlay
           statusText={overlayStatusText}
+          cancelLabel={localized.cancel || "Cancel"}
           onCancel={isSaving && duplicationProgress?.stage != "writing" ? onCancelDuplication : undefined}
         />
       )}
@@ -773,12 +814,12 @@ const DBDuplication = memo(({ launchSource, onSaveToBuildings }: DBDuplicationPr
             disabled={!isSavingPossible() || isSaving}
           >
             <div>
-              <span>{"Save to pack"}</span>
+              <span>{localized.viewerSaveToPack || "Save to pack"}</span>
             </div>
           </button>
           <input
             defaultValue={savePackFileName}
-            placeholder={"(Optional) Name for new pack"}
+            placeholder={localized.viewerOptionalNewPackName || "(Optional) Name for new pack"}
             disabled={isSaving}
             onChange={(e) => setSavePackFileName(e.target.value)}
             className={`bg-gray-50 w-52 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block p-2.5 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white dark:focus:ring-blue-500 dark:focus:border-blue-500 focus:outline-none ${
@@ -793,7 +834,7 @@ const DBDuplication = memo(({ launchSource, onSaveToBuildings }: DBDuplicationPr
               disabled={isSaving}
               onChange={(event) => setIsAppendSave(event.target.checked)}
             />
-            <span>Append Existing Pack</span>
+            <span>{localized.viewerAppendExistingPack || "Append Existing Pack"}</span>
           </label>
           <label className="flex w-52 items-center gap-2 text-sm text-gray-300" htmlFor="dbclone-open-in-windows">
             <input
@@ -803,14 +844,14 @@ const DBDuplication = memo(({ launchSource, onSaveToBuildings }: DBDuplicationPr
               disabled={isSaving}
               onChange={(event) => setOpenInWindows(event.target.checked)}
             />
-            <span>Open in Windows</span>
+            <span>{localized.viewerOpenInWindows || "Open in Windows"}</span>
           </label>
         </div>
         {launchSource !== "buildings" && memoryActionButton}
         <div>
           <input
             defaultValue={savePackedFileName}
-            placeholder={"(Optional) Name for new tables"}
+            placeholder={localized.viewerOptionalNewTablesName || "(Optional) Name for new tables"}
             disabled={isSaving}
             onChange={(e) => setSavePackedFileName(e.target.value)}
             className={`bg-gray-50 w-52 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block p-2.5 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white dark:focus:ring-blue-500 dark:focus:border-blue-500 focus:outline-none ${
@@ -835,12 +876,15 @@ const DBDuplication = memo(({ launchSource, onSaveToBuildings }: DBDuplicationPr
             onChange={(event) => setHideRepeatedIndirectTables(event.target.checked)}
             className="mt-1"
           />
-          <span>Hide indirect references when their table already appears above</span>
+          <span>
+            {localized.viewerHideIndirectReferences ||
+              "Hide indirect references when their table already appears above"}
+          </span>
         </label>
       </div>
       <div className="mx-auto mb-4 flex w-full max-w-xl flex-col gap-2 px-4 text-left">
         <label htmlFor="dbclone-global-rename" className="text-sm font-medium text-gray-200">
-          New key for all cloned keys
+          {localized.viewerNewKeyAllCloned || "New key for all cloned keys"}
         </label>
         <input
           id="dbclone-global-rename"
@@ -848,7 +892,7 @@ const DBDuplication = memo(({ launchSource, onSaveToBuildings }: DBDuplicationPr
           value={globalRenameValue}
           disabled={isSaving}
           onChange={(event) => setGlobalRenameValue(event.target.value)}
-          placeholder="Leave empty to rename keys individually"
+          placeholder={localized.viewerIndividualKeyPlaceholder || "Leave empty to rename keys individually"}
           className="block w-full rounded-lg border border-gray-600 bg-gray-700 p-2.5 text-sm text-white placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
         />
         {normalizedModdersPrefix && (
@@ -860,19 +904,23 @@ const DBDuplication = memo(({ launchSource, onSaveToBuildings }: DBDuplicationPr
               disabled={isSaving}
               onChange={(event) => setAppendModdersPrefix(event.target.checked)}
             />
-            Append modder prefix
+            {localized.viewerAppendModderPrefix || "Append modder prefix"}
           </label>
         )}
         {hasGlobalRenameValue && effectiveGlobalRenameValue !== globalRenameValue.trim() && (
-          <div className="text-xs text-gray-400">New key: {effectiveGlobalRenameValue}</div>
+          <div className="text-xs text-gray-400">
+            {localized.viewerNewKey || "New key:"} {effectiveGlobalRenameValue}
+          </div>
         )}
       </div>
-      <div>Cloning {toClone.resolvedKeyValue}</div>
+      <div>
+        {localized.viewerCloning || "Cloning"} {toClone.resolvedKeyValue}
+      </div>
       <div className="checkbox dark:text-gray-300">
         <TreeView
           key={hideRepeatedIndirectTables ? "hide-repeated-indirect-tables" : "show-all-indirect-tables"}
           data={data}
-          aria-label="Checkbox tree"
+          aria-label={localized.viewerCheckboxTree || "Checkbox tree"}
           multiSelect
           onSelect={(props) => onTreeSelect(props)}
           selectedIds={selectedIds}
