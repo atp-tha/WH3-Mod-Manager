@@ -19,7 +19,8 @@ import {
   type PackImportSource,
 } from "./utility/packImportPlan";
 import { resolveExportOutputPath } from "./utility/exportPaths";
-import { buildRpfmTsvContent, convertRpfmTsvToPackedFile, getRpfmTsvExportPath } from "./utility/rpfmTsv";
+import { buildRpfmTsvContent, getRpfmTsvExportPath } from "./utility/rpfmTsv";
+import { buildImportedPackedFile } from "./utility/packImportStaging";
 import { createInFlightTableRequests } from "./components/viewer/inFlightTableRequests";
 import { createSerializedBuilds } from "./utility/serializedBuilds";
 import { createPackReadRegistry } from "./utility/packReadRegistry";
@@ -12255,49 +12256,12 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
         for (const item of items) {
           try {
             const buffer = await fs.promises.readFile(item.diskPath);
-            let importedFile: PackedFile;
-            if (item.isRpfmTsv) {
-              tableSchemasPromise ??= getSchemaForGame(appData.currentGame);
-              const convertedFile = convertRpfmTsvToPackedFile(
-                buffer.toString("utf8"),
-                item.packFilePath,
-                await tableSchemasPromise,
-                item.diskPath,
-              );
-              if (!convertedFile?.schemaFields || !convertedFile.tableSchema) {
-                throw new Error("The TSV did not contain an RPFM table metadata line");
-              }
-              // The payload has to be serialized here, the way saveDBTableEdits does it: both pack
-              // save paths flatten an unsaved file to `file.buffer || Buffer.from(file.text || "")`
-              // and drop schemaFields, so a staged table with no buffer is written out as 0 bytes.
-              const tableBuffer = serializePackFileDataToBuffer({
-                name: convertedFile.name,
-                schemaFields: convertedFile.schemaFields,
-                tableSchema: convertedFile.tableSchema,
-                version: convertedFile.version,
-              });
-              importedFile = {
-                name: convertedFile.name,
-                version: convertedFile.version,
-                tableSchema: convertedFile.tableSchema,
-                schemaFields: convertedFile.schemaFields,
-                buffer: tableBuffer,
-                file_size: tableBuffer.length,
-                start_pos: -1,
-                is_compressed: false,
-              };
-            } else {
-              importedFile = {
-                name: normalizePackFilePath(item.packFilePath),
-                buffer,
-                file_size: buffer.length,
-                start_pos: -1,
-                is_compressed: false,
-              };
-              if (getPackedFileViewerKind(importedFile.name) === "text") {
-                importedFile.text = decodePackedFileText(importedFile);
-              }
-            }
+            // Only a TSV needs the schema, and loading it decompresses the whole schema file - a
+            // folder of loose assets must not pay for that.
+            const tableSchemas = item.isRpfmTsv
+              ? await (tableSchemasPromise ??= getSchemaForGame(appData.currentGame))
+              : {};
+            const importedFile = buildImportedPackedFile(item, buffer, tableSchemas, decodePackedFileText);
 
             const existingIndex = unsavedFiles.findIndex(
               (packedFile) => normalizePackFilePathKey(packedFile.name) === normalizePackFilePathKey(importedFile.name),

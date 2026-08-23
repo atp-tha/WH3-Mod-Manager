@@ -132,6 +132,17 @@ export const convertRpfmTsvToPackedFile = (
     );
   }
 
+  // readPack's loc pass and serializePackFileDataToBuffer both match ".loc" case-sensitively, so a
+  // metadata path naming `foo.LOC` would be written with a DB table header and never read back as a
+  // loc. Pack paths are case-insensitive to the game, so normalize the extension rather than
+  // producing a file nothing can parse.
+  if (isLoc && !isLocPackedFilePath(metadata.packedFileName)) {
+    throw new Error(`RPFM Loc TSV does not name a .loc file in ${sourcePath}: ${metadata.packedFileName}`);
+  }
+  const packedFileName = isLoc
+    ? `${metadata.packedFileName.slice(0, -".loc".length)}.loc`
+    : metadata.packedFileName;
+
   const schema = isLoc
     ? LocVersion
     : tableSchemas[metadata.tableName]?.find((candidate) => candidate.version === metadata.version);
@@ -171,7 +182,7 @@ export const convertRpfmTsvToPackedFile = (
   }, []);
 
   return {
-    name: metadata.packedFileName,
+    name: packedFileName,
     version: metadata.version,
     tableSchema: schema,
     schemaFields,

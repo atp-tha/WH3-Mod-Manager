@@ -9,9 +9,9 @@ vi.mock("@mongodb-js/zstd", () => ({
 }));
 
 import appData from "../src/appData";
-import { readPack, serializePackFileDataToBuffer, writePack } from "../src/packFileSerializer";
-import { convertRpfmTsvToPackedFile } from "../src/utility/rpfmTsv";
-import type { DBVersion, PackedFile } from "../src/packFileTypes";
+import { readPack, writePack } from "../src/packFileSerializer";
+import { buildImportedPackedFile } from "../src/utility/packImportStaging";
+import { LocVersion, type DBVersion } from "../src/packFileTypes";
 import { DBNameToDBVersions } from "../src/schema";
 
 const temporaryFolders: string[] = [];
@@ -61,26 +61,13 @@ describe("importing an RPFM TSV and saving the pack", () => {
         "unit_b\t4\tfalse",
       ].join("\n");
 
-      const converted = convertRpfmTsvToPackedFile(tsv, "data__.tsv", { example_tables: [schema] }, "data__.tsv");
-      expect(converted?.schemaFields).toBeTruthy();
-
-      // What applyPackImportFromDisk stages into appData.unsavedPacksData.
-      const tableBuffer = serializePackFileDataToBuffer({
-        name: converted!.name,
-        schemaFields: converted!.schemaFields,
-        tableSchema: converted!.tableSchema,
-        version: converted!.version,
-      });
-      const staged: PackedFile = {
-        name: converted!.name,
-        version: converted!.version,
-        tableSchema: converted!.tableSchema,
-        schemaFields: converted!.schemaFields,
-        buffer: tableBuffer,
-        file_size: tableBuffer.length,
-        start_pos: -1,
-        is_compressed: false,
-      };
+      // The same helper applyPackImportFromDisk stages with.
+      const staged = buildImportedPackedFile(
+        { diskPath: "data__.tsv", packFilePath: "db\\example_tables\\data__", isRpfmTsv: true },
+        Buffer.from(tsv, "utf8"),
+        { example_tables: [schema] },
+        () => undefined,
+      );
 
       // What savePackWithUnsavedFiles / savePackAsWithUnsavedFiles then write.
       const buffer = staged.buffer || Buffer.from(staged.text || "");
@@ -97,5 +84,54 @@ describe("importing an RPFM TSV and saving the pack", () => {
       if (previousSchemas) DBNameToDBVersions.wh3.example_tables = previousSchemas;
       else delete DBNameToDBVersions.wh3.example_tables;
     }
+  });
+
+  /**
+   * readPack's loc pass and serializePackFileDataToBuffer both match ".loc" case-sensitively, while
+   * the import pipeline recognises locs case-insensitively. An uppercase target therefore used to be
+   * written with a DB table header and could never be read back.
+   */
+  it("normalizes an uppercase .LOC target so it is written as a loc", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "whmm-import-loc-"));
+    temporaryFolders.push(root);
+    const packPath = path.join(root, "Loc.pack");
+
+    const previousGame = appData.currentGame;
+    appData.currentGame = "wh3";
+    try {
+      const tsv = ["key\ttext\ttooltip", "#Loc;1;text/db/mymod.LOC", "greeting\tHello\tfalse"].join("\n");
+      const staged = buildImportedPackedFile(
+        { diskPath: "mymod.LOC.tsv", packFilePath: "text\\db\\mymod.LOC", isRpfmTsv: true },
+        Buffer.from(tsv, "utf8"),
+        {},
+        () => undefined,
+      );
+
+      expect(staged.name).toBe("text\\db\\mymod.loc");
+      expect(staged.tableSchema).toBe(LocVersion);
+      // The LOC preamble: BOM, "LOC", a null, then the loc version.
+      expect(staged.buffer?.subarray(0, 6).toString("hex")).toBe("fffe4c4f4300");
+
+      const buffer = staged.buffer || Buffer.from(staged.text || "");
+      await writePack([{ name: staged.name, buffer, file_size: buffer.length }], packPath);
+
+      const saved = await readPack(packPath, { readLocs: true });
+      const savedLoc = saved.packedFiles.find((packedFile) => packedFile.name === "text\\db\\mymod.loc");
+      expect(savedLoc?.schemaFields?.map((cell) => cell.fields.at(-1)?.val)).toEqual(["greeting", "Hello", 0]);
+    } finally {
+      appData.currentGame = previousGame;
+    }
+  });
+
+  it("rejects a Loc TSV whose metadata path is not a .loc file", () => {
+    const tsv = ["key\ttext\ttooltip", "#Loc;1;text/db/mymod", "greeting\tHello\tfalse"].join("\n");
+    expect(() =>
+      buildImportedPackedFile(
+        { diskPath: "mymod.tsv", packFilePath: "text\\db\\mymod", isRpfmTsv: true },
+        Buffer.from(tsv, "utf8"),
+        {},
+        () => undefined,
+      ),
+    ).toThrow(/does not name a \.loc file/);
   });
 });
