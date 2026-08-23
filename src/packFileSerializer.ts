@@ -28,7 +28,7 @@ import * as fsExtra from "fs-extra";
 import { compareModNames } from "./modSortingHelpers";
 import { getDBName, getDBPackedFilePath, parseDBTablePath, resolveParsedDBVersion } from "./utility/packFileHelpers";
 import { groupPackedFilesIntoReadRuns } from "./utility/packedFileReadRuns";
-import { normalizePackFilePathKey } from "./utility/packImportPlan";
+import { normalizePackFilePathKey } from "./utility/packFilePathUtils";
 import type { SerializedNodeGraph } from "./nodeGraph/types";
 import { resolveRadioChoiceId } from "./nodeGraph/types";
 import {

@@ -1,9 +1,5 @@
-import {
-  hasParentSegment,
-  normalizePackFilePath,
-  normalizePackFilePathKey,
-  type ExistingPackFilePaths,
-} from "./packImportPlan";
+import type { ExistingPackFilePaths } from "./packImportPlan";
+import { hasParentSegment, normalizePackFilePath, normalizePackFilePathKey } from "./packFilePathUtils";
 
 export type PackFileRenameScope = "name" | "folder" | "full";
 

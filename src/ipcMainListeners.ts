@@ -12,13 +12,11 @@ import {
 } from "./utility/packFileHelpers";
 import { planSaveAs } from "./utility/saveAsPlan";
 import {
-  hasParentSegment,
-  normalizePackFilePath,
-  normalizePackFilePathKey,
   planPackImport,
   type PackImportItem,
   type PackImportSource,
 } from "./utility/packImportPlan";
+import { hasParentSegment, normalizePackFilePath, normalizePackFilePathKey } from "./utility/packFilePathUtils";
 import type { PackFileRenameEntry } from "./utility/packFileRenamePlan";
 import { resolveExportOutputPath } from "./utility/exportPaths";
 import { buildRpfmTsvContent, getRpfmTsvExportPath } from "./utility/rpfmTsv";

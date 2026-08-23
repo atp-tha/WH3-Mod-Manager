@@ -2,6 +2,7 @@ import { promises as fs } from "node:fs";
 import * as nodePath from "node:path";
 
 import { getRpfmTsvMetadata } from "./rpfmTsv";
+import { hasParentSegment, normalizePackFilePath, normalizePackFilePathKey } from "./packFilePathUtils";
 
 export type PackImportSourceKind = "file" | "folder";
 
@@ -49,21 +50,11 @@ export interface PlanPackImportOptions {
   readFileHead?: PackImportReadFileHead;
 }
 
-export const normalizePackFilePath = (value: string) =>
-  value.replace(/\//g, "\\").replace(/\\+/g, "\\").replace(/^\\+/, "").trim();
-
-export const normalizePackFilePathKey = (value: string) => normalizePackFilePath(value).toLowerCase();
-
 const joinPackFilePath = (first: string, second: string) => {
   if (!first) return second;
   if (!second) return first;
   return `${first.replace(/[\\/]+$/, "")}\\${second.replace(/^[\\/]+/, "")}`;
 };
-
-export const hasParentSegment = (value: string) =>
-  normalizePackFilePath(value)
-    .split("\\")
-    .some((segment) => segment === "..");
 
 const getDiskBasename = (value: string) => nodePath.basename(value.replace(/[\\/]/g, nodePath.sep));
 

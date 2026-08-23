@@ -1,7 +1,7 @@
 import { serializePackFileDataToBuffer } from "../packFileSerializer";
 import type { DBVersion, PackedFile } from "../packFileTypes";
 import type { PackImportItem } from "./packImportPlan";
-import { normalizePackFilePath } from "./packImportPlan";
+import { normalizePackFilePath } from "./packFilePathUtils";
 import { convertRpfmTsvToPackedFile } from "./rpfmTsv";
 import { getPackedFileViewerKind } from "./packFileViewing";
 
