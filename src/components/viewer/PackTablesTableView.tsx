@@ -35,9 +35,9 @@ import { getRowsForCopy, getSelectedRowIndices } from "./copyRows";
 
 const BIG_TABLE_ROW_THRESHOLD = 20000;
 const BIG_TABLE_CELL_THRESHOLD = 2000000;
-// Line box plus the space around it, at the 16px cells render at.
-const BIG_TABLE_ROW_HEIGHT = 20 + 6;
-const NORMAL_TABLE_ROW_HEIGHT = 22 + 6;
+// Line box plus the space around it, at the 17.6px cells render at.
+const BIG_TABLE_ROW_HEIGHT = 23 + 8;
+const NORMAL_TABLE_ROW_HEIGHT = 28 + 8;
 /** Floor for a numeric column; above this they are sized to their widest value like text ones. */
 const NUMERIC_COLUMN_MIN_WIDTH_PX = 56;
 const BIG_TABLE_CHECKBOX_COL_WIDTH = 36;
@@ -61,10 +61,10 @@ const HIDDEN_COLUMN_TOOLTIP_LIMIT = 30;
 /** Below this the middle button counts as a click, which leaves auto-scroll running after the release. */
 const MIDDLE_AUTO_SCROLL_DRAG_THRESHOLD_PX = 8;
 const SELECTION_AUTO_SCROLL_MAX_STEP_PX = 24;
-// Cells render at `.ag-cell { font-size: 1rem }` from index.css, which is 16px. Measuring them at
-// anything smaller makes every column narrower than its contents, which shows up as ellipsised
+// Cells render at `.ag-cell { font-size: 1.1rem }` from index.css, which is 17.6px. Measuring them
+// at anything smaller makes every column narrower than its contents, which shows up as ellipsised
 // values in whichever column holds the longest text - usually a key column.
-const GRID_CELL_FONT = '400 16px "Roboto", "Inter", Arial, sans-serif';
+const GRID_CELL_FONT = '400 17.6px "Roboto", "Inter", Arial, sans-serif';
 const ROW_INDEX_GRID_CELL_FONT = GRID_CELL_FONT;
 /** Upper bound on one glyph's advance at GRID_CELL_FONT, generous enough to cover full-width ones. */
 const GRID_CELL_MAX_GLYPH_WIDTH_PX = 24;

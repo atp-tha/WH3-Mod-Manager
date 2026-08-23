@@ -756,7 +756,7 @@ body:not(.disable-row-hover) .row-hover-highlight:hover > div:not(.drop-ghost) {
 }
 
 .ag-cell {
-  font-size: 1rem;
+  font-size: 1.1rem;
 }
 
 .pack-tables-grid .pack-table-header .ag-header-cell-label {
