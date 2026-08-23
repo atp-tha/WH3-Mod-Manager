@@ -756,14 +756,20 @@ const AgGridWrapper = memo(
     }, []);
 
     /**
-     * Middle-button auto-scroll over a pinned column, for the same reason as the wheel above: the
-     * browser's own auto-scroll picks the nearest scrollable ancestor, and over a pinned section
-     * that is the body viewport, which only scrolls vertically. Sideways it does nothing at all.
+     * Middle-button auto-scroll, taken over for the whole grid body.
      *
-     * Modelled on what the browser does, so it does not feel like a different gesture: the table
-     * moves faster the further the pointer is from where the button went down, a release after an
-     * actual drag ends it, and a release without one leaves it running until the next click or Esc.
-     * The anchor marker stands in for the one the browser would have drawn.
+     * ag-grid splits the two axes across two elements - `.ag-body-viewport` scrolls vertically and
+     * wraps everything, `.ag-center-cols-viewport` scrolls horizontally and wraps only the unpinned
+     * columns - while the browser's auto-scroll latches onto a single scroller for the whole
+     * gesture, whichever one first matched the direction the pointer moved. Neither of them scrolls
+     * both ways, so the gesture ends up locked to the axis it started on; and over a pinned column,
+     * where the horizontal scroller is not even an ancestor, sideways does nothing at all.
+     *
+     * Driving both axes ourselves is what unlocks the diagonal. It is modelled on what the browser
+     * does so it does not feel like a different gesture: the table moves faster the further the
+     * pointer is from where the button went down, a release after an actual drag ends it, and a
+     * release without one leaves it running until the next click or Esc. The anchor marker stands
+     * in for the one the browser would have drawn.
      */
     const startMiddleAutoScroll = useCallback(
       (event: React.MouseEvent<HTMLDivElement>): boolean => {
@@ -777,12 +783,10 @@ const AgGridWrapper = memo(
           return true;
         }
 
-        if (
-          !(event.target as Element | null)?.closest(".ag-pinned-left-cols-container, .ag-pinned-right-cols-container")
-        )
-          return false;
+        // The rows, pinned and unpinned alike. Not the header, which has nothing to scroll to.
+        if (!(event.target as Element | null)?.closest(".ag-body-viewport")) return false;
 
-        // Without this the browser starts its own auto-scroll on top of ours.
+        // Without this the browser starts its own, axis-locked auto-scroll on top of ours.
         event.preventDefault();
 
         const autoScroll = {
