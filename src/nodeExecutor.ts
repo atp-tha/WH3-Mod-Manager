@@ -97,8 +97,8 @@ const hotPathLog = (executionContext: FlowExecutionContext | undefined, ...args:
 const matchesFilterValue = (
   cellValue: string,
   filterValue: string,
-  matchMode?: unknown,
   regexCache: Map<string, RegExp | null>,
+  matchMode?: unknown,
 ): boolean => {
   const mode = normalizeFilterMatchMode(matchMode);
   const candidates = getFilterValueCandidates(filterValue);
@@ -1301,7 +1301,7 @@ async function executeFilterNode(
   }
   const filters = parsed.filters || [];
 
-  if (filters.length === 0 || !filters.some((filter) => filter.column && filter.value)) {
+  if (filters.length === 0 || !filters.some((filter) => filter.column && filter.value.trim())) {
     // No filters configured, return all data unchanged
     console.log(`Filter Node ${nodeId}: No filters configured, passing through all data`);
     return {
@@ -1337,7 +1337,7 @@ async function executeFilterNode(
       const filterResults: boolean[] = [];
 
       for (const filter of filters) {
-        if (!filter.column || !filter.value) {
+        if (!filter.column || !filter.value.trim()) {
           filterResults.push(true);
           continue;
         }
@@ -1353,7 +1353,7 @@ async function executeFilterNode(
         const filterValue = filter.value;
 
         // All modes support newline-separated any-of lists; regex treats each line as a pattern.
-        let matches = matchesFilterValue(String(cellValue), filterValue, filter.matchMode, regexCache);
+        let matches = matchesFilterValue(String(cellValue), filterValue, regexCache, filter.matchMode);
 
         // Apply NOT if specified
         if (filter.not) {
@@ -1424,7 +1424,7 @@ async function executeFilterNode(
       const filterResults: boolean[] = [];
 
       for (const filter of filters) {
-        if (!filter.column || !filter.value) {
+        if (!filter.column || !filter.value.trim()) {
           filterResults.push(true);
           continue;
         }
@@ -1440,7 +1440,7 @@ async function executeFilterNode(
         const filterValue = filter.value;
 
         // All modes support newline-separated any-of lists; regex treats each line as a pattern.
-        let matches = matchesFilterValue(String(cellValue), filterValue, filter.matchMode, regexCache);
+        let matches = matchesFilterValue(String(cellValue), filterValue, regexCache, filter.matchMode);
 
         // Apply NOT if specified
         if (filter.not) {

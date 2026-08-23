@@ -138,11 +138,23 @@ describe("filter node with a multiline value", () => {
     expect(unitsOf(result, "elseData")).toEqual(["emp_greatswords"]);
   });
 
-  it("matches nothing when the list resolved to no entries", async () => {
-    // An option the user cleared must not turn into "match everything".
+  it("treats values with no non-whitespace entries as inert", async () => {
     const result = await runFilter("\n  \n");
 
-    expect(unitsOf(result)).toEqual([]);
+    expect(unitsOf(result)).toEqual(["emp_spearmen", "emp_greatswords", "emp_handgunners"]);
+  });
+
+  it("treats whitespace-only values as inert", async () => {
+    const cases = ["full", "partial", "regex"] as const;
+
+    for (const matchMode of cases) {
+      const result = await runFilterRows([
+        { column: "unit", value: "emp_spearmen", not: false, operator: "AND", matchMode: "full" },
+        { column: "caste", value: "   ", not: false, operator: "AND", matchMode },
+      ]);
+
+      expect(unitsOf(result)).toEqual(["emp_spearmen"]);
+    }
   });
 });
 

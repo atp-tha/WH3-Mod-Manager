@@ -19,7 +19,7 @@ export const normalizeFilterMatchMode = (mode: unknown): FilterMatchMode =>
   mode === "partial" || mode === "regex" ? mode : "full";
 
 /** The mode a newly added filter row should start with: the last row's effective mode. */
-export const getLastFilterMatchMode = (filters: ReadonlyArray<Pick<FilterRow, "matchMode">>): FilterMatchMode =>
+export const getLastFilterMatchMode = (filters: ReadonlyArray<{ matchMode?: unknown }>): FilterMatchMode =>
   filters.length > 0 ? normalizeFilterMatchMode(filters[filters.length - 1].matchMode) : "full";
 
 export interface BaseFlowOption {
