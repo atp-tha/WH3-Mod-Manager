@@ -5,7 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { Provider } from "react-redux";
 import { describe, expect, it, vi } from "vitest";
 
-import appReducer, { requestOpenPackTab, selectDBTable, setUnsavedPacksData } from "../src/appSlice";
+import appReducer, { requestOpenPackTab, selectDBTable, selectFlowFile, setUnsavedPacksData } from "../src/appSlice";
 import initialState from "../src/initialAppState";
 import LocalizationContext from "../src/localizationContext";
 import ModsViewer from "../src/components/viewer/ModsViewer";
@@ -44,6 +44,22 @@ vi.mock("../src/components/viewer/PackTablesTreeView", () => {
           }
         >
           Open new table {props.packPath}
+        </button>
+        <button
+          type="button"
+          data-testid={`open-third-table-${props.packPath}`}
+          onClick={() =>
+            props.onOpenDBTable(
+              {
+                packPath: props.packPath,
+                dbName: "third_units_tables",
+                dbSubname: "data__",
+              },
+              { forceNewTab: true },
+            )
+          }
+        >
+          Open third table {props.packPath}
         </button>
         {props.onCopyInto && props.otherOpenPacks?.[0] && (
           <>
@@ -200,6 +216,112 @@ describe("multiple pack viewer tabs", () => {
     expect(fireEvent.mouseDown(screen.getByTestId("mods-viewer-root"), { button: 3 })).toBe(false);
     await waitFor(() => expect(screen.getByRole("button", { name: /^units_tables\/data__/ })).toBeInTheDocument());
     expect(screen.getByRole("button", { name: /^units_tables\/data__/ }).parentElement).toHaveClass("bg-gray-700");
+  });
+
+  it("keeps flow tabs in the history so back returns to the table shown before them", async () => {
+    const packPath = "A:\\mods\\history-flow.pack";
+    window.api = { getPackData: vi.fn(), setViewerActivePack: vi.fn() } as unknown as NonNullable<Window["api"]>;
+    const store = configureStore({
+      reducer: { app: appReducer },
+      preloadedState: {
+        app: {
+          ...initialState,
+          packsData: { [packPath]: pack(packPath, "History Flow") },
+        },
+      },
+    });
+
+    render(
+      <Provider store={store}>
+        <LocalizationContext.Provider value={{ filter: "Filter" }}>
+          <ModsViewer />
+        </LocalizationContext.Provider>
+      </Provider>,
+    );
+
+    store.dispatch(requestOpenPackTab(packPath));
+    await waitFor(() => expect(screen.getByRole("button", { name: "History Flow", exact: true })).toBeInTheDocument());
+
+    store.dispatch(selectDBTable({ packPath, dbName: "first_units_tables", dbSubname: "data__" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /^first_units_tables\/data__/ })).toBeInTheDocument(),
+    );
+
+    store.dispatch(selectDBTable({ packPath, dbName: "second_units_tables", dbSubname: "data__" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /^second_units_tables\/data__/ })).toBeInTheDocument(),
+    );
+
+    store.dispatch(selectFlowFile({ flowFile: "whmmflows\\history.json", packPath }));
+    await waitFor(() => expect(screen.getByTestId("node-editor")).toBeInTheDocument());
+
+    // One step back is the table the flow replaced, not the one before that.
+    const root = screen.getByTestId("mods-viewer-root");
+    expect(fireEvent.mouseDown(root, { button: 3 })).toBe(false);
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /^second_units_tables\/data__/ })).toBeInTheDocument(),
+    );
+    expect(screen.queryByTestId("node-editor")).not.toBeInTheDocument();
+
+    // And the flow is somewhere forward can reach.
+    expect(fireEvent.mouseDown(root, { button: 4 })).toBe(false);
+    await waitFor(() => expect(screen.getByTestId("node-editor")).toBeInTheDocument());
+  });
+
+  it("keeps a forward entry reachable after the tab it was recorded in is closed", async () => {
+    const user = userEvent.setup();
+    const packPath = "A:\\mods\\history-close.pack";
+    window.api = { getPackData: vi.fn(), setViewerActivePack: vi.fn() } as unknown as NonNullable<Window["api"]>;
+    const store = configureStore({
+      reducer: { app: appReducer },
+      preloadedState: {
+        app: {
+          ...initialState,
+          packsData: { [packPath]: pack(packPath, "History Close") },
+        },
+      },
+    });
+
+    render(
+      <Provider store={store}>
+        <LocalizationContext.Provider value={{ filter: "Filter" }}>
+          <ModsViewer />
+        </LocalizationContext.Provider>
+      </Provider>,
+    );
+
+    store.dispatch(requestOpenPackTab(packPath));
+    await waitFor(() => expect(screen.getByTestId(`open-table-${packPath}`)).toBeInTheDocument());
+    await user.click(screen.getByTestId(`open-table-${packPath}`));
+    await waitFor(() => expect(screen.getByRole("button", { name: /^units_tables\/data__/ })).toBeInTheDocument());
+    await user.click(screen.getByTestId(`open-new-table-${packPath}`));
+    await waitFor(() => expect(screen.getByRole("button", { name: /^new_units_tables\/data__/ })).toBeInTheDocument());
+    await user.click(screen.getByTestId(`open-third-table-${packPath}`));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /^third_units_tables\/data__/ })).toBeInTheDocument(),
+    );
+
+    const root = screen.getByTestId("mods-viewer-root");
+    expect(fireEvent.mouseDown(root, { button: 3 })).toBe(false);
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /^new_units_tables\/data__/ }).parentElement).toHaveClass(
+        "bg-gray-700",
+      ),
+    );
+
+    // Closing the tab the pointer sits on drops the view to the tab on its left, so the pointer has
+    // to follow it there - parked on the entry ahead of it, forward could never reach that entry.
+    await user.click(screen.getByRole("button", { name: /^Close new_units_tables\/data__/ }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /^units_tables\/data__/ }).parentElement).toHaveClass("bg-gray-700"),
+    );
+
+    expect(fireEvent.mouseDown(root, { button: 4 })).toBe(false);
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /^third_units_tables\/data__/ }).parentElement).toHaveClass(
+        "bg-gray-700",
+      ),
+    );
   });
 
   it("preserves file tabs per pack, activates existing packs, and closes clean packs", async () => {

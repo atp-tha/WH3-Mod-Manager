@@ -461,7 +461,11 @@ const ModsViewer = memo(() => {
   const createTabId = useCallback(() => `tab-${Date.now()}-${++tabIdCounterRef.current}`, []);
 
   const recordTableHistory = useCallback((tab: ViewerTab) => {
-    if (tab.kind !== "db" || !tab.dbName || !tab.dbSubname) return;
+    // Flows and packed files belong in the history too. Leaving them out kept the pointer on the
+    // table shown before them, so the first Back from one landed two tables away and they could
+    // never be returned to. A db tab with no table is the empty "select a file" placeholder, which
+    // is not somewhere to navigate back to.
+    if (tab.kind === "db" && (!tab.dbName || !tab.dbSubname)) return;
 
     const history = tableHistoryRef.current;
     const currentEntry = history.entries[history.index];
@@ -484,9 +488,13 @@ const ModsViewer = memo(() => {
     if (nextEntries.length === history.entries.length) return;
 
     const preservedIndex = currentEntry ? nextEntries.indexOf(currentEntry) : -1;
+    // With the current entry gone, closing a tab falls back to its left-hand neighbour, so the
+    // pointer follows it left. Leaving it where it was would park it on what is now a forward
+    // entry, which puts that entry out of reach of both Back and Forward.
+    const fallbackIndex = Math.max(-1, Math.min(history.index - 1, nextEntries.length - 1));
     tableHistoryRef.current = {
       entries: nextEntries,
-      index: preservedIndex >= 0 ? preservedIndex : Math.min(history.index, nextEntries.length - 1),
+      index: preservedIndex >= 0 ? preservedIndex : fallbackIndex,
     };
   }, []);
 
@@ -664,7 +672,9 @@ const ModsViewer = memo(() => {
       const targetTab = targetPackTab?.openTabs.find((tab) => tab.id === entry.tabId);
       if (!targetPackTab || !targetTab) return false;
 
-      const restoredTab = { ...targetTab, ...entry.tab, id: entry.tabId };
+      // The entry holds a whole tab, so it replaces rather than merges: merging would leave the
+      // flowFile or filePath of whatever the tab holds now on a tab restored to a table.
+      const restoredTab = { ...entry.tab, id: entry.tabId };
       activatePackTab(entry.tab.packPath);
       setPackTabs((prevPackTabs) =>
         prevPackTabs.map((packTab) => {
@@ -677,7 +687,7 @@ const ModsViewer = memo(() => {
         }),
       );
 
-      if (restoredTab.dbName && restoredTab.dbSubname) {
+      if (restoredTab.kind === "db" && restoredTab.dbName && restoredTab.dbSubname) {
         const selection = {
           dbFolder: restoredTab.dbFolder,
           dbName: restoredTab.dbName,

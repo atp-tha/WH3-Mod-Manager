@@ -26,6 +26,7 @@ import { isSupportedLanguage } from "./utility/sharedHelpers";
 import { isWorkshopMod, resolveModsBySourcePriority } from "./modSources";
 import { sharedModMatchesInstalledMod } from "./sharedModList";
 import { isHideableMainWindowTab } from "./utility/frontend/mainWindowTabs";
+import { DEFAULT_DB_TABLE_ROOT } from "./utility/packFileHelpers";
 
 const isMainWindowTabAvailable = (state: AppState, tab: MainWindowTab) => {
   if (isHideableMainWindowTab(tab) && state.hiddenMainWindowTabs.includes(tab)) return false;
@@ -1558,7 +1559,7 @@ const appSlice = createSlice({
       if (
         currentSelection &&
         currentSelection.packPath === nextSelection.packPath &&
-        (currentSelection.dbFolder ?? "db") === (nextSelection.dbFolder ?? "db") &&
+        (currentSelection.dbFolder ?? DEFAULT_DB_TABLE_ROOT) === (nextSelection.dbFolder ?? DEFAULT_DB_TABLE_ROOT) &&
         currentSelection.dbName === nextSelection.dbName &&
         currentSelection.dbSubname === nextSelection.dbSubname
       ) {
