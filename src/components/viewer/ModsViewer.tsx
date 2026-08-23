@@ -1695,7 +1695,10 @@ const ModsViewer = memo(() => {
         </Modal.Footer>
       </Modal>
 
-      <div ref={viewerRootRef} className="dark:text-gray-300 explicit-height-without-topbar-and-padding flex flex-col">
+      <div
+        ref={viewerRootRef}
+        className="dark:text-gray-300 explicit-height-without-topbar-and-padding-3rem flex flex-col -mt-8"
+      >
         {isOpen && (
           <>
             <div className="flex items-center py-2 pr-2 bg-gray-800 border-b border-gray-600">

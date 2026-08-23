@@ -544,6 +544,10 @@ body:not(.disable-row-hover) .row-hover-highlight:hover > div:not(.drop-ghost) {
   height: calc(100vh - 5.5rem);
 }
 
+.explicit-height-without-topbar-and-padding-3rem {
+  height: calc(100vh - 3rem);
+}
+
 .playButtonText {
   font-size: 1.3rem;
   letter-spacing: 0.15rem;
