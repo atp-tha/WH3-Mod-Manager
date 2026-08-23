@@ -1,5 +1,5 @@
 import { DBVersion, SCHEMA_FIELD_TYPE } from "../../packFileTypes";
-import type { FilterMatchMode, FlowNodeDataPatch } from "../types";
+import type { FilterRow, FlowNodeDataPatch } from "../types";
 
 export interface NodeData extends Record<string, unknown> {
   label: string;
@@ -132,15 +132,6 @@ export interface GroupByColumnsNodeData extends NodeData {
   connectedTableName?: string;
   DBNameToDBVersions: Record<string, DBVersion[]>;
   onlyForMultiple?: boolean;
-}
-
-export interface FilterRow {
-  column: string;
-  value: string;
-  not: boolean;
-  operator: "AND" | "OR";
-  /** Optional so flows saved before match modes existed continue to deserialize unchanged. */
-  matchMode?: FilterMatchMode;
 }
 
 export interface FilterNodeData extends NodeData {

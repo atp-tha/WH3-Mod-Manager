@@ -54,7 +54,8 @@ import {
   gameToTablesWithNumericIds,
   tablesToIgnore,
 } from "./schema";
-import { normalizeFilterMatchMode, splitMultilineOptionValue } from "./nodeGraph/types";
+import { getFilterValueCandidates, normalizeFilterMatchMode } from "./nodeGraph/types";
+import type { FilterRow } from "./nodeGraph/types";
 import { TextFileEditRule, applyTextFileEdits, matchesTextFileTarget } from "./nodeGraph/textFileEdits";
 import type { TextFileFormatter } from "./nodeGraph/textFileFormatting";
 import { PackFileOperationRule, planPackCopy, planPackFileOperations } from "./nodeGraph/packFileOperations";
@@ -90,37 +91,40 @@ const hotPathLog = (executionContext: FlowExecutionContext | undefined, ...args:
  * Compares a cell against a filter value, case-insensitively.
  *
  * Full mode keeps the old exact-match behavior. Partial mode treats each value as a case-insensitive
- * substring, and regex mode uses the value as a case-insensitive JavaScript regular expression.
- * Full and partial values containing newlines are lists, matching any non-empty line. Regex values
- * are kept intact so a newline can be part of the expression.
+ * substring, and regex mode uses each value as a case-insensitive JavaScript regular expression.
+ * Newline-separated values are lists in all three modes, matching if any entry matches.
  */
 const matchesFilterValue = (
   cellValue: string,
   filterValue: string,
   matchMode?: unknown,
-  regexCache?: Map<string, RegExp | null>,
+  regexCache: Map<string, RegExp | null>,
 ): boolean => {
   const mode = normalizeFilterMatchMode(matchMode);
+  const candidates = getFilterValueCandidates(filterValue);
+
+  // A list that resolved to nothing matches nothing, rather than silently matching everything.
+  if (candidates.length === 0) return false;
 
   if (mode === "regex") {
-    let regex = regexCache?.get(filterValue);
-    if (!regexCache?.has(filterValue)) {
-      try {
-        regex = new RegExp(filterValue, "i");
-      } catch {
-        // An invalid pattern cannot match. This also keeps a malformed flow from crashing execution.
-        regex = null;
+    return candidates.some((candidate) => {
+      let regex: RegExp | null;
+      if (regexCache.has(candidate)) {
+        regex = regexCache.get(candidate) ?? null;
+      } else {
+        try {
+          regex = new RegExp(candidate, "i");
+        } catch {
+          // An invalid pattern cannot match. This also keeps a malformed flow from crashing execution.
+          regex = null;
+        }
+        regexCache.set(candidate, regex);
       }
-      regexCache?.set(filterValue, regex);
-    }
-    return regex?.test(cellValue) ?? false;
+      return regex?.test(cellValue) ?? false;
+    });
   }
 
   const loweredCell = cellValue.toLowerCase();
-  const candidates =
-    filterValue.includes("\n") || filterValue.includes("\r") ? splitMultilineOptionValue(filterValue) : [filterValue];
-  // A list that resolved to nothing matches nothing, rather than silently matching everything.
-  if (candidates.length === 0) return false;
   return candidates.some((candidate) =>
     mode === "partial" ? loweredCell.includes(candidate.toLowerCase()) : candidate.toLowerCase() === loweredCell,
   );
@@ -1291,21 +1295,13 @@ async function executeFilterNode(
   console.log("filter text values:", textValue);
 
   // Parse filters from textValue
-  const parsed = getNodeConfig<{
-    filters?: Array<{
-      column: string;
-      value: string;
-      not: boolean;
-      operator: "AND" | "OR";
-      matchMode?: unknown;
-    }>;
-  }>(config, textValue);
+  const parsed = getNodeConfig<{ filters?: FilterRow[] }>(config, textValue);
   if (!parsed) {
     return { success: false, error: "Invalid filter configuration" };
   }
   const filters = parsed.filters || [];
 
-  if (filters.length === 0 || !filters[0].column || !filters[0].value) {
+  if (filters.length === 0 || !filters.some((filter) => filter.column && filter.value)) {
     // No filters configured, return all data unchanged
     console.log(`Filter Node ${nodeId}: No filters configured, passing through all data`);
     return {
@@ -1341,7 +1337,7 @@ async function executeFilterNode(
       const filterResults: boolean[] = [];
 
       for (const filter of filters) {
-        if (!filter.column) {
+        if (!filter.column || !filter.value) {
           filterResults.push(true);
           continue;
         }
@@ -1356,7 +1352,7 @@ async function executeFilterNode(
         const cellValue = cell.resolvedKeyValue || "";
         const filterValue = filter.value;
 
-        // Full and partial modes support newline-separated any-of lists; regex uses the raw pattern.
+        // All modes support newline-separated any-of lists; regex treats each line as a pattern.
         let matches = matchesFilterValue(String(cellValue), filterValue, filter.matchMode, regexCache);
 
         // Apply NOT if specified
@@ -1428,7 +1424,7 @@ async function executeFilterNode(
       const filterResults: boolean[] = [];
 
       for (const filter of filters) {
-        if (!filter.column) {
+        if (!filter.column || !filter.value) {
           filterResults.push(true);
           continue;
         }
@@ -1443,7 +1439,7 @@ async function executeFilterNode(
         const cellValue = cell.resolvedKeyValue || "";
         const filterValue = filter.value;
 
-        // Full and partial modes support newline-separated any-of lists; regex uses the raw pattern.
+        // All modes support newline-separated any-of lists; regex treats each line as a pattern.
         let matches = matchesFilterValue(String(cellValue), filterValue, filter.matchMode, regexCache);
 
         // Apply NOT if specified

@@ -53,28 +53,41 @@ const clickAddFilter = (container: HTMLElement) => {
 };
 
 describe("FilterNode match mode control", () => {
-  it("shows the tooltip and inherits a unanimous mode for a new row", () => {
-    const { container } = renderFilterNode([
-      { column: "unit", value: "emp_", not: false, operator: "AND", matchMode: "partial" },
-      { column: "unit", value: "spearmen", not: false, operator: "AND", matchMode: "partial" },
-    ]);
-
-    const modeGroup = container.querySelector('[role="group"][aria-label="Filter match mode"]');
-    expect(modeGroup?.getAttribute("title")).toContain("Partial: case-insensitive substring matching");
-
-    clickAddFilter(container);
-
-    expect(selectedModeLabels(container)).toEqual(["Partial", "Partial", "Partial"]);
-  });
-
-  it("defaults a new row to full when existing rows use mixed modes", () => {
+  it("shows concise tooltips and inherits the last row's mode for a new row", () => {
     const { container } = renderFilterNode([
       { column: "unit", value: "emp_", not: false, operator: "AND", matchMode: "partial" },
       { column: "unit", value: "spearmen", not: false, operator: "AND", matchMode: "regex" },
     ]);
 
+    const modeGroup = container.querySelector('[role="group"][aria-label="Filter match mode"]');
+    expect(modeGroup?.getAttribute("title")).toBe("Choose how this condition matches the value.");
+    const partialButton = Array.from(modeGroup?.querySelectorAll("button") ?? []).find(
+      (button) => button.textContent === "Partial",
+    );
+    expect(partialButton?.getAttribute("title")).toBe("Case-insensitive substring matching.");
+
     clickAddFilter(container);
 
-    expect(selectedModeLabels(container)).toEqual(["Partial", "Regex", "Full"]);
+    expect(selectedModeLabels(container)).toEqual(["Partial", "Regex", "Regex"]);
+  });
+
+  it("defaults a new row to full when the last existing row is legacy", () => {
+    const { container } = renderFilterNode([
+      { column: "unit", value: "emp_", not: false, operator: "AND", matchMode: "partial" },
+      { column: "unit", value: "spearmen", not: false, operator: "AND" },
+    ]);
+
+    clickAddFilter(container);
+
+    expect(selectedModeLabels(container)).toEqual(["Partial", "Full", "Full"]);
+  });
+
+  it("shows invalid regex feedback", () => {
+    const { container } = renderFilterNode([
+      { column: "unit", value: "[", not: false, operator: "AND", matchMode: "regex" },
+    ]);
+
+    expect(container.querySelector('input[aria-invalid="true"]')).not.toBeNull();
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain("Invalid regex:");
   });
 });

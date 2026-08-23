@@ -5,17 +5,22 @@ import type { DeepCloneOverride, DeepCloneTreeNode, DeepCloneVariantAxis } from 
 
 export type FilterMatchMode = "full" | "partial" | "regex";
 
+/** One row of the table-row filter node. `matchMode` is optional for old saved flows. */
+export interface FilterRow {
+  column: string;
+  value: string;
+  not: boolean;
+  operator: "AND" | "OR";
+  matchMode?: FilterMatchMode;
+}
+
 /** Old filter rows have no mode, which deliberately resolves to the legacy full-match behavior. */
 export const normalizeFilterMatchMode = (mode: unknown): FilterMatchMode =>
   mode === "partial" || mode === "regex" ? mode : "full";
 
-/** The mode a newly added filter row should start with. */
-export const getNewFilterMatchMode = (filters: ReadonlyArray<{ matchMode?: unknown }>): FilterMatchMode => {
-  if (filters.length === 0) return "full";
-
-  const firstMode = normalizeFilterMatchMode(filters[0].matchMode);
-  return filters.every((filter) => normalizeFilterMatchMode(filter.matchMode) === firstMode) ? firstMode : "full";
-};
+/** The mode a newly added filter row should start with: the last row's effective mode. */
+export const getLastFilterMatchMode = (filters: ReadonlyArray<Pick<FilterRow, "matchMode">>): FilterMatchMode =>
+  filters.length > 0 ? normalizeFilterMatchMode(filters[filters.length - 1].matchMode) : "full";
 
 export interface BaseFlowOption {
   id: string;
@@ -89,6 +94,23 @@ export const splitMultilineOptionValue = (value: string): string[] =>
     .map((line) => line.trim())
     .filter((line) => line.length > 0);
 
+/** A single-line value stays one value; newline-separated flow options become an any-of list. */
+export const getFilterValueCandidates = (value: string): string[] =>
+  value.includes("\n") || value.includes("\r") ? splitMultilineOptionValue(value) : [value];
+
+/** Returns the first invalid case-insensitive regex in a filter value, if any. */
+export const getFilterRegexError = (value: string): string | undefined => {
+  for (const candidate of getFilterValueCandidates(value)) {
+    try {
+      new RegExp(candidate, "i");
+    } catch (error) {
+      return error instanceof Error ? error.message : "Invalid regular expression";
+    }
+  }
+
+  return undefined;
+};
+
 export interface SerializedNode {
   id: string;
   type: FlowNodeType;
@@ -111,14 +133,7 @@ export interface SerializedNode {
     afterText?: string;
     useCurrentPack?: boolean;
     onlyForMultiple?: boolean;
-    filters?: Array<{
-      column: string;
-      value: string;
-      not: boolean;
-      operator: "AND" | "OR";
-      /** Optional for compatibility with flow files saved before match modes existed. */
-      matchMode?: FilterMatchMode;
-    }>;
+    filters?: FilterRow[];
     splitValues?: Array<{ id: string; value: string; enabled: boolean }>;
     columnNames?: string[];
     dedupeByColumns?: string[];

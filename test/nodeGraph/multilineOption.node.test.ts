@@ -3,7 +3,14 @@ import { describe, expect, it, vi } from "vitest";
 import { executeNodeAction } from "../../src/nodeExecutor";
 import { prepareGraphForExecution } from "../../src/nodeGraph/graphSerialization";
 import { substituteFilterOptionValues } from "../../src/nodeGraph/nestedOptionValues";
-import { getNewFilterMatchMode, splitMultilineOptionValue, type FilterMatchMode } from "../../src/nodeGraph/types";
+import {
+  getFilterRegexError,
+  getFilterValueCandidates,
+  getLastFilterMatchMode,
+  splitMultilineOptionValue,
+  type FilterMatchMode,
+  type FilterRow,
+} from "../../src/nodeGraph/types";
 import type { AmendedSchemaField, DBField, DBVersion, Pack, PackedFile } from "../../src/packFileTypes";
 
 vi.mock("@mongodb-js/zstd", () => ({
@@ -61,16 +68,17 @@ const createInput = () => ({
   tableCount: 1,
 });
 
-const runFilter = async (value: string, not = false, matchMode?: FilterMatchMode) =>
+const runFilterRows = async (filters: FilterRow[]) =>
   executeNodeAction({
     nodeId: "filter_1",
     nodeType: "filter",
     textValue: "",
-    config: {
-      filters: [{ column: "unit", value, not, operator: "AND", ...(matchMode ? { matchMode } : {}) }],
-    },
+    config: { filters },
     inputData: createInput(),
   });
+
+const runFilter = async (value: string, not = false, matchMode?: FilterMatchMode) =>
+  runFilterRows([{ column: "unit", value, not, operator: "AND", ...(matchMode ? { matchMode } : {}) }]);
 
 const unitsOf = (result: Awaited<ReturnType<typeof runFilter>>, key: "data" | "elseData" = "data") => {
   const tables = (result[key] as any)?.tables ?? [];
@@ -84,6 +92,18 @@ describe("splitMultilineOptionValue", () => {
     expect(splitMultilineOptionValue("  a  \n\nb\r\n  \n c ")).toEqual(["a", "b", "c"]);
     expect(splitMultilineOptionValue("")).toEqual([]);
     expect(splitMultilineOptionValue("   \n  ")).toEqual([]);
+  });
+});
+
+describe("filter value candidates", () => {
+  it("keeps single-line values intact and splits multiline values", () => {
+    expect(getFilterValueCandidates("a|b")).toEqual(["a|b"]);
+    expect(getFilterValueCandidates(" a \n b ")).toEqual(["a", "b"]);
+  });
+
+  it("reports invalid regex candidates", () => {
+    expect(getFilterRegexError("valid\n[")).toContain("Invalid");
+    expect(getFilterRegexError("valid\nother")).toBeUndefined();
   });
 });
 
@@ -131,12 +151,14 @@ describe("filter node match modes", () => {
     const result = await runFilter("SPEAR", false, "partial");
 
     expect(unitsOf(result)).toEqual(["emp_spearmen"]);
+    expect(unitsOf(result, "elseData")).toEqual(["emp_greatswords", "emp_handgunners"]);
   });
 
-  it("uses a case-insensitive regular expression in regex mode", async () => {
-    const result = await runFilter("^EMP_(spearmen|handgunners)$", false, "regex");
+  it("uses each non-empty line as a case-insensitive regular expression", async () => {
+    const result = await runFilter("^EMP_spearmen$\n^EMP_handgunners$", false, "regex");
 
     expect(unitsOf(result)).toEqual(["emp_spearmen", "emp_handgunners"]);
+    expect(unitsOf(result, "elseData")).toEqual(["emp_greatswords"]);
   });
 
   it("does not let an invalid regular expression crash the node", async () => {
@@ -145,18 +167,45 @@ describe("filter node match modes", () => {
     expect(result.success).toBe(true);
     expect(unitsOf(result)).toEqual([]);
   });
+
+  it("treats empty non-first conditions as inert in every mode", async () => {
+    const cases = [
+      { matchMode: "full" as const, not: false },
+      { matchMode: "partial" as const, not: true },
+      { matchMode: "regex" as const, not: true },
+    ];
+
+    for (const { matchMode, not } of cases) {
+      const result = await runFilterRows([
+        { column: "unit", value: "emp_spearmen", not: false, operator: "AND", matchMode: "full" },
+        { column: "caste", value: "", not, operator: "AND", matchMode },
+      ]);
+
+      expect(unitsOf(result)).toEqual(["emp_spearmen"]);
+    }
+  });
+
+  it("does not let an empty first condition hide a later active condition", async () => {
+    const result = await runFilterRows([
+      { column: "", value: "", not: false, operator: "AND", matchMode: "full" },
+      { column: "unit", value: "emp_spearmen", not: false, operator: "AND", matchMode: "full" },
+    ]);
+
+    expect(unitsOf(result)).toEqual(["emp_spearmen"]);
+    expect(unitsOf(result, "elseData")).toEqual(["emp_greatswords", "emp_handgunners"]);
+  });
 });
 
 describe("new filter row match mode", () => {
-  it("inherits a unanimous effective mode", () => {
-    expect(getNewFilterMatchMode([{ matchMode: "partial" }, { matchMode: "partial" }])).toBe("partial");
-    expect(getNewFilterMatchMode([{ matchMode: "regex" }])).toBe("regex");
+  it("inherits the last row's effective mode", () => {
+    expect(getLastFilterMatchMode([{ matchMode: "partial" }, { matchMode: "regex" }])).toBe("regex");
+    expect(getLastFilterMatchMode([{ matchMode: "full" }, { matchMode: "partial" }])).toBe("partial");
   });
 
-  it("defaults to full for legacy, invalid, or mixed modes", () => {
-    expect(getNewFilterMatchMode([{}, {}])).toBe("full");
-    expect(getNewFilterMatchMode([{ matchMode: "unknown" }, { matchMode: "full" }])).toBe("full");
-    expect(getNewFilterMatchMode([{ matchMode: "partial" }, { matchMode: "regex" }])).toBe("full");
+  it("defaults to full for empty, legacy, or invalid last modes", () => {
+    expect(getLastFilterMatchMode([])).toBe("full");
+    expect(getLastFilterMatchMode([{}, {}])).toBe("full");
+    expect(getLastFilterMatchMode([{ matchMode: "partial" }, { matchMode: "unknown" }])).toBe("full");
   });
 });
 

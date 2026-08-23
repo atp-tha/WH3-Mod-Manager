@@ -21,8 +21,8 @@ import {
   useDefaultTableVersions,
   useFlowOptions,
 } from "./shared";
-import { getNewFilterMatchMode, normalizeFilterMatchMode } from "../types";
-import type { FilterMatchMode } from "../types";
+import { getFilterRegexError, getLastFilterMatchMode, normalizeFilterMatchMode } from "../types";
+import type { FilterMatchMode, FilterRow } from "../types";
 import type {
   AddColumnTransformation,
   AddNewColumnNodeData,
@@ -51,7 +51,6 @@ import type {
   DumpToTSVNodeData,
   ExtractTableNodeData,
   FilterNodeData,
-  FilterRow,
   FlattenNestedNodeData,
   GenerateRowsNodeData,
   GetCounterColumnNodeData,
@@ -802,7 +801,7 @@ export const FilterNode: React.FC<{ data: FilterNodeData; id: string }> = ({ dat
         value: "",
         not: false,
         operator: "AND",
-        matchMode: getNewFilterMatchMode(filters),
+        matchMode: getLastFilterMatchMode(filters),
       },
     ]);
   };
@@ -821,13 +820,22 @@ export const FilterNode: React.FC<{ data: FilterNodeData; id: string }> = ({ dat
   };
 
   const filterMatchModeTooltip =
-    localized.nodeEditorFilterMatchModeTooltip ||
-    "Full: case-insensitive whole-value matching (the original filter behavior). Partial: case-insensitive substring matching. Regex: a case-insensitive JavaScript regular expression, matching anywhere unless you use ^ or $.";
+    localized.nodeEditorFilterMatchModeTooltip || "Choose how this condition matches the value.";
   const filterMatchModeLabels: Record<FilterMatchMode, string> = {
     full: localized.nodeEditorFilterMatchModeFull || "Full",
     partial: localized.nodeEditorFilterMatchModePartial || "Partial",
     regex: localized.nodeEditorFilterMatchModeRegex || "Regex",
   };
+  const filterMatchModeDescriptions: Record<FilterMatchMode, string> = {
+    full:
+      localized.nodeEditorFilterMatchModeFullTooltip ||
+      "Case-insensitive whole-value matching (the original filter behavior).",
+    partial: localized.nodeEditorFilterMatchModePartialTooltip || "Case-insensitive substring matching.",
+    regex:
+      localized.nodeEditorFilterMatchModeRegexTooltip ||
+      "Case-insensitive JavaScript regular expression; matches anywhere unless anchored with ^ or $.",
+  };
+  const invalidFilterRegex = localized.nodeEditorInvalidFilterRegex || "Invalid regex: {{error}}";
 
   return (
     <div className="bg-gray-700 border-2 border-yellow-500 rounded-lg p-4 min-w-[300px] max-w-[400px]">
@@ -842,98 +850,117 @@ export const FilterNode: React.FC<{ data: FilterNodeData; id: string }> = ({ dat
       <div className="text-xs text-gray-400 mb-2">{localized.nodeEditorInput || "Input:"} TableSelection</div>
 
       <div className="space-y-2 max-h-96 overflow-y-auto scrollable-node-content" onWheel={stopWheelPropagation}>
-        {filters.map((filter, index) => (
-          <div key={index} className="bg-gray-800 p-2 rounded border border-gray-600">
-            <div className="flex items-center gap-2 mb-2">
-              <label className="flex items-center gap-1 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={filter.not}
-                  onChange={(e) => handleFilterChange(index, "not", e.target.checked)}
-                  className="w-3 h-3"
-                />
-                <span className="text-xs text-gray-300">{localized.nodeEditorNot || "NOT"}</span>
-              </label>
-              <div
-                className="inline-flex overflow-hidden rounded-full border border-gray-600 bg-gray-700"
-                role="group"
-                aria-label={localized.nodeEditorFilterMatchMode || "Filter match mode"}
-                title={filterMatchModeTooltip}
-              >
-                {FILTER_MATCH_MODES.map((mode) => {
-                  const selected = normalizeFilterMatchMode(filter.matchMode) === mode;
-                  return (
-                    <button
-                      key={mode}
-                      type="button"
-                      aria-pressed={selected}
-                      title={`${filterMatchModeLabels[mode]}: ${filterMatchModeTooltip}`}
-                      onClick={() => handleFilterChange(index, "matchMode", mode)}
-                      className={`px-2 py-0.5 text-[10px] leading-none transition-colors focus:outline-none focus:ring-1 focus:ring-yellow-400 ${
-                        selected ? "bg-yellow-600 text-white" : "text-gray-300 hover:bg-gray-600"
-                      }`}
-                    >
-                      {filterMatchModeLabels[mode]}
-                    </button>
-                  );
-                })}
+        {filters.map((filter, index) => {
+          const matchMode = normalizeFilterMatchMode(filter.matchMode);
+          const regexError =
+            matchMode === "regex" && filter.value.length > 0 ? getFilterRegexError(filter.value) : undefined;
+
+          return (
+            <div key={index} className="bg-gray-800 p-2 rounded border border-gray-600">
+              <div className="flex items-center gap-2 mb-2">
+                <label className="flex items-center gap-1 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={filter.not}
+                    onChange={(e) => handleFilterChange(index, "not", e.target.checked)}
+                    className="w-3 h-3"
+                  />
+                  <span className="text-xs text-gray-300">{localized.nodeEditorNot || "NOT"}</span>
+                </label>
+                <div
+                  className={`inline-flex overflow-hidden rounded-full border bg-gray-700 ${
+                    regexError ? "border-red-500" : "border-gray-600"
+                  }`}
+                  role="group"
+                  aria-label={localized.nodeEditorFilterMatchMode || "Filter match mode"}
+                  title={filterMatchModeTooltip}
+                >
+                  {FILTER_MATCH_MODES.map((mode) => {
+                    const selected = matchMode === mode;
+                    return (
+                      <button
+                        key={mode}
+                        type="button"
+                        aria-pressed={selected}
+                        title={filterMatchModeDescriptions[mode]}
+                        onClick={() => handleFilterChange(index, "matchMode", mode)}
+                        className={`px-2 py-0.5 text-[10px] leading-none transition-colors focus:outline-none focus:ring-1 focus:ring-yellow-400 ${
+                          selected ? "bg-yellow-600 text-white" : "text-gray-300 hover:bg-gray-600"
+                        }`}
+                      >
+                        {filterMatchModeLabels[mode]}
+                      </button>
+                    );
+                  })}
+                </div>
+                {filters.length > 1 && (
+                  <button
+                    onClick={() => handleRemoveFilter(index)}
+                    className="ml-auto text-red-400 hover:text-red-300 text-xs"
+                  >
+                    {localized.remove || "Remove"}
+                  </button>
+                )}
               </div>
-              {filters.length > 1 && (
-                <button
-                  onClick={() => handleRemoveFilter(index)}
-                  className="ml-auto text-red-400 hover:text-red-300 text-xs"
-                >
-                  {localized.remove || "Remove"}
-                </button>
-              )}
-            </div>
 
-            <div className="mb-1">
-              <label className="text-xs text-gray-400 block mb-1">{localized.nodeEditorColumnLabel || "Column:"}</label>
-              {columnNames.length > 0 ? (
+              <div className="mb-1">
+                <label className="text-xs text-gray-400 block mb-1">
+                  {localized.nodeEditorColumnLabel || "Column:"}
+                </label>
+                {columnNames.length > 0 ? (
+                  <select
+                    value={filter.column}
+                    onChange={(e) => handleFilterChange(index, "column", e.target.value)}
+                    className="w-full p-1 text-xs bg-gray-700 text-white border border-gray-600 rounded focus:outline-none focus:border-yellow-400"
+                  >
+                    <option value="">{localized.nodeEditorSelectColumnShort || "Select column..."}</option>
+                    {columnNames.map((columnName) => (
+                      <option key={columnName} value={columnName}>
+                        {columnName}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    type="text"
+                    value={filter.column}
+                    onChange={(e) => handleFilterChange(index, "column", e.target.value)}
+                    placeholder={localized.nodeEditorEnterColumnName || "Enter column name..."}
+                    className="w-full p-1 text-xs bg-gray-700 text-white border border-gray-600 rounded focus:outline-none focus:border-yellow-400"
+                  />
+                )}
+              </div>
+
+              <input
+                type="text"
+                value={filter.value}
+                onChange={(e) => handleFilterChange(index, "value", e.target.value)}
+                placeholder={localized.nodeEditorFilterValue || "Filter value..."}
+                aria-invalid={regexError ? true : undefined}
+                className={`w-full p-1 text-xs bg-gray-700 text-white border rounded mb-1 focus:outline-none ${
+                  regexError ? "border-red-500 focus:border-red-400" : "border-gray-600 focus:border-yellow-400"
+                }`}
+              />
+
+              {regexError && (
+                <div className="mb-1 text-[10px] text-red-300" role="alert">
+                  {invalidFilterRegex.replace("{{error}}", regexError)}
+                </div>
+              )}
+
+              {index < filters.length - 1 && (
                 <select
-                  value={filter.column}
-                  onChange={(e) => handleFilterChange(index, "column", e.target.value)}
+                  value={filter.operator}
+                  onChange={(e) => handleFilterChange(index, "operator", e.target.value as "AND" | "OR")}
                   className="w-full p-1 text-xs bg-gray-700 text-white border border-gray-600 rounded focus:outline-none focus:border-yellow-400"
                 >
-                  <option value="">{localized.nodeEditorSelectColumnShort || "Select column..."}</option>
-                  {columnNames.map((columnName) => (
-                    <option key={columnName} value={columnName}>
-                      {columnName}
-                    </option>
-                  ))}
+                  <option value="AND">{localized.nodeEditorAnd || "AND"}</option>
+                  <option value="OR">{localized.nodeEditorOr || "OR"}</option>
                 </select>
-              ) : (
-                <input
-                  type="text"
-                  value={filter.column}
-                  onChange={(e) => handleFilterChange(index, "column", e.target.value)}
-                  placeholder={localized.nodeEditorEnterColumnName || "Enter column name..."}
-                  className="w-full p-1 text-xs bg-gray-700 text-white border border-gray-600 rounded focus:outline-none focus:border-yellow-400"
-                />
               )}
             </div>
-
-            <input
-              type="text"
-              value={filter.value}
-              onChange={(e) => handleFilterChange(index, "value", e.target.value)}
-              placeholder={localized.nodeEditorFilterValue || "Filter value..."}
-              className="w-full p-1 text-xs bg-gray-700 text-white border border-gray-600 rounded mb-1 focus:outline-none focus:border-yellow-400"
-            />
-
-            {index < filters.length - 1 && (
-              <select
-                value={filter.operator}
-                onChange={(e) => handleFilterChange(index, "operator", e.target.value as "AND" | "OR")}
-                className="w-full p-1 text-xs bg-gray-700 text-white border border-gray-600 rounded focus:outline-none focus:border-yellow-400"
-              >
-                <option value="AND">{localized.nodeEditorAnd || "AND"}</option>
-                <option value="OR">{localized.nodeEditorOr || "OR"}</option>
-              </select>
-            )}
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       <button
