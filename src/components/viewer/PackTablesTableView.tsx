@@ -1533,7 +1533,7 @@ const AgGridWrapper = memo(
               zIndex: 9999,
               minWidth: 200,
             }}
-            className="rounded-md border border-gray-600 bg-gray-800 text-gray-100 shadow-lg overflow-hidden"
+            className="rounded-md border border-gray-600 bg-gray-800 text-gray-100 shadow-lg overflow-visible"
             onMouseDownCapture={(e) => e.stopPropagation()}
           >
             {menuState.label && (
