@@ -63,7 +63,7 @@ type PanelRow =
   | { type: "result"; key: string; result: GlobalSearchResult };
 
 const PACK_ROW_HEIGHT = 32;
-const FILE_ROW_HEIGHT = 30;
+const FILE_ROW_HEIGHT = 34;
 const RESULT_ROW_HEIGHT = 28;
 
 const packPathKey = (value: string) => value.replaceAll("/", "\\").toLowerCase();
@@ -384,7 +384,7 @@ const GlobalSearchPanel = memo(
                 type="button"
                 onClick={() => toggleCollapsed(row.key)}
                 title={row.packPath}
-                className="flex w-full items-center gap-2 px-2 text-left text-sm font-medium text-gray-100 hover:bg-gray-700/60"
+                className="flex w-full items-center gap-2 px-2 text-left text-sm font-semibold text-gray-100 hover:bg-gray-700/60"
               >
                 <FontAwesomeIcon icon={isCollapsed ? faChevronRight : faChevronDown} className="w-2.5 shrink-0" />
                 <span className="truncate">{row.packLabel}</span>
@@ -405,12 +405,15 @@ const GlobalSearchPanel = memo(
                 className="flex w-full items-center gap-2 pl-5 pr-2 text-left text-sm text-gray-200 hover:bg-gray-700/60"
               >
                 <FontAwesomeIcon icon={isCollapsed ? faChevronRight : faChevronDown} className="w-2.5 shrink-0" />
-                <span className="truncate">{row.label}</span>
-                {row.sublabel && <span className="shrink-0 truncate text-gray-400">{row.sublabel}</span>}
-                <span className="shrink-0 text-[11px] uppercase tracking-wide text-gray-400">
+                {/* The table, or the file name - the label the reader navigates by, so it is the
+                    largest thing in the tree. Its own file name and the kind sit right of the gap,
+                    quiet enough not to compete with it. */}
+                <span className="truncate text-base font-medium text-gray-50">{row.label}</span>
+                {row.sublabel && <span className="shrink-0 truncate text-xs text-gray-400">{row.sublabel}</span>}
+                <span className="ml-auto shrink-0 text-[11px] uppercase tracking-wide text-gray-500">
                   {globalSearchKindLabels[row.kind]}
                 </span>
-                <span className="ml-auto shrink-0 tabular-nums text-gray-400">{row.count}</span>
+                <span className="shrink-0 tabular-nums text-gray-400">{row.count}</span>
               </button>
             </div>
           );

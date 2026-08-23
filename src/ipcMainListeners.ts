@@ -10449,7 +10449,6 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
       }
     }
     console.log("CURRENTLY READING:", packReads.reading());
-    console.log("before join", dataFolder, packPath);
     if (!packPath.includes("\\")) {
       // if we provided pack name instead of pack path as argument
       if (!dataFolder) {
