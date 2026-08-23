@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildKeyPrefixDisplay,
+  getPercentileWidth,
   getDefaultSaveAsPackName,
   getPackFileInventory,
   getPreferredTreeTab,
@@ -174,6 +175,23 @@ describe("widest column value", () => {
 
     pickWidestValue({ value: "aa", width: 20 }, "WW", countingMeasure, MAX_GLYPH);
     expect(measured).toEqual(["WW"]);
+  });
+});
+
+describe("percentile column width", () => {
+  it("sizes to the target percentile instead of one long outlier", () => {
+    const widths = [...Array.from({ length: 19 }, (_, index) => 120 + index), 600];
+
+    expect(getPercentileWidth(widths, 0.95, 110, 280)).toBe(138);
+  });
+
+  it("clamps a percentile above the content budget", () => {
+    expect(getPercentileWidth([120, 140, 300, 500], 0.95, 110, 280)).toBe(280);
+  });
+
+  it("preserves the minimum for narrow or empty input", () => {
+    expect(getPercentileWidth([20, 40], 0.95, 110, 280)).toBe(110);
+    expect(getPercentileWidth([], 0.95, 110, 280)).toBe(110);
   });
 });
 

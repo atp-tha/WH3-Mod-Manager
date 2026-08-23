@@ -25,7 +25,13 @@ import {
   TableCellValue,
 } from "./tablePrepCache";
 import type { ShowViewerDialog } from "./viewerDialogs";
-import { buildKeyPrefixDisplay, pickWidestValue, type KeyPrefixDisplay, type WidestValue } from "./viewerHelpers";
+import {
+  buildKeyPrefixDisplay,
+  getPercentileWidth,
+  pickWidestValue,
+  type KeyPrefixDisplay,
+  type WidestValue,
+} from "./viewerHelpers";
 import { makeSelectCurrentPackData, makeSelectCurrentPackUnsavedFiles } from "./viewerSelectors";
 import { vanillaPackNames } from "@/src/supportedGames";
 import { isDBCloneTableIgnored } from "@/src/utility/dbCloneTableRouting";
@@ -95,6 +101,8 @@ const TEXT_COLUMN_WIDTH_MIN_PX = 110;
  * all the rest. Past this the value ellipsises, and hovering the cell shows the whole of it.
  */
 const PINNED_KEY_COLUMN_MAX_CONTENT_WIDTH_PX = 280;
+/** Keep the common case visible while allowing unusually long keys to use hover expansion. */
+const PINNED_KEY_COLUMN_TARGET_PERCENTILE = 0.95;
 const GRID_HEADER_FONT = '500 14px "Inter", "Roboto", Arial, sans-serif';
 const KEY_HEADER_ICON_WIDTH_PX = 22;
 const COLUMN_HEADER_DISPLAY_NAMES: Record<string, string> = {
@@ -993,26 +1001,28 @@ const AgGridWrapper = memo(
     }, [columns, firstKeyColumnIndex, pinFirstKeyColumn, rowData]);
 
     /**
-     * Measured over what the column now draws rather than the width hint, which knows only the full
-     * values - sizing to those would hold open the width the hidden prefix used to take.
+     * Measure what the column now draws rather than the width hint, which knows only the full values
+     * - sizing to those would hold open the width the hidden prefix used to take. Use a percentile
+     * rather than the widest row so one unusually long key does not make every other row pay for it.
      */
     const pinnedKeyContentWidth = useMemo(() => {
-      if (!pinnedKeyPrefix || pinnedKeyPrefix.shortened.size === 0 || firstKeyColumnIndex < 0) return undefined;
+      if (!pinnedKeyPrefix || firstKeyColumnIndex < 0) return undefined;
 
       const fieldKey = getColumnFieldKey(firstKeyColumnIndex);
-      let widest: WidestValue = { value: "", width: 0 };
+      const displayedWidths: number[] = [];
       for (const row of rowData) {
         const full = String(row[fieldKey] ?? "");
         const shown = pinnedKeyPrefix.shortened.get(full) ?? full;
-        widest = pickWidestValue(
-          widest,
-          shown,
-          (text) => measureTextWidth(text, GRID_CELL_FONT),
-          GRID_CELL_MAX_GLYPH_WIDTH_PX,
-        );
+        if (shown.length === 0) continue;
+        displayedWidths.push(Math.ceil(measureTextWidth(shown, GRID_CELL_FONT) + CELL_CONTENT_PADDING_PX));
       }
-      if (widest.value.length === 0) return undefined;
-      return Math.max(TEXT_COLUMN_WIDTH_MIN_PX, Math.ceil(widest.width + CELL_CONTENT_PADDING_PX));
+
+      return getPercentileWidth(
+        displayedWidths,
+        PINNED_KEY_COLUMN_TARGET_PERCENTILE,
+        TEXT_COLUMN_WIDTH_MIN_PX,
+        PINNED_KEY_COLUMN_MAX_CONTENT_WIDTH_PX,
+      );
     }, [firstKeyColumnIndex, pinnedKeyPrefix, rowData]);
 
     /**

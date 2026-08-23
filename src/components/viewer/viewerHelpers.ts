@@ -34,6 +34,30 @@ export const pickWidestValue = (
 };
 
 /**
+ * Chooses a bounded content width from measured row widths.
+ *
+ * The nearest-rank percentile keeps the common case visible while allowing a few unusually long
+ * values to use the pinned cell's hover expansion. Empty values should be omitted by the caller, so
+ * they do not make the column look smaller without contributing any content that needs to fit.
+ */
+export const getPercentileWidth = (
+  widths: readonly number[],
+  percentile: number,
+  minWidth: number,
+  maxWidth: number,
+): number => {
+  const finiteWidths = widths.filter((width) => Number.isFinite(width));
+  if (finiteWidths.length === 0) return minWidth;
+
+  const sortedWidths = [...finiteWidths].sort((first, second) => first - second);
+  const clampedPercentile = Math.min(1, Math.max(0, percentile));
+  const rank = Math.max(1, Math.ceil(sortedWidths.length * clampedPercentile));
+  const percentileWidth = sortedWidths[Math.min(rank, sortedWidths.length) - 1] ?? minWidth;
+
+  return Math.min(maxWidth, Math.max(minWidth, Math.ceil(percentileWidth)));
+};
+
+/**
  * Segments a shortened value has to keep. Without a floor the detector will happily strip a key down
  * to `3` or `1` - still unique, and useless to read.
  */
