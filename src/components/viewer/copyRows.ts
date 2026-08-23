@@ -17,6 +17,28 @@ export const getSelectedRowIndices = (ranges: RowSelectionRange[], clickedRow: n
   return [...selectedRows].sort((first, second) => first - second);
 };
 
+/** Returns only rows represented by a full-width row selection, once and in display order. */
+export const getFullySelectedRowIndices = (
+  ranges: RowSelectionRange[],
+  rowCount: number,
+  columnCount: number,
+): number[] => {
+  if (rowCount <= 0 || columnCount <= 0) return [];
+
+  const selectedRows = new Set<number>();
+  for (const range of ranges) {
+    if (range.startCol !== 0 || range.endCol !== columnCount - 1) continue;
+
+    const firstRow = Math.max(0, Math.min(range.startRow, range.endRow));
+    const lastRow = Math.min(rowCount - 1, Math.max(range.startRow, range.endRow));
+    for (let rowIndex = firstRow; rowIndex <= lastRow; rowIndex++) {
+      selectedRows.add(rowIndex);
+    }
+  }
+
+  return [...selectedRows].sort((first, second) => first - second);
+};
+
 /** Converts selected row indices into complete schema rows, rather than copying only selected cells. */
 export const getRowsForCopy = (
   schemaFields: AmendedSchemaField[],

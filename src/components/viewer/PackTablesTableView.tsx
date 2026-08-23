@@ -37,7 +37,7 @@ import { vanillaPackNames } from "@/src/supportedGames";
 import { isDBCloneTableIgnored } from "@/src/utility/dbCloneTableRouting";
 import CopyIntoSubmenu from "./CopyIntoSubmenu";
 import type { CopyIntoSource, ViewerPackTarget } from "./PackTablesTreeView";
-import { getRowsForCopy, getSelectedRowIndices } from "./copyRows";
+import { getFullySelectedRowIndices, getRowsForCopy, getSelectedRowIndices } from "./copyRows";
 
 const BIG_TABLE_ROW_THRESHOLD = 20000;
 const BIG_TABLE_CELL_THRESHOLD = 2000000;
@@ -587,6 +587,30 @@ const appendPreparedTableDataRow = (
   };
 };
 
+const removePreparedTableDataRows = (preparedTableData: PreparedTableData, rowIndices: number[]): PreparedTableData => {
+  const rowsToRemove = new Set(rowIndices);
+  if (rowsToRemove.size === 0) return preparedTableData;
+
+  const nextData = preparedTableData.data
+    .filter((_row, rowIndex) => !rowsToRemove.has(rowIndex))
+    .map((row, rowIndex) => ({ ...row, __rowId: String(rowIndex) }));
+  const nextPreparedTableData = {
+    ...preparedTableData,
+    data: nextData,
+    chunkedTable: preparedTableData.chunkedTable.filter((_row, rowIndex) => !rowsToRemove.has(rowIndex)),
+    lowerCaseColumnValues: preparedTableData.lowerCaseColumnValues.map((columnValues) =>
+      columnValues.filter((_value, rowIndex) => !rowsToRemove.has(rowIndex)),
+    ),
+  };
+
+  return {
+    ...nextPreparedTableData,
+    columnWidthHints: preparedTableData.columnWidthHints.map((_hint, colIndex) =>
+      getUpdatedTextColumnWidthHint(nextPreparedTableData, colIndex),
+    ),
+  };
+};
+
 const copyTextToClipboard = async (text: string): Promise<void> => {
   try {
     await navigator.clipboard.writeText(text);
@@ -731,6 +755,7 @@ const AgGridWrapper = memo(
     canEditTable,
     canDeepCloneTable,
     onCellValueChangedCallback,
+    onDeleteRows,
     onContextMenuCallback,
     onGoToReference,
     referenceSelection,
@@ -757,6 +782,7 @@ const AgGridWrapper = memo(
     canEditTable: boolean;
     canDeepCloneTable: boolean;
     onCellValueChangedCallback: (event: CellValueChangedEvent<RowData>) => void;
+    onDeleteRows?: (displayedRows: number[]) => Promise<boolean>;
     onContextMenuCallback: (row: number, col: number) => void;
     onGoToReference?: (request: GoToReferenceRequest) => void;
     referenceSelection?: ReferenceSelection;
@@ -1559,6 +1585,31 @@ const AgGridWrapper = memo(
 
     const onKeyDownCapture = useCallback(
       async (ev: React.KeyboardEvent) => {
+        if (ev.key === "Delete" && onDeleteRows) {
+          const target = ev.target as Element | null;
+          if (
+            target?.closest(
+              "input, textarea, select, [contenteditable='true'], .ag-cell-inline-editing, .ag-rich-select, .ag-popup-editor",
+            )
+          ) {
+            return;
+          }
+
+          const selectedRows = getFullySelectedRowIndices(
+            selectionRangesRef.current,
+            rowData.length,
+            currentSchema.fields.length,
+          );
+          if (selectedRows.length === 0) return;
+
+          ev.preventDefault();
+          ev.stopPropagation();
+          if (await onDeleteRows(selectedRows)) {
+            setSelectionRanges([]);
+          }
+          return;
+        }
+
         const isCopy = (ev.ctrlKey || ev.metaKey) && !ev.shiftKey && !ev.altKey && ev.key.toLowerCase() === "c";
         if (!isCopy) return;
 
@@ -1640,7 +1691,7 @@ const AgGridWrapper = memo(
         await copyTextToClipboard(value == null ? "" : String(value));
         ev.preventDefault();
       },
-      [currentSchema.fields.length],
+      [currentSchema.fields.length, onDeleteRows, rowData.length],
     );
 
     return (
@@ -2275,6 +2326,45 @@ const PackTablesTableView = memo((props: PackTablesTableViewProps) => {
     );
   }, [activePackFile, activePreparedTableData, canEditTable, commitPackFileChange, currentSchema]);
 
+  const handleDeleteRows = useCallback(
+    async (displayedRowIndices: number[]) => {
+      if (!canEditTable || !activePackFile || !currentSchema || !activePreparedTableData) {
+        return false;
+      }
+
+      const columnCount = currentSchema.fields.length;
+      if (columnCount === 0) return false;
+
+      const rowIndicesToDelete = [
+        ...new Set(
+          displayedRowIndices.map((rowIndex) => filteredRowIndices[rowIndex]).filter((rowIndex) => rowIndex != null),
+        ),
+      ].sort((first, second) => first - second);
+      if (rowIndicesToDelete.length === 0) return false;
+
+      const rowsToDelete = new Set(rowIndicesToDelete);
+      const previousPackFile = activePackFile;
+      const previousPreparedTableData = activePreparedTableData;
+      const nextSchemaFields = ((activePackFile.schemaFields as AmendedSchemaField[] | undefined) ?? []).filter(
+        (_cell, fieldIndex) => !rowsToDelete.has(Math.floor(fieldIndex / columnCount)),
+      );
+      const nextPackFile = {
+        ...activePackFile,
+        schemaFields: nextSchemaFields,
+      } as PackedFile;
+      const nextPreparedTableData = removePreparedTableDataRows(previousPreparedTableData, rowIndicesToDelete);
+
+      return commitPackFileChange(
+        nextPackFile,
+        previousPackFile,
+        previousPreparedTableData,
+        nextPreparedTableData,
+        "push",
+      );
+    },
+    [activePackFile, activePreparedTableData, canEditTable, commitPackFileChange, currentSchema, filteredRowIndices],
+  );
+
   const handleUndo = useCallback(async () => {
     if (!canEditTable || !activePackFile || !activePreparedTableData) {
       return;
@@ -2356,6 +2446,7 @@ const PackTablesTableView = memo((props: PackTablesTableViewProps) => {
           canEditTable={canEditTable}
           canDeepCloneTable={!isDBCloneTableIgnored(currentDBTableSelection.dbName)}
           onCellValueChangedCallback={handleCellValueChangedCallback}
+          onDeleteRows={canEditTable ? handleDeleteRows : undefined}
           onContextMenuCallback={handleContextMenuCallback}
           onGoToReference={onGoToReference}
           referenceSelection={referenceSelection}

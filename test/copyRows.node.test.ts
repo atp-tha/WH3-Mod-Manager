@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { getRowsForCopy, getSelectedRowIndices } from "../src/components/viewer/copyRows";
+import { getFullySelectedRowIndices, getRowsForCopy, getSelectedRowIndices } from "../src/components/viewer/copyRows";
 import type { AmendedSchemaField } from "../src/packFileTypes";
 
 const cell = (name: string, value: string): AmendedSchemaField => ({
@@ -25,6 +25,20 @@ describe("viewer row copying", () => {
 
   it("falls back to the row under the context click outside the selection", () => {
     expect(getSelectedRowIndices([{ startRow: 1, endRow: 2, startCol: 0, endCol: 0 }], 5)).toEqual([5]);
+  });
+
+  it("returns only rows selected across the full table width", () => {
+    expect(
+      getFullySelectedRowIndices(
+        [
+          { startRow: 3, endRow: 4, startCol: 0, endCol: 2 },
+          { startRow: 1, endRow: 1, startCol: 1, endCol: 2 },
+          { startRow: 4, endRow: 5, startCol: 0, endCol: 2 },
+        ],
+        6,
+        3,
+      ),
+    ).toEqual([3, 4, 5]);
   });
 
   it("copies complete schema rows even when only cells were selected", () => {
