@@ -1912,17 +1912,17 @@ const ModsViewer = memo(() => {
                   </div>
 
                   <div className="flex items-center mt-3">
-                    <span className="text-slate-100">{localized.filter}</span>
-                    <span className="relative">
+                    <span className="relative w-full">
                       <input
                         id="dbTableFilter"
                         type="text"
+                        placeholder={localized.filter}
                         onChange={(e) => onFilterChangeDebounced(e.target.value)}
                         defaultValue={dbTableFilter}
-                        className="ml-2 block bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 w-full p-2.5 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white dark:focus:ring-blue-500 dark:focus:border-blue-500"
+                        className="block bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 w-full px-2 py-1 pr-6 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white dark:focus:ring-blue-500 dark:focus:border-blue-500"
                       ></input>
 
-                      <span className="absolute right-[0.3rem] top-[0.6rem] text-gray-400">
+                      <span className="absolute right-[0.3rem] top-1/2 -translate-y-1/2 leading-none text-gray-400">
                         <button onClick={() => clearFilter()}>
                           <FontAwesomeIcon icon={faXmark} />
                         </button>
