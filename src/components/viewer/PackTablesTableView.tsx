@@ -1720,7 +1720,7 @@ const PackTablesTableView = memo(({ showDialog, otherOpenPacks, onCopyInto }: Pa
           tableSelectionKey={`${currentDBTableSelection.packPath}|${currentDBTableSelection.dbName}|${currentDBTableSelection.dbSubname}`}
         />
       </div>
-      <div className="mt-3 flex gap-4 shrink-0 items-center flex-wrap">
+      <div className="mt-3 px-2 flex gap-4 shrink-0 items-center flex-wrap">
         {canEditTable && (
           <>
             <button

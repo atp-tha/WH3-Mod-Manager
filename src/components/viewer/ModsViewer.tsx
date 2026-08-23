@@ -2014,7 +2014,7 @@ const ModsViewer = memo(() => {
                 minHeight={180}
                 maxHeight="70%"
                 enable={{ top: true }}
-                className={"shrink-0" + (isGlobalSearchOpen ? "" : " hidden")}
+                className={"mt-3 shrink-0" + (isGlobalSearchOpen ? "" : " hidden")}
               >
                 <GlobalSearchPanel
                   isOpen={isGlobalSearchOpen}
