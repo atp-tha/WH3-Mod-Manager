@@ -12,6 +12,8 @@ export interface FilterRow {
   not: boolean;
   operator: "AND" | "OR";
   matchMode?: FilterMatchMode;
+  /** Execution-only marker for a flow option that resolved to an empty value. */
+  flowOptionResolvedEmpty?: boolean;
 }
 
 /** Old filter rows have no mode, which deliberately resolves to the legacy full-match behavior. */

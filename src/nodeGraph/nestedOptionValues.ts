@@ -92,7 +92,13 @@ export const substituteFilterOptionValues = (
     if (nextValue === value) return filterRow;
 
     modified = true;
-    return { ...(filterRow as Record<string, unknown>), value: nextValue };
+    const nextFilterRow: Record<string, unknown> = { ...(filterRow as Record<string, unknown>), value: nextValue };
+    if (nextValue.trim().length === 0) {
+      nextFilterRow.flowOptionResolvedEmpty = true;
+    } else {
+      delete nextFilterRow.flowOptionResolvedEmpty;
+    }
+    return nextFilterRow;
   });
 
   return modified;

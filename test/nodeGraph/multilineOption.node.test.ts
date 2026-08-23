@@ -156,6 +156,43 @@ describe("filter node with a multiline value", () => {
       expect(unitsOf(result)).toEqual(["emp_spearmen"]);
     }
   });
+
+  it("keeps a flow option that resolves empty as a non-match", async () => {
+    const nodes = [
+      {
+        id: "node_0",
+        type: "filter",
+        position: { x: 0, y: 0 },
+        data: {
+          label: "Filter",
+          type: "filter",
+          filters: [{ column: "unit", value: "{{myUnits}}", not: false, operator: "AND" }],
+        },
+      },
+    ] as any[];
+
+    const prepared = prepareGraphForExecution({
+      nodes,
+      edges: [],
+      flowOptions: [{ id: "myUnits", name: "Units", type: "multiline", value: "" }],
+    });
+
+    expect((prepared.nodes[0].data as any).filters[0]).toMatchObject({
+      value: "",
+      flowOptionResolvedEmpty: true,
+    });
+
+    const result = await executeNodeAction({
+      nodeId: "node_0",
+      nodeType: "filter",
+      textValue: "",
+      config: { filters: (prepared.nodes[0].data as any).filters },
+      inputData: createInput(),
+    });
+
+    expect(unitsOf(result)).toEqual([]);
+    expect(unitsOf(result, "elseData")).toEqual(["emp_spearmen", "emp_greatswords", "emp_handgunners"]);
+  });
 });
 
 describe("filter node match modes", () => {
@@ -205,6 +242,27 @@ describe("filter node match modes", () => {
 
     expect(unitsOf(result)).toEqual(["emp_spearmen"]);
     expect(unitsOf(result, "elseData")).toEqual(["emp_greatswords", "emp_handgunners"]);
+  });
+
+  it("drops inactive rows from an OR join", async () => {
+    const result = await runFilterRows([
+      { column: "unit", value: "emp_spearmen", not: false, operator: "OR", matchMode: "full" },
+      { column: "caste", value: "", not: false, operator: "AND", matchMode: "full" },
+    ]);
+
+    expect(unitsOf(result)).toEqual(["emp_spearmen"]);
+    expect(unitsOf(result, "elseData")).toEqual(["emp_greatswords", "emp_handgunners"]);
+  });
+
+  it("uses the preceding active row's operator across inactive rows", async () => {
+    const result = await runFilterRows([
+      { column: "", value: "", not: false, operator: "AND", matchMode: "full" },
+      { column: "unit", value: "emp_spearmen", not: false, operator: "OR", matchMode: "full" },
+      { column: "caste", value: "missile_infantry", not: false, operator: "AND", matchMode: "full" },
+    ]);
+
+    expect(unitsOf(result)).toEqual(["emp_spearmen", "emp_handgunners"]);
+    expect(unitsOf(result, "elseData")).toEqual(["emp_greatswords"]);
   });
 });
 

@@ -103,9 +103,6 @@ const matchesFilterValue = (
   const mode = normalizeFilterMatchMode(matchMode);
   const candidates = getFilterValueCandidates(filterValue);
 
-  // A list that resolved to nothing matches nothing, rather than silently matching everything.
-  if (candidates.length === 0) return false;
-
   if (mode === "regex") {
     return candidates.some((candidate) => {
       let regex: RegExp | null;
@@ -129,6 +126,8 @@ const matchesFilterValue = (
     mode === "partial" ? loweredCell.includes(candidate.toLowerCase()) : candidate.toLowerCase() === loweredCell,
   );
 };
+
+type EvaluatedFilterResult = { result: boolean; operator: "AND" | "OR" };
 
 export const CONDITIONAL_BRANCH_TRUE_HANDLE = "output-true";
 export const CONDITIONAL_BRANCH_FALSE_HANDLE = "output-false";
@@ -1301,7 +1300,10 @@ async function executeFilterNode(
   }
   const filters = parsed.filters || [];
 
-  if (filters.length === 0 || !filters.some((filter) => filter.column && filter.value.trim())) {
+  if (
+    filters.length === 0 ||
+    !filters.some((filter) => filter.column && (filter.value.trim() || filter.flowOptionResolvedEmpty))
+  ) {
     // No filters configured, return all data unchanged
     console.log(`Filter Node ${nodeId}: No filters configured, passing through all data`);
     return {
@@ -1334,18 +1336,17 @@ async function executeFilterNode(
     // Filter rows based on the filter configuration
     const filteredRows = rows.filter((row) => {
       // Evaluate each filter
-      const filterResults: boolean[] = [];
+      const filterResults: EvaluatedFilterResult[] = [];
 
       for (const filter of filters) {
-        if (!filter.column || !filter.value.trim()) {
-          filterResults.push(true);
+        if (!filter.column || (!filter.value.trim() && !filter.flowOptionResolvedEmpty)) {
           continue;
         }
 
         // Find the cell with matching column name
         const cell = row.find((c) => c.name === filter.column);
         if (!cell) {
-          filterResults.push(true); // Column not found, skip filter
+          filterResults.push({ result: true, operator: filter.operator }); // Column not found, skip filter
           continue;
         }
 
@@ -1353,26 +1354,28 @@ async function executeFilterNode(
         const filterValue = filter.value;
 
         // All modes support newline-separated any-of lists; regex treats each line as a pattern.
-        let matches = matchesFilterValue(String(cellValue), filterValue, regexCache, filter.matchMode);
+        let matches = filter.flowOptionResolvedEmpty
+          ? false
+          : matchesFilterValue(String(cellValue), filterValue, regexCache, filter.matchMode);
 
         // Apply NOT if specified
         if (filter.not) {
           matches = !matches;
         }
 
-        filterResults.push(matches);
+        filterResults.push({ result: matches, operator: filter.operator });
       }
 
       // Combine filter results based on operators
       if (filterResults.length === 0) return true;
 
-      let result = filterResults[0];
+      let result = filterResults[0].result;
       for (let i = 1; i < filterResults.length; i++) {
-        const operator = filters[i - 1].operator;
+        const operator = filterResults[i - 1].operator;
         if (operator === "AND") {
-          result = result && filterResults[i];
+          result = result && filterResults[i].result;
         } else {
-          result = result || filterResults[i];
+          result = result || filterResults[i].result;
         }
       }
 
@@ -1421,18 +1424,17 @@ async function executeFilterNode(
     // Filter rows that DON'T match (inverse of the match filter)
     const elseRows = rows.filter((row) => {
       // Evaluate each filter
-      const filterResults: boolean[] = [];
+      const filterResults: EvaluatedFilterResult[] = [];
 
       for (const filter of filters) {
-        if (!filter.column || !filter.value.trim()) {
-          filterResults.push(true);
+        if (!filter.column || (!filter.value.trim() && !filter.flowOptionResolvedEmpty)) {
           continue;
         }
 
         // Find the cell with matching column name
         const cell = row.find((c) => c.name === filter.column);
         if (!cell) {
-          filterResults.push(true); // Column not found, skip filter
+          filterResults.push({ result: true, operator: filter.operator }); // Column not found, skip filter
           continue;
         }
 
@@ -1440,26 +1442,28 @@ async function executeFilterNode(
         const filterValue = filter.value;
 
         // All modes support newline-separated any-of lists; regex treats each line as a pattern.
-        let matches = matchesFilterValue(String(cellValue), filterValue, regexCache, filter.matchMode);
+        let matches = filter.flowOptionResolvedEmpty
+          ? false
+          : matchesFilterValue(String(cellValue), filterValue, regexCache, filter.matchMode);
 
         // Apply NOT if specified
         if (filter.not) {
           matches = !matches;
         }
 
-        filterResults.push(matches);
+        filterResults.push({ result: matches, operator: filter.operator });
       }
 
       // Combine filter results based on operators
       if (filterResults.length === 0) return false; // No match = goes to else
 
-      let result = filterResults[0];
+      let result = filterResults[0].result;
       for (let i = 1; i < filterResults.length; i++) {
-        const operator = filters[i - 1].operator;
+        const operator = filterResults[i - 1].operator;
         if (operator === "AND") {
-          result = result && filterResults[i];
+          result = result && filterResults[i].result;
         } else {
-          result = result || filterResults[i];
+          result = result || filterResults[i].result;
         }
       }
 
