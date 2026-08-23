@@ -268,6 +268,27 @@ const getDisplayColumnHeader = (headerName: string): string => {
   return COLUMN_HEADER_DISPLAY_NAMES[headerName] ?? headerName;
 };
 
+const getColumnHeaderTooltip = (tableName: string, field: DBVersion["fields"][number], headerName: string): string => {
+  const referencingTables = [
+    ...new Set(
+      (dataFromBackend.DBFieldsReferencedBy?.[tableName]?.[field.name] ?? [])
+        .map(([referencingTable]) => referencingTable)
+        .filter(Boolean),
+    ),
+  ];
+
+  if (referencingTables.length > 0) {
+    return `${headerName}\nReferenced by tables:\n${referencingTables.join("\n")}`;
+  }
+
+  const referencedTable = field.is_reference?.[0];
+  if (referencedTable) {
+    return `${headerName}\nReferences table:\n${referencedTable}`;
+  }
+
+  return headerName;
+};
+
 /**
  * What the header alone needs, with no floor of its own.
  *
@@ -649,6 +670,7 @@ const AgGridWrapper = memo(
     otherOpenPacks,
     showDialog,
     sourcePackPath,
+    tableName,
     keyColumnNamesUnderscore,
     currentSchema,
     isBigTable,
@@ -669,6 +691,7 @@ const AgGridWrapper = memo(
     otherOpenPacks?: ViewerPackTarget[];
     showDialog: ShowViewerDialog;
     sourcePackPath: string;
+    tableName: string;
     keyColumnNamesUnderscore: string[];
     currentSchema: DBVersion;
     isBigTable: boolean;
@@ -1009,7 +1032,7 @@ const AgGridWrapper = memo(
         const columnDefaultValue = columnDefaultValues[colIndex];
         defs.push({
           headerName,
-          headerTooltip: fullHeaderName,
+          headerTooltip: getColumnHeaderTooltip(tableName, field, fullHeaderName),
           hide: hiddenColumnIndexes.has(colIndex),
           // Beside the row number, so a row keeps its name however far right the table is scrolled.
           //
@@ -1068,6 +1091,7 @@ const AgGridWrapper = memo(
       firstKeyColumnIndex,
       hiddenColumnIndexes,
       pinFirstKeyColumn,
+      tableName,
     ]);
 
     const [menuState, setMenuState] = useState<
@@ -2051,6 +2075,7 @@ const PackTablesTableView = memo(({ showDialog, otherOpenPacks, onCopyInto }: Pa
           otherOpenPacks={otherOpenPacks}
           showDialog={showDialog}
           sourcePackPath={packPath}
+          tableName={currentDBTableSelection.dbName}
           keyColumnNamesUnderscore={keyColumnNamesUnderscore}
           currentSchema={currentSchema}
           isBigTable={isBigTable}
