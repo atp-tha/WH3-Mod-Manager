@@ -158,6 +158,11 @@ declare global {
     unsavedFileData: PackedFile[];
   }
 
+  interface SetDeletedPackFilePathsPayload {
+    packPath: string;
+    deletedFilePaths: string[];
+  }
+
   interface AppState {
     categories: string[];
     categoryColors: Record<string, string>;
@@ -219,6 +224,7 @@ declare global {
     workshopUpdateCheckResults: Record<string, WorkshopUpdateCheckItem>;
     packsData: Record<string, PackViewData>;
     unsavedPacksData: Record<string, PackedFile[]>;
+    deletedPackFilePaths: Record<string, string[]>;
     packCollisions: PackCollisions;
     packCollisionsCheckProgress: PackCollisionsCheckProgressData;
     dataFromConfig?: ConfigForRenderer;
@@ -498,6 +504,7 @@ declare global {
   type PackImportItem = import("./utility/packImportPlan").PackImportItem;
   type PackImportPlan = import("./utility/packImportPlan").PackImportPlan;
   type PackImportPlanError = import("./utility/packImportPlan").PackImportPlanError;
+  type PackFileRenameEntry = import("./utility/packFileRenamePlan").PackFileRenameEntry;
 
   interface PackImportApplyResult {
     success: boolean;

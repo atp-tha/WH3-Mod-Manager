@@ -1002,6 +1002,7 @@ const appSlice = createSlice({
       const packPath = action.payload;
       delete state.packsData[packPath];
       delete state.unsavedPacksData[packPath];
+      delete state.deletedPackFilePaths[packPath];
       if (state.currentDBTableSelection?.packPath === packPath) state.currentDBTableSelection = undefined;
       if (state.currentFlowFilePackPath === packPath) {
         state.currentFlowFileSelection = undefined;
@@ -1021,6 +1022,11 @@ const appSlice = createSlice({
         window.location.pathname,
         unsavedFileData.map((pd) => pd.name),
       );
+    },
+    setDeletedPackFilePaths: (state: AppState, action: PayloadAction<SetDeletedPackFilePathsPayload>) => {
+      const { packPath, deletedFilePaths } = action.payload;
+      if (deletedFilePaths.length === 0) delete state.deletedPackFilePaths[packPath];
+      else state.deletedPackFilePaths[packPath] = deletedFilePaths;
     },
     setPacksDataRead: (state: AppState, action: PayloadAction<string[]>) => {
       const packPaths = action.payload;
@@ -1821,6 +1827,7 @@ export const {
   setPacksData,
   removePackData,
   setUnsavedPacksData,
+  setDeletedPackFilePaths,
   setPacksDataRead,
   setPackCollisions,
   setPackCollisionsCheckProgress,

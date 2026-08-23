@@ -12,12 +12,14 @@ import {
 } from "./utility/packFileHelpers";
 import { planSaveAs } from "./utility/saveAsPlan";
 import {
+  hasParentSegment,
   normalizePackFilePath,
   normalizePackFilePathKey,
   planPackImport,
   type PackImportItem,
   type PackImportSource,
 } from "./utility/packImportPlan";
+import type { PackFileRenameEntry } from "./utility/packFileRenamePlan";
 import { resolveExportOutputPath } from "./utility/exportPaths";
 import { buildRpfmTsvContent, getRpfmTsvExportPath } from "./utility/rpfmTsv";
 import { buildImportedPackedFile } from "./utility/packImportStaging";
@@ -1365,6 +1367,101 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
   const log = (msg: string) => {
     mainWindow?.webContents.send("handleLog", msg);
     console.log(msg);
+  };
+  const packPathKey = (packPath: string) =>
+    packPath.startsWith("memory://") ? packPath.toLowerCase() : nodePath.resolve(packPath).toLowerCase();
+  const findPackByPath = (packPath: string) =>
+    appData.packsData.find((pack) => pack.path === packPath || packPathKey(pack.path) === packPathKey(packPath));
+  const broadcastPackStagingState = (packPath: string) => {
+    const unsavedFiles = appData.unsavedPacksData[packPath] ?? [];
+    const deletedFilePaths = appData.deletedPackFilePaths[packPath] ?? [];
+    mainWindow?.webContents.send("setUnsavedPacksData", packPath, unsavedFiles);
+    mainWindow?.webContents.send("setDeletedPackFilePaths", packPath, deletedFilePaths);
+    windows.viewerWindow?.webContents.send("setUnsavedPacksData", packPath, unsavedFiles);
+    windows.viewerWindow?.webContents.send("setDeletedPackFilePaths", packPath, deletedFilePaths);
+  };
+  const materializePackedFileForStaging = async (
+    sourcePackPath: string,
+    filePath: string,
+    destinationFilePath: string,
+  ): Promise<PackedFile> => {
+    const normalizedFilePath = normalizePackFilePath(filePath);
+    const normalizedDestinationFilePath = normalizePackFilePath(destinationFilePath);
+    const isDBFile = parseDBTablePath(normalizedFilePath) != undefined;
+    const sourceUnsavedFiles = appData.unsavedPacksData[sourcePackPath] || [];
+    let sourcePackedFile = findPackedFileInList(sourceUnsavedFiles, normalizedFilePath);
+    const sourcePack = findPackByPath(sourcePackPath);
+    if (!sourcePackedFile && sourcePack) {
+      sourcePackedFile = findPackedFileInList(sourcePack.packedFiles, normalizedFilePath);
+    }
+
+    const makeViewerReadyDBFile = (
+      packedFile: PackedFile | undefined,
+      allowEmptyParsed = false,
+    ): PackedFile | undefined => {
+      if (!isDBFile || !packedFile) return packedFile;
+      return preparePackedFileForViewer(
+        sourcePack ?? { name: nodePath.basename(sourcePackPath), path: sourcePackPath },
+        packedFile,
+        allowEmptyParsed,
+      );
+    };
+
+    sourcePackedFile = makeViewerReadyDBFile(sourcePackedFile);
+
+    let sourceBuffer = sourcePackedFile?.buffer;
+    if (!sourceBuffer && sourcePackedFile?.text != null) sourceBuffer = Buffer.from(sourcePackedFile.text, "utf8");
+    if (!sourceBuffer && sourcePackedFile?.schemaFields && sourcePackedFile.tableSchema) {
+      sourceBuffer = serializePackFileDataToBuffer({
+        name: sourcePackedFile.name,
+        schemaFields: sourcePackedFile.schemaFields,
+        tableSchema: sourcePackedFile.tableSchema,
+        version: sourcePackedFile.version,
+      });
+    }
+
+    if (!sourceBuffer || (isDBFile && (!sourcePackedFile?.schemaFields || !sourcePackedFile.tableSchema))) {
+      if (sourcePackPath.startsWith("memory://")) {
+        throw new Error(`The source file "${normalizedFilePath}" has no saved payload`);
+      }
+
+      const sourceRead = await readPack(
+        sourcePackPath,
+        isDBFile
+          ? {
+              tablesToRead: [normalizedFilePath],
+              filesToRead: [normalizedFilePath],
+              readLocs: isLocPackedFilePath(normalizedFilePath),
+            }
+          : { skipParsingTables: true, filesToRead: [normalizedFilePath] },
+      );
+      sourcePackedFile = findPackedFileInList(sourceRead.packedFiles, normalizedFilePath);
+      sourcePackedFile = makeViewerReadyDBFile(sourcePackedFile, true);
+      sourceBuffer = sourcePackedFile?.buffer;
+    }
+
+    if (!sourcePackedFile || !sourceBuffer) {
+      throw new Error(`Could not read "${normalizedFilePath}" from the source pack`);
+    }
+    if (isDBFile && (!sourcePackedFile.schemaFields || !sourcePackedFile.tableSchema)) {
+      throw new Error(`Could not prepare DB table "${normalizedFilePath}" for the viewer`);
+    }
+
+    const copiedFile: PackedFile = {
+      ...sourcePackedFile,
+      name: normalizedDestinationFilePath,
+      file_size: sourceBuffer.length,
+      start_pos: -1,
+      is_compressed: false,
+      buffer: sourceBuffer,
+    };
+    if (
+      getPackedFileViewerKind(normalizedDestinationFilePath) === "text" ||
+      normalizedDestinationFilePath.toLowerCase().startsWith("whmmflows\\")
+    ) {
+      copiedFile.text = decodePackedFileText(copiedFile);
+    }
+    return copiedFile;
   };
   const tempModDatas: ModData[] = [];
   const sendModData = debounce(() => {
@@ -6185,6 +6282,190 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
     },
   );
   ipcMain.handle(
+    "deletePackedFiles",
+    async (
+      _event,
+      packPath: string,
+      filePaths: string[],
+    ): Promise<{ success: boolean; removedPaths?: string[]; error?: string }> => {
+      try {
+        if (!packPath || !Array.isArray(filePaths)) {
+          return { success: false, error: "A pack and file path list are required" };
+        }
+
+        const requestedKeys = new Set(filePaths.map(normalizePackFilePathKey).filter(Boolean));
+        let unsavedFiles = appData.unsavedPacksData[packPath] ?? [];
+        const removedPaths: string[] = [];
+        const removedKeys = new Set<string>();
+        const addRemovedPath = (path: string) => {
+          const key = normalizePackFilePathKey(path);
+          if (!key || removedKeys.has(key)) return;
+          removedKeys.add(key);
+          removedPaths.push(path);
+        };
+
+        unsavedFiles = unsavedFiles.filter((packedFile) => {
+          if (!requestedKeys.has(normalizePackFilePathKey(packedFile.name))) return true;
+          addRemovedPath(packedFile.name);
+          return false;
+        });
+        if (unsavedFiles.length > 0) appData.unsavedPacksData[packPath] = unsavedFiles;
+        else delete appData.unsavedPacksData[packPath];
+
+        let indexedPack = findPackByPath(packPath);
+        if (!indexedPack && !packPath.startsWith("memory://")) {
+          try {
+            indexedPack = await readPack(packPath, { skipParsingTables: true });
+          } catch {
+            // A missing index is reported through the paths that could actually be staged. The
+            // viewer will surface a failed save if the pack itself is no longer readable.
+          }
+        }
+        const deletedFilePaths = [...(appData.deletedPackFilePaths[packPath] ?? [])];
+        const deletedKeys = new Set(deletedFilePaths.map(normalizePackFilePathKey));
+        for (const packedFile of indexedPack?.packedFiles ?? []) {
+          const key = normalizePackFilePathKey(packedFile.name);
+          if (!requestedKeys.has(key) || deletedKeys.has(key)) continue;
+          deletedFilePaths.push(packedFile.name);
+          deletedKeys.add(key);
+          addRemovedPath(packedFile.name);
+        }
+        if (deletedFilePaths.length > 0) appData.deletedPackFilePaths[packPath] = deletedFilePaths;
+        else delete appData.deletedPackFilePaths[packPath];
+
+        broadcastPackStagingState(packPath);
+        return { success: true, removedPaths };
+      } catch (error) {
+        console.error("Error deleting packed files:", error);
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : "Failed to delete packed files",
+        };
+      }
+    },
+  );
+  ipcMain.handle(
+    "renamePackedFilesInPack",
+    async (
+      _event,
+      packPath: string,
+      entries: PackFileRenameEntry[],
+    ): Promise<{ success: boolean; removedPaths?: string[]; error?: string }> => {
+      try {
+        if (!packPath || !Array.isArray(entries) || entries.length === 0) {
+          return { success: false, error: "A pack and at least one rename entry are required" };
+        }
+
+        const existingUnsavedFiles = appData.unsavedPacksData[packPath] ?? [];
+        let indexedPack = findPackByPath(packPath);
+        if (!indexedPack && !packPath.startsWith("memory://")) {
+          try {
+            indexedPack = await readPack(packPath, { skipParsingTables: true });
+          } catch {
+            // Materialization below will provide the useful per-file read error.
+          }
+        }
+        const deletedKeys = new Set((appData.deletedPackFilePaths[packPath] ?? []).map(normalizePackFilePathKey));
+        const packFilesByKey = new Map(
+          (indexedPack?.packedFiles ?? [])
+            .filter((packedFile) => !deletedKeys.has(normalizePackFilePathKey(packedFile.name)))
+            .map((packedFile) => [normalizePackFilePathKey(packedFile.name), packedFile] as const),
+        );
+        const unsavedFilesByKey = new Map(
+          existingUnsavedFiles.map((packedFile) => [normalizePackFilePathKey(packedFile.name), packedFile] as const),
+        );
+        const sourceKeys = new Set<string>();
+        const destinationKeys = new Set<string>();
+        for (const entry of entries) {
+          const originalPath = normalizePackFilePath(entry.originalPath);
+          const newPath = normalizePackFilePath(entry.newPath);
+          const originalKey = normalizePackFilePathKey(originalPath);
+          const destinationKey = normalizePackFilePathKey(newPath);
+          if (!originalPath || !newPath || hasParentSegment(newPath)) {
+            return { success: false, error: `Invalid rename path: ${entry.originalPath} → ${entry.newPath}` };
+          }
+          if (sourceKeys.has(originalKey)) {
+            return { success: false, error: `The source file is listed more than once: ${originalPath}` };
+          }
+          if (destinationKeys.has(destinationKey)) {
+            return { success: false, error: `Multiple files would be written to ${newPath}` };
+          }
+          if (!unsavedFilesByKey.has(originalKey) && !packFilesByKey.has(originalKey)) {
+            return { success: false, error: `Could not find "${originalPath}" in the pack` };
+          }
+          if (!sourceKeys.has(destinationKey)) {
+            const existingPackFile = packFilesByKey.get(destinationKey);
+            const existingUnsavedFile = unsavedFilesByKey.get(destinationKey);
+            if (
+              (existingPackFile && !sourceKeys.has(destinationKey)) ||
+              (existingUnsavedFile && !sourceKeys.has(destinationKey))
+            ) {
+              // A destination occupied by another selected source is allowed: that source is
+              // removed in the same operation. All other destinations are protected from overwrite.
+              const isAnotherSource = entries.some(
+                (candidate) => normalizePackFilePathKey(candidate.originalPath) === destinationKey,
+              );
+              if (!isAnotherSource) return { success: false, error: `The destination already exists: ${newPath}` };
+            }
+          }
+          sourceKeys.add(originalKey);
+          destinationKeys.add(destinationKey);
+        }
+
+        // Read every source before changing the staged lists. This preserves a selection such as
+        // a→b, b→c instead of making the second read observe the first staged destination.
+        const materializedFiles = await Promise.all(
+          entries.map((entry) => materializePackedFileForStaging(packPath, entry.originalPath, entry.newPath)),
+        );
+
+        let unsavedFiles = existingUnsavedFiles.filter(
+          (packedFile) => !sourceKeys.has(normalizePackFilePathKey(packedFile.name)),
+        );
+        const deletedFilePaths = [...(appData.deletedPackFilePaths[packPath] ?? [])];
+        const deletedPathKeys = new Set(deletedFilePaths.map(normalizePackFilePathKey));
+        const removedPaths: string[] = [];
+        const removedPathKeys = new Set<string>();
+        const addRemovedPath = (path: string) => {
+          const key = normalizePackFilePathKey(path);
+          if (!key || removedPathKeys.has(key)) return;
+          removedPathKeys.add(key);
+          removedPaths.push(path);
+        };
+
+        for (const entry of entries) {
+          const originalKey = normalizePackFilePathKey(entry.originalPath);
+          const indexedSource = packFilesByKey.get(originalKey);
+          if (indexedSource && !deletedPathKeys.has(originalKey)) {
+            deletedFilePaths.push(indexedSource.name);
+            deletedPathKeys.add(originalKey);
+          }
+          addRemovedPath(unsavedFilesByKey.get(originalKey)?.name ?? indexedSource?.name ?? entry.originalPath);
+        }
+
+        for (const materializedFile of materializedFiles) {
+          const destinationKey = normalizePackFilePathKey(materializedFile.name);
+          unsavedFiles = unsavedFiles.filter(
+            (packedFile) => normalizePackFilePathKey(packedFile.name) !== destinationKey,
+          );
+          unsavedFiles.push(materializedFile);
+        }
+
+        if (unsavedFiles.length > 0) appData.unsavedPacksData[packPath] = unsavedFiles;
+        else delete appData.unsavedPacksData[packPath];
+        if (deletedFilePaths.length > 0) appData.deletedPackFilePaths[packPath] = deletedFilePaths;
+        else delete appData.deletedPackFilePaths[packPath];
+        broadcastPackStagingState(packPath);
+        return { success: true, removedPaths };
+      } catch (error) {
+        console.error("Error renaming packed files in pack:", error);
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : "Failed to rename packed files",
+        };
+      }
+    },
+  );
+  ipcMain.handle(
     "executeNode",
     async (
       event,
@@ -6290,8 +6571,7 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
       } else {
         unsavedFiles.push(newFile);
       }
-      mainWindow?.webContents.send("setUnsavedPacksData", packPath, unsavedFiles);
-      windows.viewerWindow?.webContents.send("setUnsavedPacksData", packPath, unsavedFiles);
+      broadcastPackStagingState(packPath);
       return { success: true, filePath: flowName };
     } catch (error) {
       console.error("Error saving node flow:", error);
@@ -6336,8 +6616,7 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
         unsavedFiles.push(nextUnsavedFile);
       }
 
-      mainWindow?.webContents.send("setUnsavedPacksData", packPath, unsavedFiles);
-      windows.viewerWindow?.webContents.send("setUnsavedPacksData", packPath, unsavedFiles);
+      broadcastPackStagingState(packPath);
 
       return { success: true };
     } catch (error) {
@@ -6372,8 +6651,7 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
         unsavedFiles.push(nextUnsavedFile);
       }
 
-      mainWindow?.webContents.send("setUnsavedPacksData", packPath, unsavedFiles);
-      windows.viewerWindow?.webContents.send("setUnsavedPacksData", packPath, unsavedFiles);
+      broadcastPackStagingState(packPath);
 
       return { success: true };
     } catch (error) {
@@ -6410,8 +6688,9 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
           error: "Memory packs must use 'Save As' to specify a save location",
         };
       }
-      const unsavedFiles = appData.unsavedPacksData[packPath];
-      if (!unsavedFiles || unsavedFiles.length === 0) {
+      const unsavedFiles = appData.unsavedPacksData[packPath] ?? [];
+      const deletedPaths = appData.deletedPackFilePaths[packPath] ?? [];
+      if (unsavedFiles.length === 0 && deletedPaths.length === 0) {
         return {
           success: false,
           error: "No unsaved files found for this pack",
@@ -6437,7 +6716,7 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
       let replacedOriginal = true;
       try {
         // Write the pack with unsaved files appended/overwritten
-        await writePack(sortedFilesToSave, savePath, pack, true);
+        await writePack(sortedFilesToSave, savePath, pack, true, [], deletedPaths);
         console.log(`Pack saved to: ${savePath}`);
       } catch (error) {
         // If we can't overwrite (file in use/locked), save as _modified instead
@@ -6447,7 +6726,7 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
           const packName = nodePath.basename(packPath, ".pack");
           savePath = nodePath.join(packDir, `${packName}_modified.pack`);
           replacedOriginal = false;
-          await writePack(sortedFilesToSave, savePath, pack, true);
+          await writePack(sortedFilesToSave, savePath, pack, true, [], deletedPaths);
           console.log(`Pack saved to: ${savePath}`);
         } else {
           throw error;
@@ -6458,7 +6737,8 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
       }
       // Clear unsaved files for this pack
       delete appData.unsavedPacksData[packPath];
-      windows.viewerWindow?.webContents.send("setUnsavedPacksData", packPath, []);
+      delete appData.deletedPackFilePaths[packPath];
+      broadcastPackStagingState(packPath);
       return {
         success: true,
         savedPath: savePath,
@@ -6481,12 +6761,13 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
         console.log("savePackAsWithUnsavedFiles:", packPath, newPackName, newPackDirectory);
         // No unsaved files is not an error: Save As on an untouched pack means "save a copy of it".
         const unsavedFiles = appData.unsavedPacksData[packPath] ?? [];
+        const deletedPaths = appData.deletedPackFilePaths[packPath] ?? [];
         const isMemoryPack = packPath.startsWith("memory://");
         // Create new pack path with user-provided name and directory
         const savePath = nodePath.join(newPackDirectory, `${newPackName}.pack`);
         const plan = planSaveAs({
           isMemoryPack,
-          unsavedFileCount: unsavedFiles.length,
+          unsavedFileCount: unsavedFiles.length + deletedPaths.length,
           targetExists: fsExtra.existsSync(savePath),
           targetIsSourcePack: !isMemoryPack && nodePath.resolve(savePath) === nodePath.resolve(packPath),
           overwriteExisting: !!overwriteExisting,
@@ -6540,13 +6821,14 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
           return firstPf.name.localeCompare(secondPf.name);
         });
         // Write the pack with unsaved files appended/overwritten (as done in DBClone.ts)
-        await writePack(sortedFilesToSave, savePath, pack, useFastAppendMode);
+        await writePack(sortedFilesToSave, savePath, pack, useFastAppendMode, [], deletedPaths);
         console.log(`Pack saved to: ${savePath}`);
         // Whatever was read from the pack we just wrote over describes the old file now.
         if (overwriteExisting) await invalidateCachedPackData(savePath);
         // Clear unsaved files for this pack
         delete appData.unsavedPacksData[packPath];
-        windows.viewerWindow?.webContents.send("setUnsavedPacksData", packPath, []);
+        delete appData.deletedPackFilePaths[packPath];
+        broadcastPackStagingState(packPath);
         return { success: true, savedPath: savePath };
       } catch (error) {
         console.error("Error saving pack as with unsaved files:", error);
@@ -7118,93 +7400,12 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
           };
         }
 
-        const isDBFile = parseDBTablePath(normalizedFilePath) != undefined;
-        const sourceUnsavedFiles = appData.unsavedPacksData[sourcePackPath] || [];
-        let sourcePackedFile = findPackedFileInList(sourceUnsavedFiles, normalizedFilePath);
-        const sourcePack = appData.packsData.find(
-          (pack) => pack.path === sourcePackPath || packPathKey(pack.path) === packPathKey(sourcePackPath),
+        const copiedFile = await materializePackedFileForStaging(
+          sourcePackPath,
+          normalizedFilePath,
+          destinationFilePath || normalizedFilePath,
         );
-        if (!sourcePackedFile && sourcePack) {
-          sourcePackedFile = findPackedFileInList(sourcePack.packedFiles, normalizedFilePath);
-        }
-
-        // The pack index stores only DB file descriptors, while the viewer needs the amended fields
-        // and schema that getPackViewData normally adds before sending a table to the renderer. A
-        // table copied straight from an index-only source would otherwise be listed in the
-        // destination tree but have nothing for PackTablesTableView to render.
-        const makeViewerReadyDBFile = (
-          packedFile: PackedFile | undefined,
-          allowEmptyParsed = false,
-        ): PackedFile | undefined => {
-          if (!isDBFile || !packedFile) return packedFile;
-          return preparePackedFileForViewer(
-            sourcePack ?? { name: nodePath.basename(sourcePackPath), path: sourcePackPath },
-            packedFile,
-            allowEmptyParsed,
-          );
-        };
-
-        sourcePackedFile = makeViewerReadyDBFile(sourcePackedFile);
-
-        let sourceBuffer = sourcePackedFile?.buffer;
-        if (!sourceBuffer && sourcePackedFile?.text != null) {
-          sourceBuffer = Buffer.from(sourcePackedFile.text, "utf8");
-        }
-        // Parsed DB files carry their current edited row data even when the raw payload was not
-        // retained. Serializing that view preserves edits made in the source pack.
-        if (!sourceBuffer && sourcePackedFile?.schemaFields && sourcePackedFile.tableSchema) {
-          sourceBuffer = serializePackFileDataToBuffer({
-            name: sourcePackedFile.name,
-            schemaFields: sourcePackedFile.schemaFields,
-            tableSchema: sourcePackedFile.tableSchema,
-            version: sourcePackedFile.version,
-          });
-        }
-
-        if (!sourceBuffer || (isDBFile && (!sourcePackedFile?.schemaFields || !sourcePackedFile.tableSchema))) {
-          if (sourcePackPath.startsWith("memory://")) {
-            return { success: false, error: `The source file "${normalizedFilePath}" has no saved payload` };
-          }
-
-          const sourceRead = await readPack(
-            sourcePackPath,
-            isDBFile
-              ? {
-                  tablesToRead: [normalizedFilePath],
-                  filesToRead: [normalizedFilePath],
-                  readLocs: isLocPackedFilePath(normalizedFilePath),
-                }
-              : { skipParsingTables: true, filesToRead: [normalizedFilePath] },
-          );
-          sourcePackedFile = findPackedFileInList(sourceRead.packedFiles, normalizedFilePath);
-          sourcePackedFile = makeViewerReadyDBFile(sourcePackedFile, true);
-          sourceBuffer = sourcePackedFile?.buffer;
-        }
-
-        if (!sourcePackedFile || !sourceBuffer) {
-          return { success: false, error: `Could not read "${normalizedFilePath}" from the source pack` };
-        }
-        if (isDBFile && (!sourcePackedFile.schemaFields || !sourcePackedFile.tableSchema)) {
-          return { success: false, error: `Could not prepare DB table "${normalizedFilePath}" for the viewer` };
-        }
-
-        const copiedFileName = normalizePackFilePath(
-          destinationFilePath || sourcePackedFile.name || normalizedFilePath,
-        );
-        const copiedFile: PackedFile = {
-          ...sourcePackedFile,
-          name: copiedFileName,
-          file_size: sourceBuffer.length,
-          start_pos: -1,
-          is_compressed: false,
-          buffer: sourceBuffer,
-        };
-        if (
-          getPackedFileViewerKind(copiedFileName) === "text" ||
-          copiedFileName.toLowerCase().startsWith("whmmflows\\")
-        ) {
-          copiedFile.text = decodePackedFileText(copiedFile);
-        }
+        const copiedFileName = copiedFile.name;
 
         const existingTargetIndex = targetUnsavedFiles.findIndex(
           (targetFile) => normalizePackFilePathKey(targetFile.name) === normalizePackFilePathKey(copiedFileName),
@@ -7215,8 +7416,7 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
           targetUnsavedFiles.push(copiedFile);
         }
         appData.unsavedPacksData[targetPackPath] = targetUnsavedFiles;
-        mainWindow?.webContents.send("setUnsavedPacksData", targetPackPath, targetUnsavedFiles);
-        windows.viewerWindow?.webContents.send("setUnsavedPacksData", targetPackPath, targetUnsavedFiles);
+        broadcastPackStagingState(targetPackPath);
 
         return { success: true, targetPackPath, filePath: copiedFileName };
       } catch (error) {
@@ -7636,8 +7836,15 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
         const targetExists = fsExtra.existsSync(normalizedPackPath);
         const existingPack = targetExists ? await readPack(normalizedPackPath, { skipParsingTables: true }) : undefined;
         const unsavedFiles = appData.unsavedPacksData[normalizedPackPath] || [];
+        const deletedPaths = appData.deletedPackFilePaths[normalizedPackPath] ?? [];
+        const deletedKeys = new Set(deletedPaths.map(normalizePackFilePathKey));
         const existingFlowName = findExistingPackedFlowName(
-          [...(existingPack?.packedFiles || []), ...unsavedFiles].map((file) => file.name),
+          [
+            ...(existingPack?.packedFiles || []).filter(
+              (file) => !deletedKeys.has(normalizePackFilePathKey(file.name)),
+            ),
+            ...unsavedFiles,
+          ].map((file) => file.name),
           normalizedFlowName,
         );
         if (existingFlowName && !overwriteExisting) {
@@ -7657,6 +7864,8 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
           normalizedPackPath,
           existingPack,
           !!existingPack,
+          [],
+          deletedPaths,
         );
         await invalidateCachedPackData(normalizedPackPath);
 
@@ -7669,9 +7878,9 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
           } else {
             delete appData.unsavedPacksData[normalizedPackPath];
           }
-          mainWindow?.webContents.send("setUnsavedPacksData", normalizedPackPath, remainingUnsavedFiles);
-          windows.viewerWindow?.webContents.send("setUnsavedPacksData", normalizedPackPath, remainingUnsavedFiles);
         }
+        delete appData.deletedPackFilePaths[normalizedPackPath];
+        broadcastPackStagingState(normalizedPackPath);
 
         return {
           success: true,
@@ -10273,6 +10482,7 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
     if (viewerWindow?.webContents && !viewerWindow.webContents.isDestroyed() && appData.isViewerReady) {
       viewerWindow.webContents.send("openModInViewer", modPath);
       viewerWindow.webContents.send("setUnsavedPacksData", modPath, appData.unsavedPacksData[modPath] ?? []);
+      viewerWindow.webContents.send("setDeletedPackFilePaths", modPath, appData.deletedPackFilePaths[modPath] ?? []);
       viewerWindow.focus();
     } else if (viewerWindow) {
       viewerWindow.focus();
@@ -10289,7 +10499,8 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
     }
     // The user confirmed the edits are gone, so main must not keep them and later write them.
     delete appData.unsavedPacksData[packPath];
-    mainWindow?.webContents.send("setUnsavedPacksData", packPath, []);
+    delete appData.deletedPackFilePaths[packPath];
+    broadcastPackStagingState(packPath);
     updateViewerTitle();
   });
   ipcMain.on("setViewerActivePack", (_event, packPath: string) => {
@@ -10617,6 +10828,11 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
       if (!skipReadFor?.has(packPath)) getPackData(packPath);
       windows.viewerWindow?.webContents.send("openModInViewer", packPath);
       windows.viewerWindow?.webContents.send("setUnsavedPacksData", packPath, appData.unsavedPacksData[packPath] ?? []);
+      windows.viewerWindow?.webContents.send(
+        "setDeletedPackFilePaths",
+        packPath,
+        appData.deletedPackFilePaths[packPath] ?? [],
+      );
     }
     updateViewerTitle();
   };
@@ -12194,16 +12410,19 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
     async (event, packPath: string, sources: PackImportSource[], targetFolder: string): Promise<PackImportPlan> => {
       try {
         const unsavedPath = appData.unsavedPacksData[packPath] ?? [];
+        const deletedKeys = new Set((appData.deletedPackFilePaths[packPath] ?? []).map(normalizePackFilePathKey));
         const packPathKey = packPath.replaceAll("/", "\\").toLowerCase();
         const loadedPack = appData.packsData.find(
           (pack) => pack.path === packPath || pack.path.replaceAll("/", "\\").toLowerCase() === packPathKey,
         );
-        let packFilePaths = loadedPack?.packedFiles.map((packedFile) => packedFile.name);
+        let packFilePaths = loadedPack?.packedFiles
+          .filter((packedFile) => !deletedKeys.has(normalizePackFilePathKey(packedFile.name)))
+          .map((packedFile) => packedFile.name);
         if (!packFilePaths && !packPath.startsWith("memory://")) {
           try {
-            packFilePaths = (await readPack(packPath, { skipParsingTables: true })).packedFiles.map(
-              (packedFile) => packedFile.name,
-            );
+            packFilePaths = (await readPack(packPath, { skipParsingTables: true })).packedFiles
+              .filter((packedFile) => !deletedKeys.has(normalizePackFilePathKey(packedFile.name)))
+              .map((packedFile) => packedFile.name);
           } catch {
             packFilePaths = [];
           }
@@ -12278,8 +12497,7 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
         }
 
         appData.unsavedPacksData[packPath] = unsavedFiles;
-        mainWindow?.webContents.send("setUnsavedPacksData", packPath, unsavedFiles);
-        windows.viewerWindow?.webContents.send("setUnsavedPacksData", packPath, unsavedFiles);
+        broadcastPackStagingState(packPath);
         return { success: errors.length === 0, importedCount, errors };
       } catch (error) {
         console.error("Error applying pack import:", error);
@@ -12331,6 +12549,7 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
         }
 
         const unsavedFiles = appData.unsavedPacksData[packPath] ?? [];
+        const deletedKeys = new Set((appData.deletedPackFilePaths[packPath] ?? []).map(normalizePackFilePathKey));
         const packPathKey = packPath.replaceAll("/", "\\").toLowerCase();
         let indexedPack = appData.packsData.find(
           (pack) => pack.path === packPath || pack.path.replaceAll("/", "\\").toLowerCase() === packPathKey,
@@ -12353,12 +12572,14 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
         }
         for (const packedFile of indexedPack?.packedFiles ?? []) {
           const key = normalizePackFilePathKey(packedFile.name);
+          if (deletedKeys.has(key)) continue;
           if (requestedKeys && !requestedKeys.has(key)) continue;
           if (!candidates.has(key)) candidates.set(key, { name: packedFile.name, source: "pack" });
         }
         if (requestedKeys) {
           for (const requestedPath of filePaths) {
             const key = normalizePackFilePathKey(requestedPath);
+            if (deletedKeys.has(key)) continue;
             if (!candidates.has(key))
               candidates.set(key, { name: normalizePackFilePath(requestedPath), source: "pack" });
           }

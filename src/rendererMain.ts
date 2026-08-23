@@ -26,6 +26,7 @@ import {
   setCurrentLanguage,
   setCurrentlyReadingMod,
   setCustomizableMods,
+  setDeletedPackFilePaths,
   setDataModLastChangedLocal,
   setFromConfig,
   setHasConfigBeenRead,
@@ -301,6 +302,15 @@ window.api?.setUnsavedPacksData((event, packPath: string, unsavedFileData) => {
       packPath,
       unsavedFileData: stripUnsavedFileBuffers(unsavedFileData as PackedFile[]),
     } as SetUnsavedPacksDataPayload),
+  );
+});
+
+window.api?.setDeletedPackFilePaths((event, packPath: string, deletedFilePaths: string[]) => {
+  store.dispatch(
+    setDeletedPackFilePaths({
+      packPath,
+      deletedFilePaths,
+    }),
   );
 });
 

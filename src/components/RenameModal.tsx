@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { Modal } from "../flowbite";
 import { useAppSelector } from "../hooks";
 import { useLocalizations } from "../localizationContext";
+import { escapeRegExp } from "../utility/packFileRenamePlan";
 
 interface RenameModalProps {
   show: boolean;
@@ -27,9 +28,6 @@ const replaceBaseFilename = (filePath: string, newBasename: string): string => {
   parts[parts.length - 1] = newBasename;
   return parts.join("\\");
 };
-
-// Helper function to escape special regex characters for literal string matching
-const escapeRegExp = (string: string): string => string.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 const RenameModal: React.FC<RenameModalProps> = ({ show, onClose, mod, mods }) => {
   const [searchRegex, setSearchRegex] = useState("");

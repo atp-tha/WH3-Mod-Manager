@@ -108,6 +108,20 @@ const hasDBSelectionTarget = (selection?: DBTableSelection): selection is DBTabl
 
 const getPackFileName = (packPath: string) => packPath.split(/[\\/]/).pop() ?? packPath;
 
+const getTabPackedFilePath = (tab: ViewerTab): string | undefined => {
+  if (tab.kind === "db" && tab.dbName && tab.dbSubname) {
+    return getDBPackedFilePath({
+      packPath: tab.packPath,
+      dbFolder: tab.dbFolder,
+      dbName: tab.dbName,
+      dbSubname: tab.dbSubname,
+    });
+  }
+  if (tab.kind === "flow") return tab.flowFile;
+  if (tab.kind === "file") return tab.filePath;
+  return undefined;
+};
+
 const getReferenceTargetSelection = (
   request: GoToReferenceRequest,
   targetPackPath: string,
@@ -171,6 +185,7 @@ const ModsViewer = memo(() => {
   const startArgs = useAppSelector((state) => state.app.startArgs);
   const packsDataByPath = useAppSelector((state) => state.app.packsData);
   const unsavedPacksDataByPath = useAppSelector((state) => state.app.unsavedPacksData);
+  const deletedPackFilePathsByPath = useAppSelector((state) => state.app.deletedPackFilePaths);
   const dbPackName = gameToPackWithDBTablesName[currentGame] || "db.pack";
   const selectCurrentPackData = useMemo(makeSelectCurrentPackData, []);
   const selectCurrentPackUnsavedFiles = useMemo(makeSelectCurrentPackUnsavedFiles, []);
@@ -1048,9 +1063,7 @@ const ModsViewer = memo(() => {
           .map((packTab) => ({
             packPath: packTab.packPath,
             label:
-              packsDataByPath[packTab.packPath]?.packName ??
-              getPackNameFromPath(packTab.packPath) ??
-              packTab.packPath,
+              packsDataByPath[packTab.packPath]?.packName ?? getPackNameFromPath(packTab.packPath) ?? packTab.packPath,
           })),
       );
     }
@@ -1058,33 +1071,53 @@ const ModsViewer = memo(() => {
     return targetsBySourcePath;
   }, [packTabs, packsDataByPath]);
 
-  const handleCloseTab = useCallback((tabId: string) => {
-    const targetPackPath = activePackPathRef.current;
-    if (!targetPackPath) return;
-    const targetPackTab = packTabs.find((packTab) => packTab.packPath === targetPackPath);
-    if (targetPackTab?.openTabs.length === 1 && targetPackTab.openTabs[0]?.id === tabId) {
-      suppressDefaultTableOpenForPackPathsRef.current.add(targetPackPath);
-    }
-    // Derived inside the updater so a pack opened over IPC between render and click is not clobbered.
-    setPackTabs((prevPackTabs) =>
-      prevPackTabs.map((packTab) => {
-        if (packTab.packPath !== targetPackPath) return packTab;
-        const tabIndex = packTab.openTabs.findIndex((tab) => tab.id === tabId);
-        if (tabIndex < 0) return packTab;
-        const nextOpenTabs = packTab.openTabs.filter((tab) => tab.id !== tabId);
-        const nextActiveTabId =
-          tabId === packTab.activeTabId
-            ? ((nextOpenTabs[tabIndex - 1] ?? nextOpenTabs[tabIndex])?.id ?? null)
-            : packTab.activeTabId;
-        return { ...packTab, openTabs: nextOpenTabs, activeTabId: nextActiveTabId };
-      }),
-    );
-  }, [packTabs]);
+  const handleCloseTab = useCallback(
+    (tabId: string, packPath = activePackPathRef.current) => {
+      const targetPackPath = packPath;
+      if (!targetPackPath) return;
+      const targetPackTab = packTabs.find((packTab) => packTab.packPath === targetPackPath);
+      if (targetPackTab?.openTabs.length === 1 && targetPackTab.openTabs[0]?.id === tabId) {
+        suppressDefaultTableOpenForPackPathsRef.current.add(targetPackPath);
+      }
+      // Derived inside the updater so a pack opened over IPC between render and click is not clobbered.
+      setPackTabs((prevPackTabs) =>
+        prevPackTabs.map((packTab) => {
+          if (packTab.packPath !== targetPackPath) return packTab;
+          const tabIndex = packTab.openTabs.findIndex((tab) => tab.id === tabId);
+          if (tabIndex < 0) return packTab;
+          const nextOpenTabs = packTab.openTabs.filter((tab) => tab.id !== tabId);
+          const nextActiveTabId =
+            tabId === packTab.activeTabId
+              ? ((nextOpenTabs[tabIndex - 1] ?? nextOpenTabs[tabIndex])?.id ?? null)
+              : packTab.activeTabId;
+          return { ...packTab, openTabs: nextOpenTabs, activeTabId: nextActiveTabId };
+        }),
+      );
+    },
+    [packTabs],
+  );
+
+  const handlePackFilePathsRemoved = useCallback(
+    (packPath: string, removedPaths: string[]) => {
+      const removedKeys = new Set(removedPaths.map((path) => path.replaceAll("/", "\\").toLowerCase()));
+      const affectedTabs =
+        packTabs
+          .find((packTab) => packTab.packPath === packPath)
+          ?.openTabs.filter((tab) => {
+            const packedFilePath = getTabPackedFilePath(tab);
+            return packedFilePath ? removedKeys.has(packedFilePath.replaceAll("/", "\\").toLowerCase()) : false;
+          }) ?? [];
+      for (const tab of affectedTabs) handleCloseTab(tab.id, packPath);
+    },
+    [handleCloseTab, packTabs],
+  );
 
   // With no pack tab open, activeViewerPackPath is only the Redux fallback (the game's db pack), which
   // nobody asked to open - saving it is not on offer.
   const hasActivePackTab = activePackPath != undefined;
-  const hasUnsavedFiles = hasActivePackTab && unsavedFiles.length > 0;
+  const hasUnsavedFiles =
+    hasActivePackTab &&
+    (unsavedFiles.length > 0 || (deletedPackFilePathsByPath[activeViewerPackPath]?.length ?? 0) > 0);
   // Save As works on any pack that exists on disk, changed or not - it saves a copy. A memory pack
   // has no file to copy, so it needs something unsaved in it before there is anything to write.
   const canSavePackAs = hasActivePackTab && (!activeViewerPackPath.startsWith("memory://") || hasUnsavedFiles);
@@ -1506,13 +1539,13 @@ const ModsViewer = memo(() => {
 
   const requestClosePackTab = useCallback(
     (packPath: string) => {
-      if (unsavedPacksDataByPath[packPath]?.length) {
+      if (unsavedPacksDataByPath[packPath]?.length || deletedPackFilePathsByPath[packPath]?.length) {
         setPackCloseConfirmPath(packPath);
         return;
       }
       closePackTab(packPath);
     },
-    [closePackTab, unsavedPacksDataByPath],
+    [closePackTab, deletedPackFilePathsByPath, unsavedPacksDataByPath],
   );
 
   useLayoutEffect(() => {
@@ -1854,10 +1887,13 @@ const ModsViewer = memo(() => {
         <Modal.Header>Close Pack</Modal.Header>
         <Modal.Body>
           <div className="text-sm text-gray-200">
-            This pack has unsaved files. Closing it will discard:
+            This pack has unsaved changes. Closing it will discard:
             <ul className="mt-2 max-h-48 overflow-auto list-disc list-inside text-gray-400 break-all">
               {(packCloseConfirmPath ? (unsavedPacksDataByPath[packCloseConfirmPath] ?? []) : []).map((file) => (
-                <li key={file.name}>{file.name}</li>
+                <li key={`unsaved-${file.name}`}>Unsaved: {file.name}</li>
+              ))}
+              {(packCloseConfirmPath ? (deletedPackFilePathsByPath[packCloseConfirmPath] ?? []) : []).map((path) => (
+                <li key={`deleted-${path}`}>Deleted: {path}</li>
               ))}
             </ul>
           </div>
@@ -1989,7 +2025,9 @@ const ModsViewer = memo(() => {
                     packsDataByPath[packTab.packPath]?.packName ??
                     getPackNameFromPath(packTab.packPath) ??
                     packTab.packPath;
-                  const isDirty = (unsavedPacksDataByPath[packTab.packPath]?.length ?? 0) > 0;
+                  const isDirty =
+                    (unsavedPacksDataByPath[packTab.packPath]?.length ?? 0) > 0 ||
+                    (deletedPackFilePathsByPath[packTab.packPath]?.length ?? 0) > 0;
                   return (
                     <div
                       key={packTab.packPath}
@@ -2114,6 +2152,7 @@ const ModsViewer = memo(() => {
                           otherOpenPacks={otherOpenPacksByPackPath.get(packTab.packPath) ?? EMPTY_PACK_TARGETS}
                           onCopyInto={handleCopyInto}
                           onImportConflicts={setImportConflictRequest}
+                          onPackFilePathsRemoved={handlePackFilePathsRemoved}
                           onOpenDBTable={handleOpenDBTable}
                           onOpenFlowFile={handleOpenFlowFile}
                           onOpenPackedFile={handleOpenPackedFile}

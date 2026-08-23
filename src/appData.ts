@@ -170,6 +170,7 @@ interface AppData {
   hasReadConfig: boolean;
   packsData: Pack[];
   unsavedPacksData: Record<string, PackedFile[]>;
+  deletedPackFilePaths: Record<string, string[]>;
   compatData: PackCollisions;
   vanillaPacks: Pack[];
   allVanillaPackNames: Set<string>;
@@ -237,6 +238,7 @@ const appData = {
   hasReadConfig: false,
   packsData: [],
   unsavedPacksData: {},
+  deletedPackFilePaths: {},
   compatData: {
     packTableCollisions: [],
     packFileCollisions: [],

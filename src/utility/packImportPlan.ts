@@ -60,13 +60,12 @@ const joinPackFilePath = (first: string, second: string) => {
   return `${first.replace(/[\\/]+$/, "")}\\${second.replace(/^[\\/]+/, "")}`;
 };
 
-const hasParentSegment = (value: string) =>
+export const hasParentSegment = (value: string) =>
   normalizePackFilePath(value)
     .split("\\")
     .some((segment) => segment === "..");
 
 const getDiskBasename = (value: string) => nodePath.basename(value.replace(/[\\/]/g, nodePath.sep));
-
 
 const defaultReadFileHead: PackImportReadFileHead = async (filePath) => {
   const handle = await fs.open(filePath, "r");

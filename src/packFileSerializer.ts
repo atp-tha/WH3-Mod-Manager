@@ -28,6 +28,7 @@ import * as fsExtra from "fs-extra";
 import { compareModNames } from "./modSortingHelpers";
 import { getDBName, getDBPackedFilePath, parseDBTablePath, resolveParsedDBVersion } from "./utility/packFileHelpers";
 import { groupPackedFilesIntoReadRuns } from "./utility/packedFileReadRuns";
+import { normalizePackFilePathKey } from "./utility/packImportPlan";
 import type { SerializedNodeGraph } from "./nodeGraph/types";
 import { resolveRadioChoiceId } from "./nodeGraph/types";
 import {
@@ -1834,13 +1835,15 @@ export const writePackAppendFast = async (
   existingPackToAppend?: Pack,
   replaceDuplicates?: boolean,
   dependencyPacks: string[] = [],
+  removedFileNames: string[] = [],
 ) => {
   let outFile: BinaryFile | undefined;
   let sourceFile: BinaryFile | undefined;
   const timestamp = format(new Date(), "ddMMyy_HHmmss");
   const outPath = existingPackToAppend ? `${path}_${timestamp}` : path;
+  const removedKeys = new Set(removedFileNames.map(normalizePackFilePathKey));
   try {
-    if (packFiles.length < 1) return;
+    if (packFiles.length < 1 && removedKeys.size === 0) return;
     ensurePackFilesReadyForWrite(packFiles);
     if (existingPackToAppend) {
       // FAST PATH: Clone existing pack and append new files
@@ -1854,10 +1857,14 @@ export const writePackAppendFast = async (
       outFile = new BinaryFile(outPath, "w", true);
       await outFile.open();
       // Handle duplicate replacement logic
-      const newFileNames = new Set(packFiles.map((pf) => pf.name));
-      const filesToKeep = replaceDuplicates
-        ? existingPackToAppend.packedFiles.filter((pf) => !newFileNames.has(pf.name))
-        : existingPackToAppend.packedFiles;
+      const newKeys = new Set(packFiles.map((pf) => normalizePackFilePathKey(pf.name)));
+      const filesToKeep =
+        replaceDuplicates || removedKeys.size > 0
+          ? existingPackToAppend.packedFiles.filter((pf) => {
+              const key = normalizePackFilePathKey(pf.name);
+              return !newKeys.has(key) && !removedKeys.has(key);
+            })
+          : existingPackToAppend.packedFiles;
       // Calculate new counts and sizes
       const originalFileCount = existingPackToAppend.packedFiles.length;
       const keptFileCount = filesToKeep.length;
@@ -1896,7 +1903,7 @@ export const writePackAppendFast = async (
         `Original files: ${originalFileCount}, Kept files: ${keptFileCount}, Replaced files: ${replacedFileCount}, New files: ${packFiles.length}, Total: ${newFileCount}`,
       );
       // Copy file index entries (selectively if replacing duplicates)
-      if (replaceDuplicates && replacedFileCount > 0) {
+      if (replacedFileCount > 0) {
         console.log("Selectively copying file index entries (excluding duplicates)...");
         // Write index entries for files we're keeping
         const keptIndexAccumulator = new BufferAccumulator(outFile);
@@ -1940,7 +1947,7 @@ export const writePackAppendFast = async (
       }
       await newIndexAccumulator.flush();
       // Copy file data (selectively if replacing duplicates)
-      if (replaceDuplicates && replacedFileCount > 0) {
+      if (replacedFileCount > 0) {
         console.log("Selectively copying file data (excluding duplicates)...");
         // Copy data for files we're keeping
         for (const keptFile of filesToKeep) {
@@ -2117,10 +2124,18 @@ export const writePack = async (
   existingPackToAppend?: Pack,
   replaceDuplicates?: boolean,
   dependencyPacks: string[] = [],
+  removedFileNames: string[] = [],
 ) => {
   // Use fast append implementation when we have an existing pack
   if (existingPackToAppend) {
-    return await writePackAppendFast(packFiles, path, existingPackToAppend, replaceDuplicates, dependencyPacks);
+    return await writePackAppendFast(
+      packFiles,
+      path,
+      existingPackToAppend,
+      replaceDuplicates,
+      dependencyPacks,
+      removedFileNames,
+    );
   }
   // Fallback to sorted implementation for new packs
   return await writePackSorted(packFiles, path, dependencyPacks);

@@ -246,4 +246,63 @@ describe("pack table tree interactions", () => {
     );
     expect(tree).toBeInTheDocument();
   });
+
+  it("offers delete, rename, and move for a selected folder with plural labels", () => {
+    renderPackTree(["scripts\\hello.lua", "scripts\\goodbye.lua"], "files");
+
+    fireEvent.contextMenu(screen.getByText("scripts"));
+
+    expect(screen.getByRole("button", { name: "Delete 2 files", exact: true })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Rename 2 files…", exact: true })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Move 2 files…", exact: true })).toBeInTheDocument();
+  });
+
+  it("expands a DB table group for pack actions", () => {
+    renderPackTree(["db\\units_tables\\first", "db\\units_tables\\second"], "db");
+
+    fireEvent.contextMenu(screen.getByText("units_tables"));
+
+    expect(screen.getByRole("button", { name: "Delete 2 files", exact: true })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Rename 2 files…", exact: true })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Move 2 files…", exact: true })).toBeInTheDocument();
+  });
+
+  it("hides delete, rename, and move for vanilla packs", () => {
+    const packPath = "K:\\data.pack";
+    const store = configureStore({
+      reducer: { app: appReducer },
+      preloadedState: {
+        app: {
+          ...initialState,
+          packsData: {
+            [packPath]: {
+              packName: "data.pack",
+              packPath,
+              tables: ["scripts\\hello.lua"],
+              packedFiles: {},
+            },
+          },
+        },
+      },
+    });
+
+    render(
+      <Provider store={store}>
+        <PackTablesTreeView
+          packPath={packPath}
+          preferredTab="files"
+          tableFilter=""
+          showDialog={vi.fn()}
+          onOpenDBTable={vi.fn()}
+          onOpenFlowFile={vi.fn()}
+          onOpenPackedFile={vi.fn()}
+        />
+      </Provider>,
+    );
+
+    fireEvent.contextMenu(screen.getByText("scripts"));
+    expect(screen.queryByRole("button", { name: /Delete/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Rename/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Move/ })).not.toBeInTheDocument();
+  });
 });

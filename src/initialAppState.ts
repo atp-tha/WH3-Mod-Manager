@@ -45,6 +45,7 @@ const initialState = {
   workshopUpdateCheckResults: {},
   packsData: {},
   unsavedPacksData: {},
+  deletedPackFilePaths: {},
   packCollisions: {
     packTableCollisions: [],
     packFileCollisions: [],

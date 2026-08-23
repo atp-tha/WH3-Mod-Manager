@@ -26,6 +26,7 @@ import type {
 } from "./globalSearch/types";
 import type { EsfMapResponse } from "./esfMap/types";
 import type { PackRowsForSave } from "./utility/packRowsForSave";
+import type { PackFileRenameEntry } from "./utility/packFileRenamePlan";
 
 console.log("IN PRELOAD");
 
@@ -162,6 +163,9 @@ const api = {
   setUnsavedPacksData: (
     callback: (event: Electron.IpcRendererEvent, packPath: string, unsavedFileData: PackedFile[]) => void,
   ) => ipcRenderer.on("setUnsavedPacksData", callback),
+  setDeletedPackFilePaths: (
+    callback: (event: Electron.IpcRendererEvent, packPath: string, deletedFilePaths: string[]) => void,
+  ) => ipcRenderer.on("setDeletedPackFilePaths", callback),
   setSkillsData: (callback: (event: Electron.IpcRendererEvent, skillsData: SkillsData) => void) =>
     ipcRenderer.on("setSkillsData", callback),
   setPackCollisionsCheckProgress: (
@@ -433,6 +437,16 @@ const api = {
     pathFilter?: string,
   ): Promise<void> =>
     ipcRenderer.invoke("renamePackedFiles", packPath, searchRegex, replaceText, useRegex, isDev, pathFilter),
+  deletePackedFiles: (
+    packPath: string,
+    filePaths: string[],
+  ): Promise<{ success: boolean; removedPaths?: string[]; error?: string }> =>
+    ipcRenderer.invoke("deletePackedFiles", packPath, filePaths),
+  renamePackedFilesInPack: (
+    packPath: string,
+    entries: PackFileRenameEntry[],
+  ): Promise<{ success: boolean; removedPaths?: string[]; error?: string }> =>
+    ipcRenderer.invoke("renamePackedFilesInPack", packPath, entries),
 
   executeNode: (nodeExecutionRequest: {
     nodeId: string;

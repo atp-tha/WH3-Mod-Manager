@@ -16,6 +16,7 @@ import {
   setPacksData,
   setReferencesHash,
   setStartArgs,
+  setDeletedPackFilePaths,
   setUnsavedPacksData,
 } from "./appSlice";
 import { DBFieldName, DBFileName, DBVersion, Pack, PackedFile } from "./packFileTypes";
@@ -64,6 +65,15 @@ window.api?.setUnsavedPacksData((event, packPath: string, unsavedFileData: Packe
       packPath,
       unsavedFileData: stripUnsavedFileBuffers(unsavedFileData),
     } as SetUnsavedPacksDataPayload),
+  );
+});
+
+window.api?.setDeletedPackFilePaths((event, packPath: string, deletedFilePaths: string[]) => {
+  store.dispatch(
+    setDeletedPackFilePaths({
+      packPath,
+      deletedFilePaths,
+    }),
   );
 });
 

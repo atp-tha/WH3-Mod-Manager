@@ -1,4 +1,5 @@
 import React, { useEffect, useImperativeHandle, useMemo } from "react";
+import { Modal } from "../../flowbite";
 import { setUnsavedPacksData } from "../../appSlice";
 import { useAppDispatch, useAppSelector } from "../../hooks";
 import { IoMdArrowDropright } from "react-icons/io";
@@ -23,6 +24,11 @@ import { makeSelectCurrentPackData, makeSelectCurrentPackUnsavedFiles } from "./
 import type { AmendedSchemaField, DBVersion, PackedFile } from "../../packFileTypes";
 import { isOpenablePackedFilePath } from "../../utility/packFileViewing";
 import CopyIntoSubmenu from "./CopyIntoSubmenu";
+import PackFileRenameModal from "./PackFileRenameModal";
+import type { ExistingPackFilePaths } from "../../utility/packImportPlan";
+import type { PackFileRenameEntry } from "../../utility/packFileRenamePlan";
+import { clearPackDataStoreForPack } from "./packDataStore";
+import { clearPreparedTableForPackedFile } from "./tablePrepCache";
 
 type PackTablesTreeViewProps = {
   packPath: string;
@@ -32,6 +38,7 @@ type PackTablesTreeViewProps = {
   otherOpenPacks?: ViewerPackTarget[];
   onCopyInto?: (source: CopyIntoSource, targetPackPath: string, openAfterCopy: boolean) => void | Promise<void>;
   onImportConflicts?: (request: PackImportConflictRequest) => void;
+  onPackFilePathsRemoved?: (packPath: string, removedPaths: string[]) => void;
   onOpenDBTable: (selection: DBTableSelection, options?: { forceNewTab?: boolean }) => void;
   onOpenFlowFile: (selection: { flowFile: string; packPath: string }, options?: { forceNewTab?: boolean }) => void;
   onOpenPackedFile: (selection: { filePath: string; packPath: string }, options?: { forceNewTab?: boolean }) => void;
@@ -45,6 +52,8 @@ type TreeContextTarget =
   | { kind: "db"; packPath: string; filePath: string; selection: DBTableSelection }
   | { kind: "file"; packPath: string; filePath: string }
   | { kind: "folder"; packPath: string; folderPath: string };
+
+const EMPTY_DELETED_PACK_FILE_PATHS: string[] = [];
 
 export type ViewerPackTarget = { packPath: string; label: string };
 export type CopyIntoSource = {
@@ -226,6 +235,11 @@ const PackTablesTreeView = React.memo(
     const [isExportingSelection, setIsExportingSelection] = React.useState(false);
     const [isExportingWholePack, setIsExportingWholePack] = React.useState(false);
     const [isImporting, setIsImporting] = React.useState(false);
+    const [deleteConfirm, setDeleteConfirm] = React.useState<string[] | null>(null);
+    const [renameRequest, setRenameRequest] = React.useState<{
+      mode: "rename" | "move";
+      paths: string[];
+    } | null>(null);
 
     useEffect(() => {
       setActiveTreeTab(props.preferredTab);
@@ -242,19 +256,25 @@ const PackTablesTreeView = React.memo(
     const packPath = props.packPath || gameToPackWithDBTablesName[currentGame] || "db.pack";
     const packData = useAppSelector((state) => selectCurrentPackData(state, packPath));
     const unsavedFiles = useAppSelector((state) => selectCurrentPackUnsavedFiles(state, packPath));
+    const deletedPackFilePaths = useAppSelector(
+      (state) => state.app.deletedPackFilePaths[packPath] ?? EMPTY_DELETED_PACK_FILE_PATHS,
+    );
     const isVanillaPackOpen = packData ? vanillaPackNames.includes(packData.packName) : false;
 
     const packFileNames = useMemo(() => {
       if (!packData) return [];
 
+      const deletedKeys = new Set(deletedPackFilePaths.map((path) => path.replaceAll("/", "\\").toLowerCase()));
+      const visiblePackFile = (path: string) => !deletedKeys.has(path.replaceAll("/", "\\").toLowerCase());
+
       return Array.from(
         new Set([
-          ...packData.tables,
-          ...Object.keys(packData.packedFiles || {}),
+          ...packData.tables.filter(visiblePackFile),
+          ...Object.keys(packData.packedFiles || {}).filter(visiblePackFile),
           ...unsavedFiles.map((unsavedFile) => unsavedFile.name),
         ]),
       );
-    }, [packData, unsavedFiles]);
+    }, [deletedPackFilePaths, packData, unsavedFiles]);
 
     const vanillaTableOptions = useMemo<TableOption[]>(
       () =>
@@ -403,7 +423,7 @@ const PackTablesTreeView = React.memo(
       return getNodeFullPath(element, fileNodeById);
     };
 
-    const selectedExportPaths = useMemo(() => {
+    const getContextTargetPaths = () => {
       if (!packData) return [];
 
       const treeTab =
@@ -440,9 +460,57 @@ const PackTablesTreeView = React.memo(
         }
       }
 
-      return [...pathsByKey.values()];
+      const selectedPaths = [...pathsByKey.values()];
+      const clickedPath =
+        contextMenu?.target?.kind === "folder"
+          ? contextMenu.target.folderPath
+          : contextMenu?.target
+            ? contextMenu.target.filePath
+            : undefined;
+      const clickedPathKey = clickedPath?.replaceAll("/", "\\").toLowerCase();
+      const clickedTargetIsSelected =
+        !clickedPathKey ||
+        selectedPaths.some((path) => {
+          const key = path.replaceAll("/", "\\").toLowerCase();
+          return (
+            key === clickedPathKey || (contextMenu?.target?.kind === "folder" && key.startsWith(`${clickedPathKey}\\`))
+          );
+        });
+      const pathsToUse =
+        clickedTargetIsSelected && selectedPaths.length > 0 ? selectedPaths : clickedPath ? [clickedPath] : [];
+      const expandedPaths = new Map<string, string>();
+      for (const path of pathsToUse) {
+        const key = path.replaceAll("/", "\\").toLowerCase();
+        const isClickedFolder = contextMenu?.target?.kind === "folder" && key === clickedPathKey;
+        const descendants = isClickedFolder
+          ? packFileNames.filter((candidate) => {
+              const candidateKey = candidate.replaceAll("/", "\\").toLowerCase();
+              return candidateKey.startsWith(`${key}\\`);
+            })
+          : [];
+        for (const expandedPath of descendants.length > 0 ? descendants : [path]) {
+          const expandedKey = expandedPath.replaceAll("/", "\\").toLowerCase();
+          if (!expandedPaths.has(expandedKey)) expandedPaths.set(expandedKey, expandedPath);
+        }
+      }
+      return [...expandedPaths.values()];
+    };
+
+    const selectedExportPaths = useMemo(
+      () => getContextTargetPaths(),
+      // The selection expansion intentionally follows the context-menu tab and clicked target.
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [contextMenu, dbNodeById, dbSelectedNodeIds, fileNodeById, fileSelectedNodeIds, packData, visibleActiveTreeTab]);
+      [
+        contextMenu,
+        dbNodeById,
+        dbSelectedNodeIds,
+        fileNodeById,
+        fileSelectedNodeIds,
+        packData,
+        packFileNames,
+        visibleActiveTreeTab,
+      ],
+    );
 
     const addIdsToSelection = (
       idsToAdd: Array<string | number>,
@@ -701,6 +769,80 @@ const PackTablesTreeView = React.memo(
       };
       setContextMenu(null);
       void props.onCopyInto(source, targetPackPath, openAfterCopy);
+    };
+
+    const existingPackFilePaths = useMemo<ExistingPackFilePaths>(() => {
+      if (!packData) return { pack: [], unsaved: unsavedFiles.map((file) => file.name) };
+      const deletedKeys = new Set(deletedPackFilePaths.map((path) => path.replaceAll("/", "\\").toLowerCase()));
+      const packPaths = [...packData.tables, ...Object.keys(packData.packedFiles || {})].filter(
+        (path) => !deletedKeys.has(path.replaceAll("/", "\\").toLowerCase()),
+      );
+      return {
+        pack: [...new Set(packPaths)],
+        unsaved: unsavedFiles.map((file) => file.name),
+      };
+    }, [deletedPackFilePaths, packData, unsavedFiles]);
+
+    const clearPackFileCaches = (paths: string[]) => {
+      clearPackDataStoreForPack(packPath);
+      for (const filePath of paths) clearPreparedTableForPackedFile(packPath, filePath);
+    };
+
+    const handleDeleteRequest = () => {
+      if (selectedExportPaths.length === 0 || isVanillaPackOpen) return;
+      setContextMenu(null);
+      setDeleteConfirm(selectedExportPaths);
+    };
+
+    const handleDeleteConfirm = async () => {
+      const paths = deleteConfirm;
+      if (!paths) return;
+      setDeleteConfirm(null);
+      try {
+        const result = await window.api?.deletePackedFiles?.(packPath, paths);
+        if (!result?.success) {
+          props.showDialog(`Failed to delete packed files: ${result?.error || "Unknown error"}`, {
+            title: "Delete Failed",
+          });
+          return;
+        }
+        const removedPaths = result.removedPaths ?? paths;
+        clearPackFileCaches(removedPaths);
+        props.onPackFilePathsRemoved?.(packPath, removedPaths);
+      } catch (error) {
+        console.error("Error deleting packed files:", error);
+        props.showDialog(`Error deleting packed files: ${error instanceof Error ? error.message : "Unknown error"}`, {
+          title: "Delete Failed",
+        });
+      }
+    };
+
+    const handleRenameRequest = (mode: "rename" | "move") => {
+      if (selectedExportPaths.length === 0 || isVanillaPackOpen) return;
+      setContextMenu(null);
+      setRenameRequest({ mode, paths: selectedExportPaths });
+    };
+
+    const handleRenameApply = async (entries: PackFileRenameEntry[]) => {
+      if (!renameRequest) return;
+      try {
+        const result = await window.api?.renamePackedFilesInPack?.(packPath, entries);
+        if (!result?.success) {
+          props.showDialog(`Failed to rename packed files: ${result?.error || "Unknown error"}`, {
+            title: "Rename Failed",
+          });
+          return;
+        }
+        const removedPaths = result.removedPaths ?? entries.map((entry) => entry.originalPath);
+        clearPackFileCaches([...removedPaths, ...entries.map((entry) => entry.newPath)]);
+        props.onPackFilePathsRemoved?.(packPath, removedPaths);
+        setRenameRequest(null);
+      } catch (error) {
+        console.error("Error renaming packed files:", error);
+        props.showDialog(`Error renaming packed files: ${error instanceof Error ? error.message : "Unknown error"}`, {
+          title: "Rename Failed",
+        });
+      }
     };
 
     /**
@@ -1115,7 +1257,13 @@ const PackTablesTreeView = React.memo(
                       folderPath: getNodeFullPath(element, fileNodeById),
                     });
                   } else {
-                    handleContextMenu(e, treeTab);
+                    const groupPath = getNodeFullPath(element, dbNodeById);
+                    const { dbFolder, dbName } = parseDBGroupName(groupPath);
+                    handleContextMenu(e, treeTab, {
+                      kind: "folder",
+                      packPath,
+                      folderPath: `${dbFolder}\\${dbName}`,
+                    });
                   }
                   return;
                 }
@@ -1181,6 +1329,11 @@ const PackTablesTreeView = React.memo(
         (contextMenu.treeTab === "files" && hasFiles && !hasDBTables)),
     );
     const showImportInContext = Boolean(contextMenu && !isVanillaPackOpen);
+    const showPackFileActionsInContext = Boolean(contextMenu && !isVanillaPackOpen && selectedExportPaths.length > 0);
+    const deleteLabel = selectedExportPaths.length === 1 ? "Delete file" : `Delete ${selectedExportPaths.length} files`;
+    const renameLabel =
+      selectedExportPaths.length === 1 ? "Rename file…" : `Rename ${selectedExportPaths.length} files…`;
+    const moveLabel = selectedExportPaths.length === 1 ? "Move file…" : `Move ${selectedExportPaths.length} files…`;
     const importAnchor = contextMenu?.target?.kind === "folder" ? contextMenu.target.folderPath : "";
     const importLabel = (kind: "file" | "folder") =>
       `${kind === "file" ? "Import Files" : "Import Folders"}${importAnchor ? ` into ${importAnchor}` : ""}…`;
@@ -1298,6 +1451,28 @@ const PackTablesTreeView = React.memo(
                 </button>
               </>
             )}
+            {showPackFileActionsInContext && (
+              <>
+                <button
+                  onClick={handleDeleteRequest}
+                  className="w-full text-left px-4 py-2 hover:bg-gray-700 text-white text-sm"
+                >
+                  {deleteLabel}
+                </button>
+                <button
+                  onClick={() => handleRenameRequest("rename")}
+                  className="w-full text-left px-4 py-2 hover:bg-gray-700 text-white text-sm"
+                >
+                  {renameLabel}
+                </button>
+                <button
+                  onClick={() => handleRenameRequest("move")}
+                  className="w-full text-left px-4 py-2 hover:bg-gray-700 text-white text-sm"
+                >
+                  {moveLabel}
+                </button>
+              </>
+            )}
             {selectedExportPaths.length > 0 && (
               <button
                 onClick={() => void handleExportSelection()}
@@ -1316,6 +1491,51 @@ const PackTablesTreeView = React.memo(
             </button>
           </div>
         )}
+
+        <Modal onClose={() => setDeleteConfirm(null)} show={!!deleteConfirm} size="md" position="center">
+          <Modal.Header>Delete packed files</Modal.Header>
+          <Modal.Body>
+            <div className="text-sm text-gray-200">
+              <p>
+                Delete {deleteConfirm?.length ?? 0} file{deleteConfirm?.length === 1 ? "" : "s"} from this pack? The
+                change will be staged until you save.
+              </p>
+              <ul className="mt-3 max-h-48 list-disc space-y-1 overflow-auto pl-5 text-gray-400 break-all">
+                {(deleteConfirm ?? []).slice(0, 5).map((path) => (
+                  <li key={path}>{path}</li>
+                ))}
+              </ul>
+              {(deleteConfirm?.length ?? 0) > 5 && (
+                <p className="mt-2 text-xs text-gray-500">…and {(deleteConfirm?.length ?? 0) - 5} more.</p>
+              )}
+            </div>
+          </Modal.Body>
+          <Modal.Footer>
+            <button
+              type="button"
+              onClick={() => setDeleteConfirm(null)}
+              className="rounded bg-gray-600 px-4 py-2 font-medium text-white hover:bg-gray-500"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleDeleteConfirm()}
+              className="rounded bg-red-600 px-4 py-2 font-medium text-white hover:bg-red-700"
+            >
+              Delete
+            </button>
+          </Modal.Footer>
+        </Modal>
+
+        <PackFileRenameModal
+          show={!!renameRequest}
+          mode={renameRequest?.mode ?? "rename"}
+          paths={renameRequest?.paths ?? []}
+          existingPaths={existingPackFilePaths}
+          onClose={() => setRenameRequest(null)}
+          onApply={handleRenameApply}
+        />
 
         {/* New Flow Dialog */}
         {isNewFlowDialogOpen && (
