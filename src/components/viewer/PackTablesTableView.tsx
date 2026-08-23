@@ -49,6 +49,14 @@ const SELECTION_AUTO_SCROLL_EDGE_PX = 32;
 const MIDDLE_AUTO_SCROLL_DEAD_ZONE_PX = 12;
 const MIDDLE_AUTO_SCROLL_SPEED = 0.18;
 const MIDDLE_AUTO_SCROLL_MAX_STEP_PX = 40;
+/**
+ * Narrower than this and hiding columns is not worth offering: the table already fits, and dropping
+ * a column the reader can see would cost more than the width it saves. Above it, hiding is on
+ * unless it is turned off, since a table this wide is the case the toggle exists for.
+ */
+const HIDE_DEFAULT_COLUMNS_MIN_COLUMN_COUNT = 12;
+/** Enough hidden columns named in the tooltip to be useful without turning it into a wall of text. */
+const HIDDEN_COLUMN_TOOLTIP_LIMIT = 30;
 /** Below this the middle button counts as a click, which leaves auto-scroll running after the release. */
 const MIDDLE_AUTO_SCROLL_DRAG_THRESHOLD_PX = 8;
 const SELECTION_AUTO_SCROLL_MAX_STEP_PX = 24;
@@ -1573,8 +1581,8 @@ const PackTablesTableView = memo(({ showDialog, otherOpenPacks, onCopyInto }: Pa
   const startArgs = useAppSelector((state) => state.app.startArgs);
 
   const [keyFilter, setKeyFilter] = useState<string>("");
-  const [pinFirstKeyColumn, setPinFirstKeyColumn] = useState(true);
-  const [hideDefaultColumns, setHideDefaultColumns] = useState(false);
+  const [pinFirstKeyColumn, setPinFirstKeyColumn] = useState(false);
+  const [hideDefaultColumns, setHideDefaultColumns] = useState(true);
   const [tableFilterInput, setTableFilterInput] = useState<string>("");
   const [tableFilter, setTableFilter] = useState<string>("");
   const selectCurrentPackData = useMemo(makeSelectCurrentPackData, []);
@@ -1747,15 +1755,34 @@ const PackTablesTableView = memo(({ showDialog, otherOpenPacks, onCopyInto }: Pa
     return filteredRowIndices.map((rowIndex) => activePreparedTableData.data[rowIndex]);
   }, [activePreparedTableData, filteredRowIndices]);
 
+  const canHideDefaultColumns = colCount > HIDE_DEFAULT_COLUMNS_MIN_COLUMN_COUNT;
+
   /**
    * Scanned over the whole table rather than the filtered rows: which columns are hidden should not
-   * change under you as you type in the filter box. Only computed while the toggle is on, since it
-   * is a pass over every cell - the toggle is what pays for it, and it is off by default.
+   * change under you as you type in the filter box. Only computed while the toggle is on and the
+   * table is wide enough to offer it, since it is a pass over every cell.
    */
   const hiddenColumnIndexes = useMemo(() => {
-    if (!hideDefaultColumns || !activePreparedTableData || !currentSchema) return NO_HIDDEN_COLUMNS;
+    if (!hideDefaultColumns || !canHideDefaultColumns || !activePreparedTableData || !currentSchema) {
+      return NO_HIDDEN_COLUMNS;
+    }
     return findAllDefaultColumnIndexes(activePreparedTableData.data, currentSchema, keyColumnNamesUnderscore);
-  }, [activePreparedTableData, currentSchema, hideDefaultColumns, keyColumnNamesUnderscore]);
+  }, [activePreparedTableData, canHideDefaultColumns, currentSchema, hideDefaultColumns, keyColumnNamesUnderscore]);
+
+  /** Which columns went missing, named, so the toggle can say what it took away. */
+  const hiddenColumnsTooltip = useMemo(() => {
+    if (hiddenColumnIndexes.size === 0 || !activePreparedTableData) {
+      return "Hide columns where every row still holds the schema default";
+    }
+
+    const hiddenNames = [...hiddenColumnIndexes]
+      .sort((first, second) => first - second)
+      .map((colIndex) => activePreparedTableData.columnHeaders[colIndex] ?? String(colIndex));
+    const namedColumns = hiddenNames.slice(0, HIDDEN_COLUMN_TOOLTIP_LIMIT).join("\n");
+    const remaining = hiddenNames.length - HIDDEN_COLUMN_TOOLTIP_LIMIT;
+
+    return `Hidden columns:\n${namedColumns}` + (remaining > 0 ? `\n+${remaining} more` : "");
+  }, [activePreparedTableData, hiddenColumnIndexes]);
 
   const handleContextMenuCallback = useCallback(
     (row: number, col: number) => {
@@ -2095,17 +2122,19 @@ const PackTablesTableView = memo(({ showDialog, otherOpenPacks, onCopyInto }: Pa
         >
           Pin key column
         </button>
-        <button
-          type="button"
-          onClick={() => setHideDefaultColumns((isHidden) => !isHidden)}
-          aria-pressed={hideDefaultColumns}
-          title="Hide columns where every row still holds the schema default"
-          className={toggleButtonClass(hideDefaultColumns)}
-        >
-          {hideDefaultColumns && hiddenColumnIndexes.size > 0
-            ? `Empty columns hidden (${hiddenColumnIndexes.size})`
-            : "Hide empty columns"}
-        </button>
+        {canHideDefaultColumns && (
+          <button
+            type="button"
+            onClick={() => setHideDefaultColumns((isHidden) => !isHidden)}
+            aria-pressed={hideDefaultColumns}
+            title={hiddenColumnsTooltip}
+            className={toggleButtonClass(hideDefaultColumns)}
+          >
+            {hideDefaultColumns && hiddenColumnIndexes.size > 0
+              ? `Empty columns hidden (${hiddenColumnIndexes.size})`
+              : "Hide empty columns"}
+          </button>
+        )}
       </div>
     </div>
   );
