@@ -5,7 +5,7 @@ import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faChevronDown, faFile, faMagnifyingGlass, faXmark } from "@fortawesome/free-solid-svg-icons";
 import PackTablesTreeView, { CopyIntoSource, PackTablesTreeViewHandle, ViewerPackTarget } from "./PackTablesTreeView";
 import PackFileView from "./PackFileView";
-import PackTablesTableView from "./PackTablesTableView";
+import PackTablesTableView, { type GoToReferenceRequest, type ReferenceNavigationRequest } from "./PackTablesTableView";
 import { Resizable } from "re-resizable";
 import debounce from "just-debounce-it";
 import localizationContext from "../../localizationContext";
@@ -107,6 +107,51 @@ const hasDBSelectionTarget = (selection?: DBTableSelection): selection is DBTabl
 
 const getPackFileName = (packPath: string) => packPath.split(/[\\/]/).pop() ?? packPath;
 
+const getReferenceTargetSelection = (
+  request: GoToReferenceRequest,
+  targetPackPath: string,
+  packsDataByPath: Record<string, PackViewData>,
+  unsavedPacksDataByPath: Record<string, PackedFile[]>,
+  preferredFolder = request.sourceDBFolder ?? DEFAULT_DB_TABLE_ROOT,
+): DBTableSelection | undefined => {
+  const sourcePackData = packsDataByPath[targetPackPath];
+  const candidatePaths = [
+    ...(sourcePackData?.tables ?? []),
+    ...Object.keys(sourcePackData?.packedFiles ?? {}),
+    ...(unsavedPacksDataByPath[targetPackPath] ?? []).map((file) => file.name),
+  ];
+  const targetTables = [...new Set(candidatePaths)]
+    .map((path) => parseDBTablePath(path))
+    .filter((parsed): parsed is NonNullable<typeof parsed> => parsed?.dbName === request.targetTableName);
+  const sameFolderTables = targetTables.filter((table) => table.dbFolder === preferredFolder);
+  const availableTables = sameFolderTables.length > 0 ? sameFolderTables : targetTables;
+  if (availableTables.length === 0) return undefined;
+
+  const selectedTable =
+    availableTables.find((table) => table.dbSubname === request.sourceDBSubname) ??
+    availableTables.find((table) => table.dbSubname === "data__") ??
+    availableTables[0];
+
+  return {
+    packPath: targetPackPath,
+    dbFolder: selectedTable.dbFolder,
+    dbName: request.targetTableName,
+    dbSubname: selectedTable.dbSubname,
+  };
+};
+
+const findLoadedPackPathByName = (
+  packsDataByPath: Record<string, PackViewData>,
+  packName: string,
+): string | undefined => {
+  const normalizedPackName = packName.toLowerCase();
+  return Object.entries(packsDataByPath).find(
+    ([packPath, packData]) =>
+      packData.packName?.toLowerCase() === normalizedPackName ||
+      getPackFileName(packPath).toLowerCase() === normalizedPackName,
+  )?.[0];
+};
+
 const ModsViewer = memo(() => {
   const dispatch = useAppDispatch();
   const viewerStore = useStore<RootState>();
@@ -147,6 +192,11 @@ const ModsViewer = memo(() => {
   const [isCopyProcessing, setIsCopyProcessing] = useState(false);
   const [packTabs, setPackTabs] = useState<PackTab[]>([]);
   const [activePackPath, setActivePackPath] = useState<string | null>(null);
+  const [referenceNavigation, setReferenceNavigation] = useState<ReferenceNavigationRequest | undefined>(undefined);
+  const referenceNavigationIdRef = useRef(0);
+  const pendingReferenceNavigationRef = useRef<{ requestId: number; request: GoToReferenceRequest } | undefined>(
+    undefined,
+  );
   // Written synchronously so a handler can create a pack tab and open a file tab in it in one tick,
   // before setActivePackPath has been applied.
   const activePackPathRef = useRef<string | null>(null);
@@ -531,6 +581,85 @@ const ModsViewer = memo(() => {
     },
     [buildDbTabCandidate, openOrActivateTab],
   );
+
+  const handleGoToReference = useCallback(
+    (request: GoToReferenceRequest) => {
+      const requestId = ++referenceNavigationIdRef.current;
+      const navigateToTarget = (target: DBTableSelection) => {
+        pendingReferenceNavigationRef.current = undefined;
+        setReferenceNavigation({
+          requestId,
+          target,
+          targetColumnName: request.targetColumnName,
+          value: request.value,
+        });
+        handleOpenDBTable(target);
+      };
+
+      const target = getReferenceTargetSelection(
+        request,
+        request.sourcePackPath,
+        packsDataByPath,
+        unsavedPacksDataByPath,
+      );
+      if (target) {
+        navigateToTarget(target);
+        return;
+      }
+
+      const dbPackPath = findLoadedPackPathByName(packsDataByPath, dbPackName);
+      if (dbPackPath) {
+        const vanillaTarget = getReferenceTargetSelection(
+          request,
+          dbPackPath,
+          packsDataByPath,
+          unsavedPacksDataByPath,
+          DEFAULT_DB_TABLE_ROOT,
+        );
+        if (vanillaTarget) {
+          navigateToTarget(vanillaTarget);
+          return;
+        }
+      }
+
+      pendingReferenceNavigationRef.current = { requestId, request };
+      window.api?.requestOpenModInViewer(dbPackName);
+    },
+    [dbPackName, handleOpenDBTable, packsDataByPath, unsavedPacksDataByPath],
+  );
+
+  const handleReferenceNavigationHandled = useCallback((requestId: number) => {
+    setReferenceNavigation((current) => (current?.requestId === requestId ? undefined : current));
+  }, []);
+
+  useEffect(() => {
+    const pending = pendingReferenceNavigationRef.current;
+    if (!pending) return;
+
+    const dbPackPath = findLoadedPackPathByName(packsDataByPath, dbPackName);
+    if (!dbPackPath) return;
+
+    const target = getReferenceTargetSelection(
+      pending.request,
+      dbPackPath,
+      packsDataByPath,
+      unsavedPacksDataByPath,
+      DEFAULT_DB_TABLE_ROOT,
+    );
+    if (!target) {
+      pendingReferenceNavigationRef.current = undefined;
+      return;
+    }
+
+    pendingReferenceNavigationRef.current = undefined;
+    setReferenceNavigation({
+      requestId: pending.requestId,
+      target,
+      targetColumnName: pending.request.targetColumnName,
+      value: pending.request.value,
+    });
+    handleOpenDBTable(target);
+  }, [dbPackName, handleOpenDBTable, packsDataByPath, unsavedPacksDataByPath]);
 
   const handleOpenFlowFile = useCallback(
     (selection: { flowFile: string; packPath: string }, options?: { forceNewTab?: boolean }) => {
@@ -2022,6 +2151,9 @@ const ModsViewer = memo(() => {
                         showDialog={showDialog}
                         otherOpenPacks={otherOpenPacksByPackPath.get(activeTab.packPath) ?? EMPTY_PACK_TARGETS}
                         onCopyInto={handleCopyInto}
+                        onGoToReference={handleGoToReference}
+                        referenceNavigation={referenceNavigation}
+                        onReferenceNavigationHandled={handleReferenceNavigationHandled}
                       />
                     )
                   ) : (

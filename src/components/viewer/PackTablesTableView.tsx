@@ -9,7 +9,7 @@ import type {
   ColDef,
 } from "ag-grid-community";
 import { AllCommunityModule, ModuleRegistry } from "ag-grid-community";
-import { getDBPackedFilePath, getPackNameFromPath } from "../../utility/packFileHelpers";
+import { DEFAULT_DB_TABLE_ROOT, getDBPackedFilePath, getPackNameFromPath } from "../../utility/packFileHelpers";
 import { buildDefaultCellValue, buildDefaultRowSchemaFields, parseEditedCellValue } from "../../utility/dbRowCells";
 import { AmendedSchemaField, DBVersion, Field, PackedFile, SCHEMA_FIELD_TYPE } from "../../packFileTypes";
 import { setDeepCloneTarget } from "@/src/appSlice";
@@ -115,6 +115,27 @@ type DragSelectionState = {
   baseRanges: SelectionRange[];
 };
 
+export type GoToReferenceRequest = {
+  sourcePackPath: string;
+  sourceDBFolder?: string;
+  sourceDBSubname: string;
+  targetTableName: string;
+  targetColumnName: string;
+  value: string;
+};
+
+export type ReferenceNavigationRequest = {
+  requestId: number;
+  target: DBTableSelection;
+  targetColumnName: string;
+  value: string;
+};
+
+type ReferenceSelection = {
+  requestId: number;
+  displayedRowIndex: number;
+};
+
 let textMeasureContext: CanvasRenderingContext2D | undefined;
 
 const getColumnFieldKey = (colIndex: number): string => String(colIndex);
@@ -190,6 +211,11 @@ const resolveCellValue = (cell: AmendedSchemaField): TableCellValue => {
     return "";
   }
   return cell.resolvedKeyValue;
+};
+
+const getReferenceValue = (value: TableCellValue | string | undefined): string => {
+  if (typeof value === "boolean") return value ? "1" : "0";
+  return value == null ? "" : String(value);
 };
 
 const formatFloatDisplayValue = (value: TableCellValue | null | undefined): string => {
@@ -666,10 +692,15 @@ const AgGridWrapper = memo(
     canDeepCloneTable,
     onCellValueChangedCallback,
     onContextMenuCallback,
+    onGoToReference,
+    referenceSelection,
+    onReferenceSelectionHandled,
     onCopyRowsInto,
     otherOpenPacks,
     showDialog,
     sourcePackPath,
+    sourceDBFolder,
+    sourceDBSubname,
     tableName,
     keyColumnNamesUnderscore,
     currentSchema,
@@ -687,10 +718,15 @@ const AgGridWrapper = memo(
     canDeepCloneTable: boolean;
     onCellValueChangedCallback: (event: CellValueChangedEvent<RowData>) => void;
     onContextMenuCallback: (row: number, col: number) => void;
+    onGoToReference?: (request: GoToReferenceRequest) => void;
+    referenceSelection?: ReferenceSelection;
+    onReferenceSelectionHandled?: (requestId: number) => void;
     onCopyRowsInto?: (displayedRows: number[], targetPackPath: string, openAfterCopy: boolean) => void | Promise<void>;
     otherOpenPacks?: ViewerPackTarget[];
     showDialog: ShowViewerDialog;
     sourcePackPath: string;
+    sourceDBFolder?: string;
+    sourceDBSubname: string;
     tableName: string;
     keyColumnNamesUnderscore: string[];
     currentSchema: DBVersion;
@@ -1101,6 +1137,7 @@ const AgGridWrapper = memo(
           row: number;
           col: number;
           label?: string;
+          reference?: GoToReferenceRequest;
           copyRows: number[];
         }
       | undefined
@@ -1155,6 +1192,22 @@ const AgGridWrapper = memo(
       }
       setSelectionRanges([]);
     }, [tableSelectionKey]);
+
+    useEffect(() => {
+      if (!referenceSelection) return;
+      if (referenceSelection.displayedRowIndex < 0 || referenceSelection.displayedRowIndex >= rowData.length) return;
+
+      setSelectionRanges([
+        normalizeSelectionRange(
+          referenceSelection.displayedRowIndex,
+          0,
+          referenceSelection.displayedRowIndex,
+          Math.max(0, currentSchema.fields.length - 1),
+        ),
+      ]);
+      gridRef.current?.api.ensureIndexVisible(referenceSelection.displayedRowIndex, "middle");
+      onReferenceSelectionHandled?.(referenceSelection.requestId);
+    }, [currentSchema.fields.length, onReferenceSelectionHandled, referenceSelection, rowData.length]);
 
     useEffect(() => {
       const onWindowMouseUp = () => {
@@ -1294,11 +1347,6 @@ const AgGridWrapper = memo(
         ev.event?.preventDefault();
         ev.event?.stopPropagation();
 
-        if ((!canDeepCloneTable || keyColumnSet.size === 0) && !onCopyRowsInto) {
-          setMenuState(undefined);
-          return;
-        }
-
         const displayedRowIndex = ev.node?.rowIndex;
         if (typeof displayedRowIndex !== "number" || displayedRowIndex < 0) {
           setMenuState(undefined);
@@ -1308,6 +1356,24 @@ const AgGridWrapper = memo(
         const rawColId = ev.column?.getColId() ?? "";
         const clickedColIndex = rawColId === "__rowIndex" ? -1 : Number(rawColId);
         const clickedField = Number.isFinite(clickedColIndex) ? currentSchema.fields[clickedColIndex] : undefined;
+        const referenceTableName = clickedField?.is_reference?.[0];
+        const referenceColumnName = clickedField?.is_reference?.[1];
+        const reference =
+          referenceTableName && referenceColumnName && ev.data
+            ? {
+                sourcePackPath,
+                sourceDBFolder,
+                sourceDBSubname,
+                targetTableName: referenceTableName,
+                targetColumnName: referenceColumnName,
+                value: getReferenceValue(ev.data[getColumnFieldKey(clickedColIndex)]),
+              }
+            : undefined;
+
+        if ((!canDeepCloneTable || keyColumnSet.size === 0) && !onCopyRowsInto && !reference) {
+          setMenuState(undefined);
+          return;
+        }
 
         const deepCloneColIndex =
           clickedField && keyColumnSet.has(clickedField.name) ? clickedColIndex : firstKeyColumnIndex;
@@ -1321,10 +1387,20 @@ const AgGridWrapper = memo(
           row: displayedRowIndex,
           col: deepCloneColIndex === -1 ? 0 : deepCloneColIndex,
           label,
+          reference,
           copyRows: getSelectedRowIndices(selectionRangesRef.current, displayedRowIndex),
         });
       },
-      [canDeepCloneTable, currentSchema.fields, firstKeyColumnIndex, keyColumnSet, onCopyRowsInto],
+      [
+        canDeepCloneTable,
+        currentSchema.fields,
+        firstKeyColumnIndex,
+        keyColumnSet,
+        onCopyRowsInto,
+        sourceDBFolder,
+        sourcePackPath,
+        sourceDBSubname,
+      ],
     );
 
     const onCellMouseDown = useCallback(
@@ -1554,6 +1630,20 @@ const AgGridWrapper = memo(
             className="rounded-md border border-gray-600 bg-gray-800 text-gray-100 shadow-lg overflow-visible"
             onMouseDownCapture={(e) => e.stopPropagation()}
           >
+            {menuState.reference && onGoToReference && (
+              <button
+                type="button"
+                className="w-full text-left px-3 py-2 text-sm hover:bg-gray-700"
+                onClick={() => {
+                  const reference = menuState.reference;
+                  if (!reference) return;
+                  setMenuState(undefined);
+                  onGoToReference(reference);
+                }}
+              >
+                Go to reference
+              </button>
+            )}
             {menuState.label && (
               <button
                 type="button"
@@ -1590,9 +1680,14 @@ type PackTablesTableViewProps = {
   showDialog: ShowViewerDialog;
   otherOpenPacks?: ViewerPackTarget[];
   onCopyInto?: (source: CopyIntoSource, targetPackPath: string, openAfterCopy: boolean) => void | Promise<void>;
+  onGoToReference?: (request: GoToReferenceRequest) => void;
+  referenceNavigation?: ReferenceNavigationRequest;
+  onReferenceNavigationHandled?: (requestId: number) => void;
 };
 
-const PackTablesTableView = memo(({ showDialog, otherOpenPacks, onCopyInto }: PackTablesTableViewProps) => {
+const PackTablesTableView = memo((props: PackTablesTableViewProps) => {
+  const { showDialog, otherOpenPacks, onCopyInto, onGoToReference, referenceNavigation, onReferenceNavigationHandled } =
+    props;
   const dispatch = useAppDispatch();
   const currentDBTableSelection = useAppSelector((state) => state.app.currentDBTableSelection);
   const isFeaturesForModdersEnabled = useAppSelector((state) => state.app.isFeaturesForModdersEnabled);
@@ -1603,6 +1698,8 @@ const PackTablesTableView = memo(({ showDialog, otherOpenPacks, onCopyInto }: Pa
   const [hideDefaultColumns, setHideDefaultColumns] = useState(true);
   const [tableFilterInput, setTableFilterInput] = useState<string>("");
   const [tableFilter, setTableFilter] = useState<string>("");
+  const [referenceSelection, setReferenceSelection] = useState<ReferenceSelection | undefined>(undefined);
+  const handledReferenceRequestIdRef = useRef<number | null>(null);
   const selectCurrentPackData = useMemo(makeSelectCurrentPackData, []);
   const selectCurrentPackUnsavedFiles = useMemo(makeSelectCurrentPackUnsavedFiles, []);
 
@@ -1695,6 +1792,7 @@ const PackTablesTableView = memo(({ showDialog, otherOpenPacks, onCopyInto }: Pa
   const historyPastRef = useRef<PackedFile[]>([]);
   const historyFutureRef = useRef<PackedFile[]>([]);
   const hydratedTableKeyRef = useRef<string | null>(null);
+  const [hydratedTableKey, setHydratedTableKey] = useState<string | null>(null);
   const [historySize, setHistorySize] = useState({ past: 0, future: 0 });
 
   const syncHistorySize = useCallback(() => {
@@ -1707,6 +1805,7 @@ const PackTablesTableView = memo(({ showDialog, otherOpenPacks, onCopyInto }: Pa
   useEffect(() => {
     if (!openedTableKey) {
       hydratedTableKeyRef.current = null;
+      setHydratedTableKey(null);
       setWorkingPackFile(undefined);
       setWorkingPreparedTableData(undefined);
       return;
@@ -1719,6 +1818,7 @@ const PackTablesTableView = memo(({ showDialog, otherOpenPacks, onCopyInto }: Pa
     if (!isNewTable && !isUninitialized) return;
 
     hydratedTableKeyRef.current = openedTableKey;
+    setHydratedTableKey(openedTableKey);
     setWorkingPackFile(selectedPackFile);
     setWorkingPreparedTableData(preparedTableData);
   }, [openedTableKey, preparedTableData, selectedPackFile, workingPackFile, workingPreparedTableData]);
@@ -1772,6 +1872,92 @@ const PackTablesTableView = memo(({ showDialog, otherOpenPacks, onCopyInto }: Pa
     if (!activePreparedTableData) return [];
     return filteredRowIndices.map((rowIndex) => activePreparedTableData.data[rowIndex]);
   }, [activePreparedTableData, filteredRowIndices]);
+
+  const clearTableFilter = useCallback(() => {
+    (setTableFilterDebounced as unknown as { cancel?: () => void }).cancel?.();
+    setTableFilterInput("");
+    setTableFilter("");
+  }, [setTableFilterDebounced]);
+
+  useEffect(() => {
+    setReferenceSelection(undefined);
+  }, [openedTableKey]);
+
+  useEffect(() => {
+    if (!referenceNavigation) setReferenceSelection(undefined);
+  }, [referenceNavigation]);
+
+  useEffect(() => {
+    if (!referenceNavigation || handledReferenceRequestIdRef.current === referenceNavigation.requestId) return;
+
+    const target = referenceNavigation.target;
+    const current = currentDBTableSelection;
+    if (
+      !current ||
+      current.packPath !== target.packPath ||
+      current.dbName !== target.dbName ||
+      current.dbSubname !== target.dbSubname ||
+      (current.dbFolder ?? DEFAULT_DB_TABLE_ROOT) !== (target.dbFolder ?? DEFAULT_DB_TABLE_ROOT)
+    ) {
+      return;
+    }
+
+    // The table component stays mounted while the active tab changes. Do not inspect the previous
+    // table's prepared data during that handoff.
+    if (
+      !currentSchema ||
+      !activePreparedTableData ||
+      !openedTableKey ||
+      hydratedTableKey !== openedTableKey
+    ) {
+      return;
+    }
+
+    if (normalizedTableFilter !== "") {
+      clearTableFilter();
+      return;
+    }
+
+    const targetColumnIndex = currentSchema.fields.findIndex(
+      (field) => field.name === referenceNavigation.targetColumnName,
+    );
+    if (targetColumnIndex < 0) {
+      handledReferenceRequestIdRef.current = referenceNavigation.requestId;
+      onReferenceNavigationHandled?.(referenceNavigation.requestId);
+      return;
+    }
+
+    const targetField = currentSchema.fields[targetColumnIndex];
+    const targetValue = toComparableCellValue(referenceNavigation.value, targetField.field_type);
+    const targetRowIndex = activePreparedTableData.data.findIndex(
+      (row) => toComparableCellValue(row[getColumnFieldKey(targetColumnIndex)], targetField.field_type) === targetValue,
+    );
+    if (targetRowIndex < 0) {
+      handledReferenceRequestIdRef.current = referenceNavigation.requestId;
+      onReferenceNavigationHandled?.(referenceNavigation.requestId);
+      return;
+    }
+
+    const displayedRowIndex = filteredRowIndices.indexOf(targetRowIndex);
+    if (displayedRowIndex < 0) {
+      clearTableFilter();
+      return;
+    }
+
+    handledReferenceRequestIdRef.current = referenceNavigation.requestId;
+    setReferenceSelection({ requestId: referenceNavigation.requestId, displayedRowIndex });
+  }, [
+    activePreparedTableData,
+    clearTableFilter,
+    currentDBTableSelection,
+    currentSchema,
+    filteredRowIndices,
+    hydratedTableKey,
+    normalizedTableFilter,
+    onReferenceNavigationHandled,
+    openedTableKey,
+    referenceNavigation,
+  ]);
 
   const canHideDefaultColumns = colCount > HIDE_DEFAULT_COLUMNS_MIN_COLUMN_COUNT;
 
@@ -2071,16 +2257,21 @@ const PackTablesTableView = memo(({ showDialog, otherOpenPacks, onCopyInto }: Pa
           canDeepCloneTable={!isDBCloneTableIgnored(currentDBTableSelection.dbName)}
           onCellValueChangedCallback={handleCellValueChangedCallback}
           onContextMenuCallback={handleContextMenuCallback}
+          onGoToReference={onGoToReference}
+          referenceSelection={referenceSelection}
+          onReferenceSelectionHandled={onReferenceNavigationHandled}
           onCopyRowsInto={onCopyInto ? handleCopyRowsInto : undefined}
           otherOpenPacks={otherOpenPacks}
           showDialog={showDialog}
           sourcePackPath={packPath}
+          sourceDBFolder={currentDBTableSelection.dbFolder}
+          sourceDBSubname={currentDBTableSelection.dbSubname}
           tableName={currentDBTableSelection.dbName}
           keyColumnNamesUnderscore={keyColumnNamesUnderscore}
           currentSchema={currentSchema}
           isBigTable={isBigTable}
           rowCount={rowCount}
-          tableSelectionKey={`${currentDBTableSelection.packPath}|${currentDBTableSelection.dbName}|${currentDBTableSelection.dbSubname}`}
+          tableSelectionKey={`${currentDBTableSelection.packPath}|${currentDBTableSelection.dbFolder ?? DEFAULT_DB_TABLE_ROOT}|${currentDBTableSelection.dbName}|${currentDBTableSelection.dbSubname}`}
           hiddenColumnIndexes={hiddenColumnIndexes}
           pinFirstKeyColumn={pinFirstKeyColumn}
         />
