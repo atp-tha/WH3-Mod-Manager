@@ -662,6 +662,40 @@ const AgGridWrapper = memo(
       };
     }, []);
 
+    /**
+     * Horizontal wheel over a pinned column. ag-grid gives the pinned sections their own viewports
+     * and only the centre one scrolls sideways, so with the mouse over the pinned columns a
+     * horizontal wheel - or shift+wheel, which Chromium reports as one - is swallowed and the table
+     * looks stuck. The pinned section is the left edge of the grid, which is exactly where a hand
+     * ends up, so this is the common case rather than an edge one.
+     *
+     * Fed to the grid's own horizontal scrollbar rather than to the centre viewport: that scrollbar
+     * is what the viewport, the header and the pinned sections all follow, so scrolling it keeps
+     * them in step. Registered natively because React makes wheel listeners passive, and this one
+     * has to preventDefault to stop the page taking the scroll instead.
+     */
+    useEffect(() => {
+      const gridRoot = gridRootRef.current;
+      if (!gridRoot) return;
+
+      const onWheel = (event: WheelEvent) => {
+        const delta = event.deltaX !== 0 ? event.deltaX : event.shiftKey ? event.deltaY : 0;
+        if (delta === 0) return;
+
+        const target = event.target as Element | null;
+        if (!target?.closest(".ag-pinned-left-cols-container, .ag-pinned-right-cols-container")) return;
+
+        const scrollViewport = gridRoot.querySelector<HTMLElement>(".ag-body-horizontal-scroll-viewport");
+        if (!scrollViewport) return;
+
+        scrollViewport.scrollLeft += delta;
+        event.preventDefault();
+      };
+
+      gridRoot.addEventListener("wheel", onWheel, { passive: false });
+      return () => gridRoot.removeEventListener("wheel", onWheel);
+    }, []);
+
     // Only the row height still varies with table size; column widths come from the contents either
     // way now.
     const isDenseTable = isBigTable || rowCount >= FIXED_SIZING_ROW_THRESHOLD;

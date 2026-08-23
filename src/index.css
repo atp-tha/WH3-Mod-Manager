@@ -876,6 +876,19 @@ body:not(.disable-row-hover) .row-hover-highlight:hover > div:not(.drop-ghost) {
 }
 
 /*
+ * The strip under the pinned columns is a spacer that lines the horizontal scrollbar up with the
+ * scrollable part of the grid, and ag-grid ships it as `overflow-x: scroll`. On a platform that
+ * draws scrollbar tracks - which Electron on Windows does - that paints a second, dead horizontal
+ * scrollbar beneath the pinned columns. ag-grid only suppresses it when the pinned section is
+ * narrower than a scrollbar, which stopped being true once a key column was pinned beside the row
+ * numbers. Two classes to outrank ag-grid's own single-class rule whatever the import order.
+ */
+.pack-tables-grid .ag-horizontal-left-spacer,
+.pack-tables-grid .ag-horizontal-right-spacer {
+  overflow-x: hidden;
+}
+
+/*
  * A cell nobody has set. Dimmed through the text colour rather than `opacity`, which would fade the
  * selection and hover backgrounds underneath it along with the value.
  */
