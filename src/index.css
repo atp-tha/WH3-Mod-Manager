@@ -594,8 +594,8 @@ body:not(.disable-row-hover) .row-hover-highlight:hover > div:not(.drop-ghost) {
   height: calc(100vh - 5.5rem);
 }
 
-.explicit-height-without-topbar-and-padding-3rem {
-  height: calc(100vh - 3rem);
+.explicit-height-without-topbar-and-padding-35rem {
+  height: calc(100vh - 3.5rem);
 }
 
 .playButtonText {
@@ -870,6 +870,14 @@ body:not(.disable-row-hover) .row-hover-highlight:hover > div:not(.drop-ghost) {
    * this, so the stacks in the two places have to stay in the same order.
    */
   --ag-font-family: "Inter", "Roboto", Arial, sans-serif;
+
+  /*
+   * The theme draws cells in pure white on near-black, which is a harder contrast than a table this
+   * dense wants to be read at for any length of time. Slate 200 for values, a step down again for
+   * headers, which are read once and then navigated by position.
+   */
+  --ag-data-color: #e2e8f0;
+  --ag-header-foreground-color: #c3ccd8;
 }
 
 /*
@@ -976,7 +984,7 @@ body:not(.disable-row-hover) .row-hover-highlight:hover > div:not(.drop-ghost) {
  * selection and hover backgrounds underneath it along with the value.
  */
 .pack-tables-grid .pack-table-cell-default {
-  color: rgba(245, 245, 245, 0.4);
+  color: rgba(226, 232, 240, 0.38);
 }
 
 .pack-tables-grid .pack-table-cell-selected {
