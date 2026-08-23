@@ -25,7 +25,7 @@ import {
   TableCellValue,
 } from "./tablePrepCache";
 import type { ShowViewerDialog } from "./viewerDialogs";
-import { pickWidestValue, type WidestValue } from "./viewerHelpers";
+import { buildKeyPrefixDisplay, pickWidestValue, type KeyPrefixDisplay, type WidestValue } from "./viewerHelpers";
 import { makeSelectCurrentPackData, makeSelectCurrentPackUnsavedFiles } from "./viewerSelectors";
 import { vanillaPackNames } from "@/src/supportedGames";
 import { isDBCloneTableIgnored } from "@/src/utility/dbCloneTableRouting";
@@ -696,10 +696,23 @@ const getAutoScrollDelta = (pointer: number, start: number, end: number): number
  * The cell element is the full column width, so a background on it would reach across the columns
  * beside it. The span is only as wide as the text, which is what the hover expansion needs: a box
  * that covers the value and nothing else.
+ *
+ * The repeated prefix is a span of its own inside that one, drawn only while the cell is hovered:
+ * out of the way when the column is being scanned, and back - dimmed, in place, and without the
+ * value having moved - when the expansion is showing the whole key.
  */
-const PinnedKeyCellRenderer = (props: CustomCellRendererProps) => (
-  <span className="pack-table-pinned-key-value">{props.valueFormatted ?? props.value}</span>
-);
+const PinnedKeyCellRenderer = (props: CustomCellRendererProps & { shortened?: Map<string, string> }) => {
+  const full = props.value == null ? "" : String(props.value);
+  const shown = props.shortened?.get(full);
+  if (shown === undefined) return <span className="pack-table-pinned-key-value">{full}</span>;
+
+  return (
+    <span className="pack-table-pinned-key-value">
+      <span className="pack-table-pinned-key-prefix">{full.slice(0, full.length - shown.length)}</span>
+      {shown}
+    </span>
+  );
+};
 
 const AgGridWrapper = memo(
   ({
@@ -967,6 +980,42 @@ const AgGridWrapper = memo(
     }, [currentSchema.fields, keyColumnSet]);
 
     /**
+     * The prefix the pinned key column repeats, and what the column is left drawing once it is
+     * hidden. Only worth working out while the column is pinned - unpinned it costs the table
+     * nothing to show a key in full.
+     */
+    const pinnedKeyPrefix = useMemo<KeyPrefixDisplay | undefined>(() => {
+      if (!pinFirstKeyColumn || firstKeyColumnIndex < 0) return undefined;
+      if (columns[firstKeyColumnIndex]?.type !== "text") return undefined;
+
+      const fieldKey = getColumnFieldKey(firstKeyColumnIndex);
+      return buildKeyPrefixDisplay(rowData.map((row) => String(row[fieldKey] ?? "")));
+    }, [columns, firstKeyColumnIndex, pinFirstKeyColumn, rowData]);
+
+    /**
+     * Measured over what the column now draws rather than the width hint, which knows only the full
+     * values - sizing to those would hold open the width the hidden prefix used to take.
+     */
+    const pinnedKeyContentWidth = useMemo(() => {
+      if (!pinnedKeyPrefix || pinnedKeyPrefix.shortened.size === 0 || firstKeyColumnIndex < 0) return undefined;
+
+      const fieldKey = getColumnFieldKey(firstKeyColumnIndex);
+      let widest: WidestValue = { value: "", width: 0 };
+      for (const row of rowData) {
+        const full = String(row[fieldKey] ?? "");
+        const shown = pinnedKeyPrefix.shortened.get(full) ?? full;
+        widest = pickWidestValue(
+          widest,
+          shown,
+          (text) => measureTextWidth(text, GRID_CELL_FONT),
+          GRID_CELL_MAX_GLYPH_WIDTH_PX,
+        );
+      }
+      if (widest.value.length === 0) return undefined;
+      return Math.max(TEXT_COLUMN_WIDTH_MIN_PX, Math.ceil(widest.width + CELL_CONTENT_PADDING_PX));
+    }, [firstKeyColumnIndex, pinnedKeyPrefix, rowData]);
+
+    /**
      * What the column's values need. The header is not considered here - getHeaderMinWidth covers
      * it, and it knows the header wraps onto two lines, so folding the unwrapped header width in
      * here as well would size every column for a header that is never drawn on one line.
@@ -1087,7 +1136,7 @@ const AgGridWrapper = memo(
         // The cap covers the values only. A header squeezed below what it needs would ellipsise with
         // nothing to reveal the rest of it, and headers are read once rather than scanned.
         const contentWidth = isPinnedKeyColumn
-          ? Math.min(getColumnWidth(colIndex), PINNED_KEY_COLUMN_MAX_CONTENT_WIDTH_PX)
+          ? Math.min(pinnedKeyContentWidth ?? getColumnWidth(colIndex), PINNED_KEY_COLUMN_MAX_CONTENT_WIDTH_PX)
           : getColumnWidth(colIndex);
         const width = Math.max(contentWidth, getHeaderMinWidth(displayHeaderName, isKey, headerChromePx));
         const columnDefaultValue = columnDefaultValues[colIndex];
@@ -1116,6 +1165,9 @@ const AgGridWrapper = memo(
           // PinnedKeyCellRenderer for why the hover expansion cannot use the cell itself.
           cellRenderer:
             colType === "checkbox" ? "agCheckboxCellRenderer" : isPinnedKeyColumn ? PinnedKeyCellRenderer : undefined,
+          // Display only. The cell's value stays the whole key, so sorting, filtering and editing
+          // all still work off it - a sort on this column orders by the full key, prefix included.
+          cellRendererParams: isPinnedKeyColumn ? { shortened: pinnedKeyPrefix?.shortened } : undefined,
           cellEditor: colType === "checkbox" ? "agCheckboxCellEditor" : undefined,
           field: getColumnFieldKey(colIndex),
           valueFormatter: isFloatColumn ? (p) => formatFloatDisplayValue(p.value) : undefined,
@@ -1156,6 +1208,8 @@ const AgGridWrapper = memo(
       firstKeyColumnIndex,
       hiddenColumnIndexes,
       pinFirstKeyColumn,
+      pinnedKeyContentWidth,
+      pinnedKeyPrefix,
       tableName,
     ]);
 

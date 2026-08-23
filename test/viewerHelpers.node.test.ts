@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildKeyPrefixDisplay,
   getDefaultSaveAsPackName,
   getPackFileInventory,
   getPreferredTreeTab,
@@ -173,5 +174,117 @@ describe("widest column value", () => {
 
     pickWidestValue({ value: "aa", width: 20 }, "WW", countingMeasure, MAX_GLYPH);
     expect(measured).toEqual(["WW"]);
+  });
+});
+
+describe("repeated key prefix", () => {
+  const display = (values: string[]) => {
+    const built = buildKeyPrefixDisplay(values);
+    return values.map((value) => built.shortened.get(value) ?? value);
+  };
+
+  it("hides the game and release segments a table repeats", () => {
+    const values = [
+      "wh3_dlc27_chs_inf_chaos_warriors_0",
+      "wh3_dlc27_chs_mon_chaos_spawn",
+      "wh3_dlc27_kho_inf_bloodletters",
+      "wh2_dlc09_tmb_cav_hexwraiths",
+      "wh2_dlc09_tmb_inf_skeleton_warriors",
+      "wh2_dlc09_skv_inf_clanrats",
+      "wh_main_emp_inf_spearmen",
+      "wh_main_emp_cav_knights",
+      "wh_main_vmp_inf_zombies",
+    ];
+
+    expect(buildKeyPrefixDisplay(values).depth).toBe(2);
+    expect(display(values)).toEqual([
+      "chs_inf_chaos_warriors_0",
+      "chs_mon_chaos_spawn",
+      "kho_inf_bloodletters",
+      "tmb_cav_hexwraiths",
+      "tmb_inf_skeleton_warriors",
+      "skv_inf_clanrats",
+      "emp_inf_spearmen",
+      "emp_cav_knights",
+      "vmp_inf_zombies",
+    ]);
+  });
+
+  it("takes the depth from the data rather than assuming two segments", () => {
+    // The skill node table repeats four segments, not two.
+    const values = [
+      "wh3_dlc24_skill_node_ksl_hag_witch_magic",
+      "wh3_dlc24_skill_node_cth_dragon_melee",
+      "wh3_dlc24_skill_node_kho_bloodthirster_rage",
+      "wh3_dlc24_skill_node_nur_plague_lore",
+      "wh3_dlc24_skill_node_tze_horror_winds",
+      "wh3_dlc24_skill_node_sla_seeker_speed",
+    ];
+
+    expect(buildKeyPrefixDisplay(values).depth).toBe(4);
+    expect(display(values)).toEqual([
+      "ksl_hag_witch_magic",
+      "cth_dragon_melee",
+      "kho_bloodthirster_rage",
+      "nur_plague_lore",
+      "tze_horror_winds",
+      "sla_seeker_speed",
+    ]);
+  });
+
+  it("leaves a row its full key when shortening would make it read the same as another", () => {
+    // The same unit re-added in a later release: the release is all that tells the two apart, so
+    // neither may lose it, while the rows around them still can.
+    const values = [
+      "wh3_dlc27_chs_inf_chaos_warriors_0",
+      "wh_main_chs_inf_chaos_warriors_0",
+      "wh3_dlc27_chs_mon_chaos_spawn",
+      "wh3_dlc27_kho_inf_bloodletters",
+      "wh3_dlc27_nur_inf_plaguebearers",
+      "wh3_dlc27_tze_inf_pink_horrors",
+      "wh3_dlc27_sla_inf_daemonettes",
+      "wh_main_emp_inf_spearmen",
+      "wh_main_emp_cav_knights",
+      "wh_main_vmp_inf_zombies",
+    ];
+
+    const shown = display(values);
+    expect(shown[0]).toBe("wh3_dlc27_chs_inf_chaos_warriors_0");
+    expect(shown[1]).toBe("wh_main_chs_inf_chaos_warriors_0");
+    expect(shown[2]).toBe("chs_mon_chaos_spawn");
+    // Whatever is shown still identifies its row.
+    expect(new Set(shown).size).toBe(values.length);
+  });
+
+  it("leaves a row alone when its leading segments are its own rather than the table's", () => {
+    const values = [
+      "wh3_dlc27_inf_spearmen",
+      "wh3_dlc27_cav_knights",
+      "wh3_dlc27_mon_dragon",
+      "inf_spearmen_extra_long",
+    ];
+
+    // Only "wh3_dlc27_" repeats. The last row's own head is not boilerplate, so it is not cut off -
+    // which also keeps it from colliding with what the first row now shows.
+    expect(display(values)).toEqual(["inf_spearmen", "cav_knights", "mon_dragon", "inf_spearmen_extra_long"]);
+  });
+
+  it("shortens nothing when the keys share no prefix", () => {
+    const values = ["277629906", "277629907", "412330012"];
+
+    expect(buildKeyPrefixDisplay(values)).toMatchObject({ depth: 0 });
+    expect(display(values)).toEqual(values);
+  });
+
+  it("refuses to strip a key down to a fragment", () => {
+    // Every value would still be unique at depth 3, but "1" and "2" are not worth reading.
+    const values = ["wh3_dlc27_chs_1", "wh3_dlc27_chs_2", "wh3_dlc27_chs_3", "wh3_dlc27_chs_4"];
+
+    expect(buildKeyPrefixDisplay(values).depth).toBe(2);
+    expect(display(values)).toEqual(["chs_1", "chs_2", "chs_3", "chs_4"]);
+  });
+
+  it("handles an empty column", () => {
+    expect(buildKeyPrefixDisplay([])).toMatchObject({ depth: 0 });
   });
 });

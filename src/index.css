@@ -918,11 +918,27 @@ body:not(.disable-row-hover) .row-hover-highlight:hover > div:not(.drop-ghost) {
  *
  * ag-grid gives the pinned section no viewport of its own - `getElementParams` in
  * rowContainerComp.ts only wraps the centre container - so `.ag-pinned-left-cols-container` does not
- * clip, and the span is free to run out over the table as far as the grid's right edge. Nothing
- * between the cell and that container makes a stacking context either, so the cell's `z-index` is
- * enough to beat `.ag-center-cols-viewport`, which would otherwise paint over it as the later
- * sibling.
+ * clip, and the span is free to run out over the table as far as the grid's right edge.
+ *
+ * Which of the two sections paints on top has to be settled on the containers, below. A `z-index` on
+ * the cell cannot do it: ag-grid positions rows with `transform: translateY()` unless
+ * suppressRowTransform is set, and a transform makes every row a stacking context, so a cell's
+ * `z-index` only ever orders it against its own row's siblings. Left to the containers' source
+ * order the centre section wins, and the overhang is painted behind it - behind the opaque
+ * background of an even row, and behind the near-transparent stripe of an odd one, which is why
+ * getting this wrong showed up on one kind of row and not the other.
  */
+
+/*
+ * Pinned columns sit above the columns that scroll under them. The two sections are siblings, so
+ * one line here outranks the centre section for everything in the pinned one, whatever stacking
+ * contexts the rows inside it make.
+ */
+.pack-tables-grid .ag-pinned-left-cols-container {
+  z-index: 1;
+}
+
+/* z-index orders the hovered cell within its own row; the section is raised by the rule above. */
 .pack-tables-grid .pack-table-pinned-key-cell:hover {
   overflow: visible;
   z-index: 2;
@@ -962,6 +978,27 @@ body:not(.disable-row-hover) .row-hover-highlight:hover > div:not(.drop-ghost) {
     linear-gradient(var(--pack-pinned-key-selection), var(--pack-pinned-key-selection)),
     linear-gradient(var(--ag-row-hover-color), var(--ag-row-hover-color)),
     linear-gradient(var(--pack-pinned-key-stripe), var(--pack-pinned-key-stripe));
+}
+
+/*
+ * The repeated prefix. Out of the flow entirely at rest, so the column is sized and drawn as if the
+ * value simply began at its first useful segment, and back in front of the value while the cell is
+ * hovered - the expansion is the one place the whole key is shown, so it has to be the whole key.
+ *
+ * Restoring it inline pushes the rest of the value right by the prefix's width, which is the one
+ * thing that does move on hover. Left where it is instead, the prefix would have to hang off the
+ * left of the cell and over the row numbers beside it.
+ *
+ * Dimmed to the same value as an untouched cell: it is there to be recognised, not read, and the
+ * part of the key that tells this row from the next one should stay the brighter of the two.
+ */
+.pack-tables-grid .pack-table-pinned-key-prefix {
+  display: none;
+}
+
+.pack-tables-grid .pack-table-pinned-key-cell:hover .pack-table-pinned-key-prefix {
+  display: inline;
+  color: rgba(226, 232, 240, 0.38);
 }
 
 .pack-tables-grid .ag-row-odd .pack-table-pinned-key-cell:hover .pack-table-pinned-key-value {

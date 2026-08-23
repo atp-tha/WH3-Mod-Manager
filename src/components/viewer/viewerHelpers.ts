@@ -33,6 +33,111 @@ export const pickWidestValue = (
   return width > current.width ? { value: candidate, width } : current;
 };
 
+/**
+ * Segments a shortened value has to keep. Without a floor the detector will happily strip a key down
+ * to `3` or `1` - still unique, and useless to read.
+ */
+const KEY_PREFIX_MIN_KEPT_SEGMENTS = 2;
+/** No key in the game's own tables carries a shared prefix longer than this. */
+const KEY_PREFIX_MAX_DEPTH = 6;
+/**
+ * Share of rows allowed to keep their full value before a depth is judged too deep. Going one
+ * segment further usually costs a jump in exemptions rather than a few more - it is the point where
+ * the prefix stops being boilerplate and starts being the thing that tells two rows apart.
+ *
+ * The floor is what keeps the share workable on a short table, where one honest pair of duplicates
+ * is already a tenth of the rows and would otherwise veto shortening for all of them.
+ */
+const KEY_PREFIX_MAX_EXEMPT_SHARE = 0.05;
+const KEY_PREFIX_MIN_EXEMPT_ALLOWANCE = 2;
+/**
+ * Whatever the allowance works out to, shortening has to be what the column mostly does. A depth
+ * that only reaches a minority of the rows describes those rows, not the table.
+ */
+const KEY_PREFIX_MAX_EXEMPT_FRACTION = 0.5;
+/**
+ * Rows a prefix has to appear on before it counts as repeated. A row whose leading segments are its
+ * own has nothing boilerplate to lose: `inf_spearmen_extra_long` sitting among `wh3_dlc27_` keys
+ * would otherwise be cut down to `extra_long`, which drops the part that names it.
+ */
+const KEY_PREFIX_MIN_ROWS = 2;
+
+export interface KeyPrefixDisplay {
+  /** Underscore-separated segments hidden from the values that were shortened. */
+  depth: number;
+  /** Full value to what is shown for it. Only holds values that were actually shortened. */
+  shortened: Map<string, string>;
+}
+
+const EMPTY_KEY_PREFIX_DISPLAY: KeyPrefixDisplay = { depth: 0, shortened: new Map() };
+
+/**
+ * Finds the leading segments a key column repeats on every row, so the column can stop spending
+ * width on them.
+ *
+ * Game keys are `game_release_faction_...`, and the first segments are the same for whole runs of
+ * rows: `wh3_dlc27_` in front of two thousand units says nothing about which unit a row is. The
+ * depth is taken from the data rather than fixed, because it is not always two - the skill node
+ * table repeats `wh3_dlc24_skill_node_` - and it is sometimes nothing at all, as for a table keyed
+ * by number.
+ *
+ * A row keeps its full value when shortening it would leave too little to read, or would make it
+ * read the same as another row: the game re-adds the same unit in later releases, so
+ * `wh3_dlc27_chs_inf_chaos_warriors_0` and `wh_main_chs_inf_chaos_warriors_0` sit in one table, and
+ * the release is the only thing telling them apart. Every displayed value is therefore still unique
+ * to its row, which is what makes hiding the rest of it safe.
+ */
+export const buildKeyPrefixDisplay = (values: readonly string[]): KeyPrefixDisplay => {
+  if (values.length === 0) return EMPTY_KEY_PREFIX_DISPLAY;
+
+  const segmented = values.map((value) => value.split("_"));
+  const maxExempt = Math.min(
+    values.length * KEY_PREFIX_MAX_EXEMPT_FRACTION,
+    Math.max(KEY_PREFIX_MIN_EXEMPT_ALLOWANCE, values.length * KEY_PREFIX_MAX_EXEMPT_SHARE),
+  );
+  let best = EMPTY_KEY_PREFIX_DISPLAY;
+
+  for (let depth = 1; depth <= KEY_PREFIX_MAX_DEPTH; depth++) {
+    const longEnough = segmented.map((segments) => segments.length - depth >= KEY_PREFIX_MIN_KEPT_SEGMENTS);
+
+    const prefixCounts = new Map<string, number>();
+    for (let index = 0; index < segmented.length; index++) {
+      if (!longEnough[index]) continue;
+      const prefix = segmented[index].slice(0, depth).join("_");
+      prefixCounts.set(prefix, (prefixCounts.get(prefix) ?? 0) + 1);
+    }
+
+    const candidates = segmented.map((segments, index) => {
+      if (!longEnough[index]) return undefined;
+      const prefix = segments.slice(0, depth).join("_");
+      if ((prefixCounts.get(prefix) ?? 0) < KEY_PREFIX_MIN_ROWS) return undefined;
+      return segments.slice(depth).join("_");
+    });
+    if (candidates.every((candidate) => candidate === undefined)) break;
+
+    // What each row would show at this depth, exempt rows included: a shortened value that matches
+    // some other row's full value is just as ambiguous as one that matches another shortened value.
+    const displayCounts = new Map<string, number>();
+    for (let index = 0; index < values.length; index++) {
+      const display = candidates[index] ?? values[index];
+      displayCounts.set(display, (displayCounts.get(display) ?? 0) + 1);
+    }
+
+    const shortened = new Map<string, string>();
+    let exempt = 0;
+    for (let index = 0; index < values.length; index++) {
+      const candidate = candidates[index];
+      if (candidate !== undefined && displayCounts.get(candidate) === 1) shortened.set(values[index], candidate);
+      else exempt++;
+    }
+
+    if (exempt > maxExempt) break;
+    best = { depth, shortened };
+  }
+
+  return best;
+};
+
 const MEMORY_PACK_PREFIX = "memory://";
 
 /**
