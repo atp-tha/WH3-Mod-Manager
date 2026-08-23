@@ -858,7 +858,7 @@ export const FilterNode: React.FC<{ data: FilterNodeData; id: string }> = ({ dat
           return (
             <div key={index} className="bg-gray-800 p-2 rounded border border-gray-600">
               <div className="flex items-center gap-2 mb-2">
-                <label className="flex items-center gap-1 cursor-pointer">
+                <label className="flex shrink-0 items-center gap-1 cursor-pointer">
                   <input
                     type="checkbox"
                     checked={filter.not}
@@ -867,40 +867,47 @@ export const FilterNode: React.FC<{ data: FilterNodeData; id: string }> = ({ dat
                   />
                   <span className="text-xs text-gray-300">{localized.nodeEditorNot || "NOT"}</span>
                 </label>
-                <div
-                  className={`inline-flex overflow-hidden rounded-full border bg-gray-700 ${
-                    regexError ? "border-red-500" : "border-gray-600"
-                  }`}
-                  role="group"
-                  aria-label={localized.nodeEditorFilterMatchMode || "Filter match mode"}
-                  title={filterMatchModeTooltip}
-                >
-                  {FILTER_MATCH_MODES.map((mode) => {
-                    const selected = matchMode === mode;
-                    return (
-                      <button
-                        key={mode}
-                        type="button"
-                        aria-pressed={selected}
-                        title={filterMatchModeDescriptions[mode]}
-                        onClick={() => handleFilterChange(index, "matchMode", mode)}
-                        className={`px-2 py-0.5 text-[10px] leading-none transition-colors focus:outline-none focus:ring-1 focus:ring-yellow-400 ${
-                          selected ? "bg-yellow-600 text-white" : "text-gray-300 hover:bg-gray-600"
-                        }`}
-                      >
-                        {filterMatchModeLabels[mode]}
-                      </button>
-                    );
-                  })}
-                </div>
                 {filters.length > 1 && (
                   <button
                     onClick={() => handleRemoveFilter(index)}
-                    className="ml-auto text-red-400 hover:text-red-300 text-xs"
+                    className="ml-auto shrink-0 text-red-400 hover:text-red-300 text-xs"
                   >
                     {localized.remove || "Remove"}
                   </button>
                 )}
+                <div
+                  className={`ml-auto flex shrink-0 items-center gap-1 rounded border bg-gray-700 px-1 py-1 ${
+                    regexError ? "border-red-500" : "border-gray-600"
+                  }`}
+                >
+                  <span className="whitespace-nowrap text-[10px] font-semibold text-gray-300">
+                    {localized.nodeEditorMatchLabel || "Match:"}
+                  </span>
+                  <div
+                    className="inline-flex overflow-hidden rounded-full border border-gray-600 bg-gray-800"
+                    role="group"
+                    aria-label={localized.nodeEditorFilterMatchMode || "Filter match mode"}
+                    title={filterMatchModeTooltip}
+                  >
+                    {FILTER_MATCH_MODES.map((mode) => {
+                      const selected = matchMode === mode;
+                      return (
+                        <button
+                          key={mode}
+                          type="button"
+                          aria-pressed={selected}
+                          title={filterMatchModeDescriptions[mode]}
+                          onClick={() => handleFilterChange(index, "matchMode", mode)}
+                          className={`px-2 py-0.5 text-[10px] leading-none transition-colors focus:outline-none focus:ring-1 focus:ring-yellow-400 ${
+                            selected ? "bg-yellow-600 text-white" : "text-gray-300 hover:bg-gray-600"
+                          }`}
+                        >
+                          {filterMatchModeLabels[mode]}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
               </div>
 
               <div className="mb-1">
