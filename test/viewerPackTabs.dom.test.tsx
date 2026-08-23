@@ -238,6 +238,7 @@ describe("multiple pack viewer tabs", () => {
   });
 
   it("opens the default main units table only once", async () => {
+    const user = userEvent.setup();
     const packPath = "A:\\mods\\default-table.pack";
     const getPackData = vi.fn();
     window.api = { getPackData, setViewerActivePack: vi.fn() } as unknown as NonNullable<Window["api"]>;
@@ -267,6 +268,12 @@ describe("multiple pack viewer tabs", () => {
     store.dispatch(requestOpenPackTab(packPath));
 
     await waitFor(() => expect(screen.getAllByText(/main_units_tables\/data__/)).toHaveLength(1));
+    expect(getPackData).toHaveBeenCalledTimes(1);
+
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    await user.click(screen.getByRole("button", { name: /^Close main_units_tables\/data__/ }));
+    await waitFor(() => expect(screen.getByText("No files open")).toBeInTheDocument());
+    expect(screen.queryByRole("button", { name: /^Close main_units_tables\/data__/ })).not.toBeInTheDocument();
     expect(getPackData).toHaveBeenCalledTimes(1);
   });
 

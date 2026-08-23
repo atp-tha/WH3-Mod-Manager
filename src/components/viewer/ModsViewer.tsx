@@ -321,6 +321,8 @@ const ModsViewer = memo(() => {
   const didRunTestDBCloneRef = useRef(false);
   const lastObservedPackOpenNonceRef = useRef(0);
   const pendingPackOpenRequestsRef = useRef<PackOpenRequest[]>([]);
+  /** Do not re-open the default table after the user deliberately closes the pack's last tab. */
+  const suppressDefaultTableOpenForPackPathsRef = useRef(new Set<string>());
   const [packOpenRequestVersion, setPackOpenRequestVersion] = useState(0);
   const lastSelectionKeyRef = useRef<string | null>(null);
   const lastProcessedSelectionRequestKeyRef = useRef<string | null>(null);
@@ -1022,6 +1024,10 @@ const ModsViewer = memo(() => {
   const handleCloseTab = useCallback((tabId: string) => {
     const targetPackPath = activePackPathRef.current;
     if (!targetPackPath) return;
+    const targetPackTab = packTabs.find((packTab) => packTab.packPath === targetPackPath);
+    if (targetPackTab?.openTabs.length === 1 && targetPackTab.openTabs[0]?.id === tabId) {
+      suppressDefaultTableOpenForPackPathsRef.current.add(targetPackPath);
+    }
     // Derived inside the updater so a pack opened over IPC between render and click is not clobbered.
     setPackTabs((prevPackTabs) =>
       prevPackTabs.map((packTab) => {
@@ -1036,7 +1042,7 @@ const ModsViewer = memo(() => {
         return { ...packTab, openTabs: nextOpenTabs, activeTabId: nextActiveTabId };
       }),
     );
-  }, []);
+  }, [packTabs]);
 
   // With no pack tab open, activeViewerPackPath is only the Redux fallback (the game's db pack), which
   // nobody asked to open - saving it is not on offer.
@@ -1249,6 +1255,7 @@ const ModsViewer = memo(() => {
 
   useEffect(() => {
     if (!activePackPath) return;
+    if (suppressDefaultTableOpenForPackPathsRef.current.has(activePackPath)) return;
     if (activeTabId) return;
     if (currentFlowFileSelection && currentFlowFilePackPath === activePackPath) return;
     if (hasDBSelectionTarget(currentDBTableSelection) && currentDBTableSelection.packPath === activePackPath) return;
@@ -1453,6 +1460,7 @@ const ModsViewer = memo(() => {
       delete treeScrollElementsRef.current[packPath];
       delete treeViewRefs.current[packPath];
       delete treeViewRefCallbacksRef.current[packPath];
+      suppressDefaultTableOpenForPackPathsRef.current.delete(packPath);
       dispatch(removePackData(packPath));
       window.api?.viewerClosedPack?.(packPath);
     },
