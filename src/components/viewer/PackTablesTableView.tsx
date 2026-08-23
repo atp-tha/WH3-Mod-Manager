@@ -755,6 +755,7 @@ const AgGridWrapper = memo(
     canEditTable,
     canDeepCloneTable,
     onCellValueChangedCallback,
+    onAddRow,
     onDeleteRows,
     onContextMenuCallback,
     onGoToReference,
@@ -782,6 +783,7 @@ const AgGridWrapper = memo(
     canEditTable: boolean;
     canDeepCloneTable: boolean;
     onCellValueChangedCallback: (event: CellValueChangedEvent<RowData>) => void;
+    onAddRow?: () => void | Promise<void>;
     onDeleteRows?: (displayedRows: number[]) => Promise<boolean>;
     onContextMenuCallback: (row: number, col: number) => void;
     onGoToReference?: (request: GoToReferenceRequest) => void;
@@ -1489,7 +1491,7 @@ const AgGridWrapper = memo(
               }
             : undefined;
 
-        if ((!canDeepCloneTable || keyColumnSet.size === 0) && !onCopyRowsInto && !reference) {
+        if (!onAddRow && !onDeleteRows && (!canDeepCloneTable || keyColumnSet.size === 0) && !onCopyRowsInto && !reference) {
           setMenuState(undefined);
           return;
         }
@@ -1515,6 +1517,8 @@ const AgGridWrapper = memo(
         currentSchema.fields,
         firstKeyColumnIndex,
         keyColumnSet,
+        onAddRow,
+        onDeleteRows,
         onCopyRowsInto,
         sourceDBFolder,
         sourcePackPath,
@@ -1774,6 +1778,33 @@ const AgGridWrapper = memo(
             className="rounded-md border border-gray-600 bg-gray-800 text-gray-100 shadow-lg overflow-visible"
             onMouseDownCapture={(e) => e.stopPropagation()}
           >
+            {onAddRow && (
+              <button
+                type="button"
+                className="w-full text-left px-3 py-2 text-sm hover:bg-gray-700"
+                onClick={() => {
+                  setMenuState(undefined);
+                  void onAddRow();
+                }}
+              >
+                Add new row
+              </button>
+            )}
+            {onDeleteRows && menuState.copyRows.length > 0 && (
+              <button
+                type="button"
+                className="w-full text-left px-3 py-2 text-sm hover:bg-gray-700"
+                onClick={async () => {
+                  const rowsToDelete = menuState.copyRows;
+                  setMenuState(undefined);
+                  if (await onDeleteRows(rowsToDelete)) {
+                    setSelectionRanges([]);
+                  }
+                }}
+              >
+                {menuState.copyRows.length === 1 ? "Delete row" : "Delete rows"}
+              </button>
+            )}
             {menuState.reference && onGoToReference && (
               <button
                 type="button"
@@ -2446,6 +2477,7 @@ const PackTablesTableView = memo((props: PackTablesTableViewProps) => {
           canEditTable={canEditTable}
           canDeepCloneTable={!isDBCloneTableIgnored(currentDBTableSelection.dbName)}
           onCellValueChangedCallback={handleCellValueChangedCallback}
+          onAddRow={canEditTable ? handleAddRow : undefined}
           onDeleteRows={canEditTable ? handleDeleteRows : undefined}
           onContextMenuCallback={handleContextMenuCallback}
           onGoToReference={onGoToReference}
