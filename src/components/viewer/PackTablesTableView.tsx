@@ -64,7 +64,7 @@ const SELECTION_AUTO_SCROLL_MAX_STEP_PX = 24;
 // Cells render at `.ag-cell { font-size: 1.1rem }` from index.css, which is 17.6px. Measuring them
 // at anything smaller makes every column narrower than its contents, which shows up as ellipsised
 // values in whichever column holds the longest text - usually a key column.
-const GRID_CELL_FONT = '400 17.6px "Roboto", "Inter", Arial, sans-serif';
+const GRID_CELL_FONT = '400 17.6px "Inter", "Roboto", Arial, sans-serif';
 const ROW_INDEX_GRID_CELL_FONT = GRID_CELL_FONT;
 /** Upper bound on one glyph's advance at GRID_CELL_FONT, generous enough to cover full-width ones. */
 const GRID_CELL_MAX_GLYPH_WIDTH_PX = 24;
@@ -87,7 +87,7 @@ const HEADER_CHROME_FALLBACK_PX = 64;
 /** Ignore a measurement outside this range: the grid was not laid out yet, or the DOM moved on. */
 const HEADER_CHROME_PLAUSIBLE_RANGE_PX = { min: 4, max: 200 };
 const TEXT_COLUMN_WIDTH_MIN_PX = 110;
-const GRID_HEADER_FONT = '500 14px "Roboto", "Inter", Arial, sans-serif';
+const GRID_HEADER_FONT = '500 14px "Inter", "Roboto", Arial, sans-serif';
 const KEY_HEADER_ICON_WIDTH_PX = 22;
 const COLUMN_HEADER_DISPLAY_NAMES: Record<string, string> = {
   "additional building requirement": "building req.",

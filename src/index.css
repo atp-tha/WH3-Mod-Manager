@@ -869,7 +869,7 @@ body:not(.disable-row-hover) .row-hover-highlight:hover > div:not(.drop-ghost) {
    * GRID_CELL_FONT and GRID_HEADER_FONT in PackTablesTableView.tsx measure column widths against
    * this, so the stacks in the two places have to stay in the same order.
    */
-  --ag-font-family: "Roboto", "Inter", Arial, sans-serif;
+  --ag-font-family: "Inter", "Roboto", Arial, sans-serif;
 }
 
 /*
