@@ -832,6 +832,12 @@ body:not(.disable-row-hover) .row-hover-highlight:hover > div:not(.drop-ghost) {
   text-align: right;
 }
 
+/* Header tooltips use plain text; preserve the line breaks between referenced tables. */
+.ag-theme-material-dark .ag-header-tooltip {
+  font-size: 14px;
+  white-space: pre-line;
+}
+
 /*
  * Column separators. The theme rules rows but not columns, so wide tables of similar-looking values
  * run together and it is easy to read a cell against the wrong header.
