@@ -10500,7 +10500,14 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
 
       const newPack =
         (await readFromCache()) ??
-        (await readPack(packPath, table && { tablesToRead: [packedFilePath], readLocs: getLocs }));
+        // Opening a pack only needs its file index for the tree. Parse DB payloads lazily when the
+        // selected table is requested; parsing the whole pack here blocks the first tab switch.
+        (await readPack(
+          packPath,
+          table
+            ? { tablesToRead: [packedFilePath], readLocs: getLocs }
+            : { skipParsingTables: true, readLocs: getLocs },
+        ));
       if (appData.packsData.every((pack) => pack.path != packPath)) {
         console.log("APPENDING packsData", packPath);
         appendPacksData(newPack);

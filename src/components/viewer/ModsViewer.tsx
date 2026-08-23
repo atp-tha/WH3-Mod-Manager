@@ -74,6 +74,7 @@ type CopyTableNameRequest = {
   exactFileExists: boolean;
 };
 const EMPTY_TABS: ViewerTab[] = [];
+const EMPTY_PACK_TARGETS: ViewerPackTarget[] = [];
 /** Below this the modder File button cannot show its label inside the sidebar's width. */
 const TOOLBAR_ICON_ONLY_SIDEBAR_WIDTH = 300;
 
@@ -242,6 +243,7 @@ const ModsViewer = memo(() => {
   }, [packTabs, packsDataByPath, unsavedPacksDataByPath]);
 
   const treeViewRefs = useRef<Record<string, PackTablesTreeViewHandle | null>>({});
+  const treeViewRefCallbacksRef = useRef<Record<string, React.RefCallback<PackTablesTreeViewHandle>>>({});
   const treeScrollTopsRef = useRef<Record<string, number>>({});
   const treeScrollElementsRef = useRef<Record<string, HTMLDivElement | null>>({});
   const viewerRootRef = useRef<HTMLDivElement>(null);
@@ -286,6 +288,17 @@ const ModsViewer = memo(() => {
   /** For outcomes worth confirming but not worth a click to dismiss, like a successful save. */
   const showToast = useCallback((message: string) => {
     setToast(message);
+  }, []);
+
+  const getTreeViewRef = useCallback((packPath: string) => {
+    const existingCallback = treeViewRefCallbacksRef.current[packPath];
+    if (existingCallback) return existingCallback;
+
+    const callback: React.RefCallback<PackTablesTreeViewHandle> = (handle) => {
+      treeViewRefs.current[packPath] = handle;
+    };
+    treeViewRefCallbacksRef.current[packPath] = callback;
+    return callback;
   }, []);
 
   useEffect(() => {
@@ -853,17 +866,29 @@ const ModsViewer = memo(() => {
     );
   }, [copyTableNameRequest, handleCopyInto, isCopyProcessing]);
 
-  const getOtherOpenPacks = useCallback(
-    (sourcePackPath: string): ViewerPackTarget[] =>
-      packTabs
-        .filter((packTab) => packTab.packPath !== sourcePackPath)
-        .map((packTab) => ({
-          packPath: packTab.packPath,
-          label:
-            packsDataByPath[packTab.packPath]?.packName ?? getPackNameFromPath(packTab.packPath) ?? packTab.packPath,
-        })),
-    [packTabs, packsDataByPath],
-  );
+  // Keep each target list referentially stable while the user switches packs. The tree views stay
+  // mounted so they can retain their expansion and selection, and a fresh array here would defeat
+  // their memoization on every active-pack change.
+  const otherOpenPacksByPackPath = useMemo(() => {
+    const targetsBySourcePath = new Map<string, ViewerPackTarget[]>();
+
+    for (const sourcePackTab of packTabs) {
+      targetsBySourcePath.set(
+        sourcePackTab.packPath,
+        packTabs
+          .filter((packTab) => packTab.packPath !== sourcePackTab.packPath)
+          .map((packTab) => ({
+            packPath: packTab.packPath,
+            label:
+              packsDataByPath[packTab.packPath]?.packName ??
+              getPackNameFromPath(packTab.packPath) ??
+              packTab.packPath,
+          })),
+      );
+    }
+
+    return targetsBySourcePath;
+  }, [packTabs, packsDataByPath]);
 
   const handleCloseTab = useCallback((tabId: string) => {
     const targetPackPath = activePackPathRef.current;
@@ -1298,6 +1323,7 @@ const ModsViewer = memo(() => {
       delete treeScrollTopsRef.current[packPath];
       delete treeScrollElementsRef.current[packPath];
       delete treeViewRefs.current[packPath];
+      delete treeViewRefCallbacksRef.current[packPath];
       dispatch(removePackData(packPath));
       window.api?.viewerClosedPack?.(packPath);
     },
@@ -1897,14 +1923,12 @@ const ModsViewer = memo(() => {
                         }
                       >
                         <PackTablesTreeView
-                          ref={(handle) => {
-                            treeViewRefs.current[packTab.packPath] = handle;
-                          }}
+                          ref={getTreeViewRef(packTab.packPath)}
                           packPath={packTab.packPath}
                           preferredTab={preferredTreeTabByPackPath[packTab.packPath] ?? "db"}
                           tableFilter={dbTableFilter}
                           showDialog={showDialog}
-                          otherOpenPacks={getOtherOpenPacks(packTab.packPath)}
+                          otherOpenPacks={otherOpenPacksByPackPath.get(packTab.packPath) ?? EMPTY_PACK_TARGETS}
                           onCopyInto={handleCopyInto}
                           onOpenDBTable={handleOpenDBTable}
                           onOpenFlowFile={handleOpenFlowFile}
@@ -1996,7 +2020,7 @@ const ModsViewer = memo(() => {
                     ) : (
                       <PackTablesTableView
                         showDialog={showDialog}
-                        otherOpenPacks={getOtherOpenPacks(activeTab.packPath)}
+                        otherOpenPacks={otherOpenPacksByPackPath.get(activeTab.packPath) ?? EMPTY_PACK_TARGETS}
                         onCopyInto={handleCopyInto}
                       />
                     )
