@@ -60,6 +60,8 @@ type ViewerTab = {
 type ViewerTabCandidate = Omit<ViewerTab, "id">;
 
 type PackTab = { packPath: string; openTabs: ViewerTab[]; activeTabId: string | null };
+type TableHistoryEntry = { tabId: string; tab: ViewerTab };
+type TableHistoryState = { entries: TableHistoryEntry[]; index: number };
 type CopyOverwriteRequest = {
   source: CopyIntoSource;
   targetPackPath: string;
@@ -76,6 +78,7 @@ type CopyTableNameRequest = {
 };
 const EMPTY_TABS: ViewerTab[] = [];
 const EMPTY_PACK_TARGETS: ViewerPackTarget[] = [];
+const MAX_TABLE_HISTORY_ENTRIES = 100;
 /** Below this the modder File button cannot show its label inside the sidebar's width. */
 const TOOLBAR_ICON_ONLY_SIDEBAR_WIDTH = 300;
 
@@ -334,6 +337,7 @@ const ModsViewer = memo(() => {
   const newPackNameInputRef = useRef<HTMLInputElement>(null);
   const copyTableNameInputRef = useRef<HTMLInputElement>(null);
   const tabIdCounterRef = useRef(0);
+  const tableHistoryRef = useRef<TableHistoryState>({ entries: [], index: -1 });
   const lastActionRef = useRef<{ key: string; at: number; openedNew: boolean; tabId?: string } | null>(null);
   const lastHandledPackOpenNonceRef = useRef(0);
   const didRunTestDBCloneRef = useRef(false);
@@ -456,6 +460,55 @@ const ModsViewer = memo(() => {
 
   const createTabId = useCallback(() => `tab-${Date.now()}-${++tabIdCounterRef.current}`, []);
 
+  const recordTableHistory = useCallback((tab: ViewerTab) => {
+    if (tab.kind !== "db" || !tab.dbName || !tab.dbSubname) return;
+
+    const history = tableHistoryRef.current;
+    const currentEntry = history.entries[history.index];
+    if (currentEntry?.tabId === tab.id && currentEntry.tab.fileKey === tab.fileKey) return;
+
+    const nextEntries = history.entries.slice(0, history.index + 1);
+    nextEntries.push({ tabId: tab.id, tab: { ...tab } });
+
+    if (nextEntries.length > MAX_TABLE_HISTORY_ENTRIES) nextEntries.shift();
+    tableHistoryRef.current = {
+      entries: nextEntries,
+      index: nextEntries.length - 1,
+    };
+  }, []);
+
+  const removeTableHistoryEntries = useCallback((shouldRemove: (entry: TableHistoryEntry) => boolean) => {
+    const history = tableHistoryRef.current;
+    const currentEntry = history.entries[history.index];
+    const nextEntries = history.entries.filter((entry) => !shouldRemove(entry));
+    if (nextEntries.length === history.entries.length) return;
+
+    const preservedIndex = currentEntry ? nextEntries.indexOf(currentEntry) : -1;
+    tableHistoryRef.current = {
+      entries: nextEntries,
+      index: preservedIndex >= 0 ? preservedIndex : Math.min(history.index, nextEntries.length - 1),
+    };
+  }, []);
+
+  const activatePackTabFromUser = useCallback(
+    (packPath: string) => {
+      const packTab = packTabs.find((candidate) => candidate.packPath === packPath);
+      const activeTab = packTab?.openTabs.find((tab) => tab.id === packTab.activeTabId);
+      if (activeTab) recordTableHistory(activeTab);
+      activatePackTab(packPath);
+    },
+    [activatePackTab, packTabs, recordTableHistory],
+  );
+
+  const activateViewerTabFromUser = useCallback(
+    (tabId: string) => {
+      const tab = openTabs.find((candidate) => candidate.id === tabId);
+      if (tab) recordTableHistory(tab);
+      setActiveTabId(tabId);
+    },
+    [openTabs, recordTableHistory, setActiveTabId],
+  );
+
   const buildDbTabCandidate = useCallback((selection: DBTableSelection): ViewerTabCandidate => {
     const packLabel = getPackNameFromPath(selection.packPath) ?? selection.packPath;
     // The folder belongs in both: without it a spare copy and the live table are the same tab, and
@@ -539,6 +592,7 @@ const ModsViewer = memo(() => {
         if (existingTab) {
           setActiveTabId(existingTab.id);
           lastActionRef.current = { key: actionKey, at: now, openedNew: false, tabId: existingTab.id };
+          recordTableHistory({ ...existingTab, ...candidate });
           return;
         }
       }
@@ -566,6 +620,7 @@ const ModsViewer = memo(() => {
 
       setActiveTabId(tabToActivate.id);
       lastActionRef.current = { key: actionKey, at: now, openedNew, tabId: tabToActivate.id };
+      recordTableHistory(tabToActivate);
       if (tabToActivate.kind === "db" && tabToActivate.dbName && tabToActivate.dbSubname) {
         const selection = {
           dbFolder: tabToActivate.dbFolder,
@@ -588,6 +643,7 @@ const ModsViewer = memo(() => {
       openOrActivatePackTab,
       packTabs,
       packsDataByPath,
+      recordTableHistory,
       setActiveTabId,
       setOpenTabs,
       unsavedPacksDataByPath,
@@ -600,6 +656,62 @@ const ModsViewer = memo(() => {
       openOrActivateTab(buildDbTabCandidate(selection), options);
     },
     [buildDbTabCandidate, openOrActivateTab],
+  );
+
+  const restoreTableHistoryEntry = useCallback(
+    (entry: TableHistoryEntry): boolean => {
+      const targetPackTab = packTabs.find((packTab) => packTab.packPath === entry.tab.packPath);
+      const targetTab = targetPackTab?.openTabs.find((tab) => tab.id === entry.tabId);
+      if (!targetPackTab || !targetTab) return false;
+
+      const restoredTab = { ...targetTab, ...entry.tab, id: entry.tabId };
+      activatePackTab(entry.tab.packPath);
+      setPackTabs((prevPackTabs) =>
+        prevPackTabs.map((packTab) => {
+          if (packTab.packPath !== entry.tab.packPath) return packTab;
+          return {
+            ...packTab,
+            openTabs: packTab.openTabs.map((tab) => (tab.id === entry.tabId ? restoredTab : tab)),
+            activeTabId: entry.tabId,
+          };
+        }),
+      );
+
+      if (restoredTab.dbName && restoredTab.dbSubname) {
+        const selection = {
+          dbFolder: restoredTab.dbFolder,
+          dbName: restoredTab.dbName,
+          dbSubname: restoredTab.dbSubname,
+          packPath: restoredTab.packPath,
+        };
+        const isLoaded = hasLoadedDBTable(
+          packsDataByPath[restoredTab.packPath],
+          unsavedPacksDataByPath[restoredTab.packPath] ?? [],
+          selection,
+        );
+        if (!isLoaded) window.api?.getPackData(restoredTab.packPath, selection);
+      }
+
+      return true;
+    },
+    [activatePackTab, packTabs, packsDataByPath, unsavedPacksDataByPath],
+  );
+
+  const navigateTableHistory = useCallback(
+    (direction: -1 | 1) => {
+      const history = tableHistoryRef.current;
+      let nextIndex = history.index + direction;
+
+      while (nextIndex >= 0 && nextIndex < history.entries.length) {
+        const entry = history.entries[nextIndex];
+        if (entry && restoreTableHistoryEntry(entry)) {
+          history.index = nextIndex;
+          return;
+        }
+        nextIndex += direction;
+      }
+    },
+    [restoreTableHistoryEntry],
   );
 
   const handleGoToReference = useCallback(
@@ -748,6 +860,36 @@ const ModsViewer = memo(() => {
     },
     [handleOpenPackedFile, navigateToPack],
   );
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const root = viewerRootRef.current;
+    if (!root) return;
+
+    const isHistoryMouseButton = (event: MouseEvent) => event.button === 3 || event.button === 4;
+    const consumeHistoryMouseButton = (event: MouseEvent) => {
+      if (!isHistoryMouseButton(event)) return;
+      event.preventDefault();
+      event.stopPropagation();
+    };
+    const handleMouseDown = (event: MouseEvent) => {
+      if (!isHistoryMouseButton(event)) return;
+      consumeHistoryMouseButton(event);
+      navigateTableHistory(event.button === 3 ? -1 : 1);
+    };
+
+    // XButton1/XButton2 are reported as buttons 3 and 4. Capture the event before a child control or
+    // Electron's default page navigation can consume it, while auxclick/mouseup only suppress the
+    // browser action so one physical click cannot navigate twice.
+    root.addEventListener("mousedown", handleMouseDown, true);
+    root.addEventListener("auxclick", consumeHistoryMouseButton, true);
+    root.addEventListener("mouseup", consumeHistoryMouseButton, true);
+    return () => {
+      root.removeEventListener("mousedown", handleMouseDown, true);
+      root.removeEventListener("auxclick", consumeHistoryMouseButton, true);
+      root.removeEventListener("mouseup", consumeHistoryMouseButton, true);
+    };
+  }, [isOpen, navigateTableHistory]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -1079,6 +1221,7 @@ const ModsViewer = memo(() => {
       if (targetPackTab?.openTabs.length === 1 && targetPackTab.openTabs[0]?.id === tabId) {
         suppressDefaultTableOpenForPackPathsRef.current.add(targetPackPath);
       }
+      removeTableHistoryEntries((entry) => entry.tabId === tabId);
       // Derived inside the updater so a pack opened over IPC between render and click is not clobbered.
       setPackTabs((prevPackTabs) =>
         prevPackTabs.map((packTab) => {
@@ -1094,7 +1237,7 @@ const ModsViewer = memo(() => {
         }),
       );
     },
-    [packTabs],
+    [packTabs, removeTableHistoryEntries],
   );
 
   const handlePackFilePathsRemoved = useCallback(
@@ -1202,7 +1345,7 @@ const ModsViewer = memo(() => {
       const isAlreadySelected =
         !currentFlowSelection &&
         currentDBSelection?.packPath === activeTab.packPath &&
-        (currentDBSelection?.dbFolder || DEFAULT_DB_TABLE_ROOT) === (activeTab.dbFolder || DEFAULT_DB_TABLE_ROOT) &&
+        (currentDBSelection?.dbFolder ?? DEFAULT_DB_TABLE_ROOT) === (activeTab.dbFolder ?? DEFAULT_DB_TABLE_ROOT) &&
         currentDBSelection?.dbName === activeTab.dbName &&
         currentDBSelection?.dbSubname === activeTab.dbSubname;
       if (isAlreadySelected) {
@@ -1233,7 +1376,9 @@ const ModsViewer = memo(() => {
         selectionRequestKey = `flow|${flowPackPath}|${currentFlowFileSelection}`;
       }
     } else if (hasDBSelectionTarget(currentDBTableSelection)) {
-      selectionRequestKey = `db|${currentDBTableSelection.packPath}|${currentDBTableSelection.dbName}|${currentDBTableSelection.dbSubname}`;
+      selectionRequestKey = `db|${currentDBTableSelection.packPath}|${
+        currentDBTableSelection.dbFolder ?? DEFAULT_DB_TABLE_ROOT
+      }|${currentDBTableSelection.dbName}|${currentDBTableSelection.dbSubname}`;
     }
 
     if (suppressSelectionToTabSyncRef.current) {
@@ -1514,6 +1659,8 @@ const ModsViewer = memo(() => {
       const packIndex = packTabs.findIndex((packTab) => packTab.packPath === packPath);
       if (packIndex < 0) return;
 
+      removeTableHistoryEntries((entry) => entry.tab.packPath === packPath);
+
       // Which neighbour to fall back to is read from this render; the removal itself goes through an
       // updater so a pack opened over IPC while the confirm dialog was up is not clobbered.
       if (activePackPathRef.current === packPath) {
@@ -1534,7 +1681,7 @@ const ModsViewer = memo(() => {
       dispatch(removePackData(packPath));
       window.api?.viewerClosedPack?.(packPath);
     },
-    [activatePackTab, dispatch, packTabs],
+    [activatePackTab, dispatch, packTabs, removeTableHistoryEntries],
   );
 
   const requestClosePackTab = useCallback(
@@ -1945,6 +2092,7 @@ const ModsViewer = memo(() => {
 
       <div
         ref={viewerRootRef}
+        data-testid="mods-viewer-root"
         className="dark:text-gray-300 explicit-height-without-topbar-and-padding-35rem flex flex-col -mt-8"
       >
         {isOpen && (
@@ -2040,7 +2188,7 @@ const ModsViewer = memo(() => {
                     >
                       <button
                         type="button"
-                        onClick={() => activatePackTab(packTab.packPath)}
+                        onClick={() => activatePackTabFromUser(packTab.packPath)}
                         className="px-2 py-1 max-w-[220px] truncate"
                         title={packLabel}
                       >
@@ -2200,7 +2348,7 @@ const ModsViewer = memo(() => {
                         >
                           <button
                             type="button"
-                            onClick={() => setActiveTabId(tab.id)}
+                            onClick={() => activateViewerTabFromUser(tab.id)}
                             className="px-2 py-1 max-w-[220px] truncate"
                             title={tab.title}
                           >

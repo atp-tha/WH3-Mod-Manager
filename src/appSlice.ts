@@ -1558,6 +1558,7 @@ const appSlice = createSlice({
       if (
         currentSelection &&
         currentSelection.packPath === nextSelection.packPath &&
+        (currentSelection.dbFolder ?? "db") === (nextSelection.dbFolder ?? "db") &&
         currentSelection.dbName === nextSelection.dbName &&
         currentSelection.dbSubname === nextSelection.dbSubname
       ) {

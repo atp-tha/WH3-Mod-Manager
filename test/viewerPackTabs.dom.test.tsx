@@ -5,7 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { Provider } from "react-redux";
 import { describe, expect, it, vi } from "vitest";
 
-import appReducer, { requestOpenPackTab, setUnsavedPacksData } from "../src/appSlice";
+import appReducer, { requestOpenPackTab, selectDBTable, setUnsavedPacksData } from "../src/appSlice";
 import initialState from "../src/initialAppState";
 import LocalizationContext from "../src/localizationContext";
 import ModsViewer from "../src/components/viewer/ModsViewer";
@@ -28,6 +28,22 @@ vi.mock("../src/components/viewer/PackTablesTreeView", () => {
           }
         >
           Open table {props.packPath}
+        </button>
+        <button
+          type="button"
+          data-testid={`open-new-table-${props.packPath}`}
+          onClick={() =>
+            props.onOpenDBTable(
+              {
+                packPath: props.packPath,
+                dbName: "new_units_tables",
+                dbSubname: "data__",
+              },
+              { forceNewTab: true },
+            )
+          }
+        >
+          Open new table {props.packPath}
         </button>
         {props.onCopyInto && props.otherOpenPacks?.[0] && (
           <>
@@ -105,6 +121,87 @@ const pack = (packPath: string, packName: string): PackViewData => ({
 });
 
 describe("multiple pack viewer tabs", () => {
+  it("navigates table history with the mouse back and forward buttons", async () => {
+    const packPath = "A:\\mods\\history.pack";
+    window.api = { getPackData: vi.fn(), setViewerActivePack: vi.fn() } as unknown as NonNullable<Window["api"]>;
+    const store = configureStore({
+      reducer: { app: appReducer },
+      preloadedState: {
+        app: {
+          ...initialState,
+          packsData: { [packPath]: pack(packPath, "History") },
+        },
+      },
+    });
+
+    render(
+      <Provider store={store}>
+        <LocalizationContext.Provider value={{ filter: "Filter" }}>
+          <ModsViewer />
+        </LocalizationContext.Provider>
+      </Provider>,
+    );
+
+    store.dispatch(requestOpenPackTab(packPath));
+    await waitFor(() => expect(screen.getByRole("button", { name: "History", exact: true })).toBeInTheDocument());
+
+    store.dispatch(selectDBTable({ packPath, dbName: "first_units_tables", dbSubname: "data__" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /^first_units_tables\/data__/ })).toBeInTheDocument(),
+    );
+
+    store.dispatch(selectDBTable({ packPath, dbName: "second_units_tables", dbSubname: "data__" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /^second_units_tables\/data__/ })).toBeInTheDocument(),
+    );
+
+    const root = screen.getByTestId("mods-viewer-root");
+    expect(fireEvent.mouseDown(root, { button: 3 })).toBe(false);
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /^first_units_tables\/data__/ })).toBeInTheDocument(),
+    );
+
+    expect(fireEvent.mouseDown(root, { button: 4 })).toBe(false);
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /^second_units_tables\/data__/ })).toBeInTheDocument(),
+    );
+  });
+
+  it("switches to the previous table's tab when history crosses a viewer tab", async () => {
+    const user = userEvent.setup();
+    const packPath = "A:\\mods\\history-tabs.pack";
+    window.api = { getPackData: vi.fn(), setViewerActivePack: vi.fn() } as unknown as NonNullable<Window["api"]>;
+    const store = configureStore({
+      reducer: { app: appReducer },
+      preloadedState: {
+        app: {
+          ...initialState,
+          packsData: { [packPath]: pack(packPath, "History Tabs") },
+        },
+      },
+    });
+
+    render(
+      <Provider store={store}>
+        <LocalizationContext.Provider value={{ filter: "Filter" }}>
+          <ModsViewer />
+        </LocalizationContext.Provider>
+      </Provider>,
+    );
+
+    store.dispatch(requestOpenPackTab(packPath));
+    await waitFor(() => expect(screen.getByTestId(`open-table-${packPath}`)).toBeInTheDocument());
+    await user.click(screen.getByTestId(`open-table-${packPath}`));
+    await waitFor(() => expect(screen.getByRole("button", { name: /^units_tables\/data__/ })).toBeInTheDocument());
+
+    await user.click(screen.getByTestId(`open-new-table-${packPath}`));
+    await waitFor(() => expect(screen.getByRole("button", { name: /^new_units_tables\/data__/ })).toBeInTheDocument());
+
+    expect(fireEvent.mouseDown(screen.getByTestId("mods-viewer-root"), { button: 3 })).toBe(false);
+    await waitFor(() => expect(screen.getByRole("button", { name: /^units_tables\/data__/ })).toBeInTheDocument());
+    expect(screen.getByRole("button", { name: /^units_tables\/data__/ }).parentElement).toHaveClass("bg-gray-700");
+  });
+
   it("preserves file tabs per pack, activates existing packs, and closes clean packs", async () => {
     const user = userEvent.setup();
     const packA = "A:\\mods\\a.pack";
