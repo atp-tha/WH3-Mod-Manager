@@ -649,6 +649,26 @@ const api = {
   selectDirectory: (defaultPath?: string): Promise<string | undefined> =>
     ipcRenderer.invoke("selectDirectory", defaultPath),
 
+  selectImportFiles: (): Promise<string[]> => ipcRenderer.invoke("selectImportFiles"),
+
+  selectImportFolders: (): Promise<string[]> => ipcRenderer.invoke("selectImportFolders"),
+
+  planPackImportFromDisk: (
+    packPath: string,
+    sources: PackImportSource[],
+    targetFolder: string,
+  ): Promise<PackImportPlan> => ipcRenderer.invoke("planPackImportFromDisk", packPath, sources, targetFolder),
+
+  applyPackImportFromDisk: (packPath: string, items: PackImportItem[]): Promise<PackImportApplyResult> =>
+    ipcRenderer.invoke("applyPackImportFromDisk", packPath, items),
+
+  exportPackedFilesToDirectory: (
+    packPath: string,
+    outputDirectory: string,
+    filePaths: string[] | "all",
+  ): Promise<PackExportResult> =>
+    ipcRenderer.invoke("exportPackedFilesToDirectory", packPath, outputDirectory, filePaths),
+
   getDataFolder: (): Promise<string | undefined> => ipcRenderer.invoke("getDataFolder"),
 
   exportCompatReport: (

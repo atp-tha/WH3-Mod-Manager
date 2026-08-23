@@ -2,9 +2,10 @@ import { promises as fs } from "node:fs";
 import * as nodePath from "node:path";
 
 import { sortByNameAndLoadOrder } from "./modSortingHelpers";
-import { buildRowFromValues } from "./utility/dbRowCells";
-import { parseDBTablePath } from "./utility/packFileHelpers";
 import type { DBVersion, NewPackedFile, Pack } from "./packFileTypes";
+import { convertRpfmTsvToPackedFile } from "./utility/rpfmTsv";
+
+export { convertRpfmTsvToPackedFile } from "./utility/rpfmTsv";
 
 export const WHMM_MODDING_FOLDER = "whmm_modding";
 
@@ -30,101 +31,6 @@ export const replaceEnabledModsWithGeneratedPacks = (enabledMods: Mod[], generat
 };
 
 const isBackedUpFolder = (name: string) => name === "whmm_backups";
-
-interface RpfmTsvMetadata {
-  tableName: string;
-  version: number;
-  packedFileName: string;
-}
-
-const normalizePackedFileName = (fileName: string) =>
-  fileName
-    .replaceAll("/", "\\")
-    .replace(/^\.\\/, "")
-    .replace(/\.tsv$/i, "");
-
-const getRpfmTsvMetadata = (line: string, fallbackPackedFileName: string): RpfmTsvMetadata | undefined => {
-  const trimmedLine = line.trim();
-  if (!trimmedLine.startsWith("#")) return;
-
-  const [tableNamePart, versionPart, packedFileNamePart] = trimmedLine.slice(1).split(";");
-  if (tableNamePart == null || versionPart == null || packedFileNamePart == null) return;
-
-  const tableName = tableNamePart.trim();
-  const version = Number(versionPart.trim());
-  const packedFileName = normalizePackedFileName(packedFileNamePart.trim() || fallbackPackedFileName);
-  if (!tableName || !Number.isInteger(version) || version < 0 || !packedFileName) {
-    throw new Error(`Invalid RPFM TSV metadata: ${line}`);
-  }
-
-  return { tableName, version, packedFileName };
-};
-
-export const convertRpfmTsvToPackedFile = (
-  contents: string,
-  fallbackPackedFileName: string,
-  tableSchemas: Record<string, DBVersion[]>,
-  sourcePath: string,
-): NewPackedFile | undefined => {
-  const lines = contents.split(/\r?\n/);
-  if (lines.length < 2) return;
-
-  const metadata = getRpfmTsvMetadata(lines[1], fallbackPackedFileName);
-  if (!metadata) return;
-
-  const parsedPath = parseDBTablePath(metadata.packedFileName);
-  if (!parsedPath) {
-    throw new Error(`RPFM TSV metadata does not name a DB table: ${sourcePath}`);
-  }
-  if (parsedPath.dbName !== metadata.tableName) {
-    throw new Error(
-      `RPFM TSV table name does not match its path in ${sourcePath}: ${metadata.tableName} vs ${parsedPath.dbName}`,
-    );
-  }
-
-  const schema = tableSchemas[metadata.tableName]?.find((version) => version.version === metadata.version);
-  if (!schema) {
-    throw new Error(`No schema for RPFM TSV ${metadata.tableName} version ${metadata.version} in ${sourcePath}`);
-  }
-
-  const headers = lines[0]
-    .replace(/^\uFEFF/, "")
-    .split("\t")
-    .map((header) => header.trim());
-  const headerSet = new Set(headers);
-  const duplicateHeaders = headers.filter((header, index) => header && headers.indexOf(header) !== index);
-  const unknownHeaders = headers.filter((header) => !schema.fields.some((field) => field.name === header));
-  const missingHeaders = schema.fields.map((field) => field.name).filter((fieldName) => !headerSet.has(fieldName));
-  if (headers.some((header) => !header) || duplicateHeaders.length > 0 || unknownHeaders.length > 0) {
-    throw new Error(`RPFM TSV columns do not match the schema for ${metadata.tableName}: ${sourcePath}`);
-  }
-  if (missingHeaders.length > 0) {
-    throw new Error(
-      `RPFM TSV is missing columns for ${metadata.tableName}: ${missingHeaders.join(", ")} (${sourcePath})`,
-    );
-  }
-
-  const schemaFields = lines.slice(2).reduce<NonNullable<NewPackedFile["schemaFields"]>>((fields, line) => {
-    if (line === "") return fields;
-    const values = line.split("\t");
-    if (values.length > headers.length) {
-      throw new Error(`RPFM TSV row has too many columns in ${sourcePath}`);
-    }
-    const rowValues: Record<string, string> = {};
-    headers.forEach((header, index) => {
-      rowValues[header] = values[index] ?? "";
-    });
-    fields.push(...buildRowFromValues(schema, rowValues));
-    return fields;
-  }, []);
-
-  return {
-    name: metadata.packedFileName,
-    version: metadata.version,
-    tableSchema: schema,
-    schemaFields,
-  };
-};
 
 export const getModdingPackName = (folderName: string): string =>
   folderName.toLowerCase().endsWith(".pack") ? folderName : `${folderName}.pack`;

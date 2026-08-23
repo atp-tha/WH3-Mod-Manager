@@ -494,6 +494,29 @@ declare global {
     readFlows?: boolean;
   }
 
+  type PackImportSource = import("./utility/packImportPlan").PackImportSource;
+  type PackImportItem = import("./utility/packImportPlan").PackImportItem;
+  type PackImportPlan = import("./utility/packImportPlan").PackImportPlan;
+  type PackImportPlanError = import("./utility/packImportPlan").PackImportPlanError;
+
+  interface PackImportApplyResult {
+    success: boolean;
+    importedCount: number;
+    errors: { diskPath: string; message: string }[];
+  }
+
+  interface PackExportResult {
+    success: boolean;
+    writtenCount: number;
+    skipped: { name: string; reason: string }[];
+    error?: string;
+  }
+
+  interface PackImportConflictRequest {
+    packPath: string;
+    plan: PackImportPlan;
+  }
+
   interface FlowExecutionContext {
     readPackCache: Map<string, Promise<Pack>>;
     tableFilesByPackAndTable: Map<string, PackedFile[]>;

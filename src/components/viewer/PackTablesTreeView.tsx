@@ -31,6 +31,7 @@ type PackTablesTreeViewProps = {
   showDialog: ShowViewerDialog;
   otherOpenPacks?: ViewerPackTarget[];
   onCopyInto?: (source: CopyIntoSource, targetPackPath: string, openAfterCopy: boolean) => void | Promise<void>;
+  onImportConflicts?: (request: PackImportConflictRequest) => void;
   onOpenDBTable: (selection: DBTableSelection, options?: { forceNewTab?: boolean }) => void;
   onOpenFlowFile: (selection: { flowFile: string; packPath: string }, options?: { forceNewTab?: boolean }) => void;
   onOpenPackedFile: (selection: { filePath: string; packPath: string }, options?: { forceNewTab?: boolean }) => void;
@@ -42,7 +43,8 @@ type TreeTab = "db" | "files";
 type ContextMenuTreeTab = TreeTab | "empty";
 type TreeContextTarget =
   | { kind: "db"; packPath: string; filePath: string; selection: DBTableSelection }
-  | { kind: "file"; packPath: string; filePath: string };
+  | { kind: "file"; packPath: string; filePath: string }
+  | { kind: "folder"; packPath: string; folderPath: string };
 
 export type ViewerPackTarget = { packPath: string; label: string };
 export type CopyIntoSource = {
@@ -222,6 +224,8 @@ const PackTablesTreeView = React.memo(
     const clearLabelSelectionModeTimeoutRef = React.useRef<number | null>(null);
     const contextMenuRef = React.useRef<HTMLDivElement | null>(null);
     const [isExportingSelection, setIsExportingSelection] = React.useState(false);
+    const [isExportingWholePack, setIsExportingWholePack] = React.useState(false);
+    const [isImporting, setIsImporting] = React.useState(false);
 
     useEffect(() => {
       setActiveTreeTab(props.preferredTab);
@@ -399,90 +403,46 @@ const PackTablesTreeView = React.memo(
       return getNodeFullPath(element, fileNodeById);
     };
 
-    const getPackedFileForDBSelection = (selection: DBTableSelection): PackedFile | undefined => {
-      const packedFilePath = getDBPackedFilePath(selection);
-      const unsavedFile =
-        unsavedFiles.find((file) => file.name === packedFilePath) ||
-        unsavedFiles.find((file) => file.name.startsWith(packedFilePath));
-      if (unsavedFile) {
-        return unsavedFile;
-      }
+    const selectedExportPaths = useMemo(() => {
+      if (!packData) return [];
 
-      if (!packData?.packedFiles) return undefined;
-      if (packData.packedFiles[packedFilePath]) {
-        return packData.packedFiles[packedFilePath];
-      }
+      const treeTab =
+        contextMenu?.treeTab === "db" || contextMenu?.treeTab === "files" ? contextMenu.treeTab : visibleActiveTreeTab;
+      const pathsByKey = new Map<string, string>();
+      const addPath = (path: string | undefined) => {
+        if (!path) return;
+        const key = path.replaceAll("/", "\\").toLowerCase();
+        if (!pathsByKey.has(key)) pathsByKey.set(key, path);
+      };
 
-      for (const [iterPackedFilePath, iterPackedFile] of Object.entries(packData.packedFiles)) {
-        if (iterPackedFilePath.startsWith(packedFilePath)) {
-          return iterPackedFile;
+      if (treeTab === "db") {
+        for (const selectedId of dbSelectedNodeIds) {
+          const node = dbNodeById.get(selectedId);
+          if (!node) continue;
+          const leafIds =
+            node.children && node.children.length > 0 ? getDescendantLeafIds(node, dbNodeById) : [node.id];
+          for (const leafId of leafIds) {
+            const leaf = dbNodeById.get(leafId);
+            const selection = leaf ? getDBSelectionForElement(leaf) : undefined;
+            addPath(selection ? getDBPackedFilePath(selection) : undefined);
+          }
+        }
+      } else if (treeTab === "files") {
+        for (const selectedId of fileSelectedNodeIds) {
+          const node = fileNodeById.get(selectedId);
+          if (!node) continue;
+          const leafIds =
+            node.children && node.children.length > 0 ? getDescendantLeafIds(node, fileNodeById) : [node.id];
+          for (const leafId of leafIds) {
+            const leaf = fileNodeById.get(leafId);
+            addPath(leaf ? getNodeFullPath(leaf, fileNodeById) : undefined);
+          }
         }
       }
 
-      return undefined;
-    };
-
-    const sanitizeTsvCell = (value: unknown) =>
-      String(value ?? "")
-        .replace(/\t/g, " ")
-        .replace(/\r?\n/g, " ");
-
-    const buildTsvContentForDBSelection = (selection: DBTableSelection) => {
-      const packedFile = getPackedFileForDBSelection(selection);
-      if (!packedFile?.schemaFields || !packedFile.tableSchema) return;
-
-      const schema = packedFile.tableSchema;
-      if (!schema.fields?.length) return;
-
-      const rows =
-        packedFile.schemaFields.reduce<any[][]>((resultArray, item, index) => {
-          const chunkIndex = Math.floor(index / schema.fields.length);
-          if (!resultArray[chunkIndex]) resultArray[chunkIndex] = [];
-          resultArray[chunkIndex].push(item);
-          return resultArray;
-        }, []) || [];
-
-      const columnNames = schema.fields.map((field) => field.name);
-      // The header path tells an importer where the table came from, so it has to name the real
-      // folder - a spare exported as db/... would be re-imported over the live table.
-      const packedFilePathForward = getDBPackedFilePath(selection).replaceAll("\\", "/");
-      const version = packedFile.version ?? schema.version ?? 0;
-
-      const tsvLines: string[] = [];
-      tsvLines.push(columnNames.join("\t"));
-      tsvLines.push(`#${selection.dbName};${version};${packedFilePathForward}`);
-
-      for (const row of rows) {
-        const rowValues = row.map((cell: any) => {
-          if (cell?.type === "Boolean") return sanitizeTsvCell(cell?.resolvedKeyValue != "0");
-          if (cell?.type === "OptionalStringU8" && cell?.resolvedKeyValue === "0") return "";
-          return sanitizeTsvCell(cell?.resolvedKeyValue);
-        });
-        tsvLines.push(rowValues.join("\t"));
-      }
-
-      return tsvLines.join("\n");
-    };
-
-    const selectedDBTableSelections = useMemo(() => {
-      if (!packData) return [];
-      if ((!contextMenu || contextMenu.treeTab !== "db") && !isExportingSelection) return [];
-
-      const dedupedSelections = new Map<string, DBTableSelection>();
-      for (const selectedId of dbSelectedNodeIds) {
-        const node = dbNodeById.get(selectedId);
-        if (!node) continue;
-        const selection = getDBSelectionForElement(node);
-        if (!selection) continue;
-        dedupedSelections.set(`${selection.packPath}|${getDBPackedFilePath(selection)}`, selection);
-      }
-
-      return Array.from(dedupedSelections.values()).filter((selection) => {
-        const packedFile = getPackedFileForDBSelection(selection);
-        return Boolean(packedFile?.schemaFields && packedFile?.tableSchema);
-      });
+      return [...pathsByKey.values()];
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [dbSelectedNodeIds, dbNodeById, packData, unsavedFiles, contextMenu, isExportingSelection]);
+    }, [contextMenu, dbNodeById, dbSelectedNodeIds, fileNodeById, fileSelectedNodeIds, packData, visibleActiveTreeTab]);
 
     const addIdsToSelection = (
       idsToAdd: Array<string | number>,
@@ -725,7 +685,13 @@ const PackTablesTreeView = React.memo(
 
     const handleCopyIntoPack = (targetPackPath: string, openAfterCopy: boolean) => {
       const target = contextMenu?.target;
-      if (!target || !props.onCopyInto || packPathKey(target.packPath) === packPathKey(targetPackPath)) return;
+      if (
+        !target ||
+        target.kind === "folder" ||
+        !props.onCopyInto ||
+        packPathKey(target.packPath) === packPathKey(targetPackPath)
+      )
+        return;
 
       const source: CopyIntoSource = {
         packPath: target.packPath,
@@ -813,50 +779,132 @@ const PackTablesTreeView = React.memo(
       }
     };
 
-    const handleExportSelectedAsTSV = async () => {
-      if (selectedDBTableSelections.length === 0 || isExportingSelection) return;
+    const showExportResult = (result: PackExportResult | undefined, outputDirectory: string) => {
+      if (!result?.success) {
+        props.showDialog(`Failed to export packed files: ${result?.error || "Unknown error"}`, {
+          title: "Export Failed",
+        });
+        return;
+      }
+
+      const skipped = result.skipped ?? [];
+      const skippedMessage =
+        skipped.length > 0
+          ? `\nSkipped ${skipped.length} file(s):\n${skipped
+              .map((entry) => `${entry.name}: ${entry.reason}`)
+              .join("\n")}`
+          : "";
+      props.showDialog(`Exported ${result.writtenCount} file(s) to: ${outputDirectory}.${skippedMessage}`, {
+        title: "Export Complete",
+      });
+    };
+
+    const handleExportSelection = async () => {
+      if (selectedExportPaths.length === 0 || isExportingSelection || isExportingWholePack) return;
 
       setContextMenu(null);
       setIsExportingSelection(true);
       try {
         const outputDirectory = await window.api?.selectDirectory();
         if (!outputDirectory) return;
-
-        const exportFiles = selectedDBTableSelections
-          .map((selection) => {
-            const content = buildTsvContentForDBSelection(selection);
-            if (!content) return undefined;
-            return {
-              relativePath: `${getDBPackedFilePath(selection).replaceAll("\\", "/")}.tsv`,
-              content,
-            };
-          })
-          .filter((file): file is { relativePath: string; content: string } => Boolean(file));
-
-        if (exportFiles.length === 0) {
-          props.showDialog("No exportable DB tables selected", { title: "Nothing To Export" });
-          return;
-        }
-
-        const result = await window.api?.writeTextFilesToDirectory(outputDirectory, exportFiles);
-
-        if (!result?.success) {
-          props.showDialog(`Failed to export TSV files: ${result?.error || "Unknown error"}`, {
-            title: "Export Failed",
-          });
-          return;
-        }
-
-        props.showDialog(`Exported ${exportFiles.length} TSV file(s) to: ${outputDirectory}`, {
-          title: "Export Complete",
-        });
+        const result = await window.api?.exportPackedFilesToDirectory?.(packPath, outputDirectory, selectedExportPaths);
+        showExportResult(result, outputDirectory);
       } catch (error) {
-        console.error("Error exporting selected tables as TSV:", error);
-        props.showDialog(`Error exporting TSV files: ${error instanceof Error ? error.message : "Unknown error"}`, {
+        console.error("Error exporting selected packed files:", error);
+        props.showDialog(`Error exporting packed files: ${error instanceof Error ? error.message : "Unknown error"}`, {
           title: "Export Failed",
         });
       } finally {
         setIsExportingSelection(false);
+      }
+    };
+
+    const handleExportWholePack = async () => {
+      if (isExportingSelection || isExportingWholePack) return;
+
+      setContextMenu(null);
+      setIsExportingWholePack(true);
+      try {
+        const outputDirectory = await window.api?.selectDirectory();
+        if (!outputDirectory) return;
+        const result = await window.api?.exportPackedFilesToDirectory?.(packPath, outputDirectory, "all");
+        showExportResult(result, outputDirectory);
+      } catch (error) {
+        console.error("Error exporting whole packed file:", error);
+        props.showDialog(`Error exporting packed files: ${error instanceof Error ? error.message : "Unknown error"}`, {
+          title: "Export Failed",
+        });
+      } finally {
+        setIsExportingWholePack(false);
+      }
+    };
+
+    const applyImportItems = async (items: PackImportItem[], planningErrors: PackImportPlanError[] = []) => {
+      setIsImporting(true);
+      try {
+        const result = await window.api?.applyPackImportFromDisk?.(packPath, items);
+        const errors = [
+          ...planningErrors.map((error) => `${error.diskPath || "Import"}: ${error.message}`),
+          ...(result?.errors ?? []).map((error) => `${error.diskPath || "Import"}: ${error.message}`),
+        ];
+        if (!result?.success && errors.length === 0) errors.push("Unknown import error");
+        if (errors.length > 0) {
+          props.showDialog(
+            `Imported ${result?.importedCount ?? 0} file(s), but ${errors.length} file(s) failed:\n${errors.join("\n")}`,
+            { title: "Import Finished With Errors" },
+          );
+        } else {
+          props.showDialog(`Imported ${result?.importedCount ?? 0} file(s). Press Save to write the pack.`, {
+            title: "Import Complete",
+          });
+        }
+      } catch (error) {
+        console.error("Error importing packed files:", error);
+        props.showDialog(`Error importing packed files: ${error instanceof Error ? error.message : "Unknown error"}`, {
+          title: "Import Failed",
+        });
+      } finally {
+        setIsImporting(false);
+      }
+    };
+
+    const handleImport = async (kind: "file" | "folder") => {
+      if (isImporting) return;
+
+      const targetFolder = contextMenu?.target?.kind === "folder" ? contextMenu.target.folderPath : "";
+      setContextMenu(null);
+      setIsImporting(true);
+      try {
+        const sourcePaths =
+          kind === "file" ? await window.api?.selectImportFiles?.() : await window.api?.selectImportFolders?.();
+        if (!sourcePaths || sourcePaths.length === 0) return;
+
+        const plan = await window.api?.planPackImportFromDisk?.(
+          packPath,
+          sourcePaths.map((sourcePath) => ({ path: sourcePath, kind })),
+          targetFolder,
+        );
+        if (!plan) {
+          props.showDialog("Could not plan the import", { title: "Import Failed" });
+          return;
+        }
+        if (plan.items.length === 0) {
+          const errors = plan.errors.map((error) => `${error.diskPath || "Import"}: ${error.message}`).join("\n");
+          props.showDialog(errors || "No files were found to import", { title: "Nothing To Import" });
+          return;
+        }
+        if (plan.items.some((item) => item.conflictsWith)) {
+          props.onImportConflicts?.({ packPath, plan });
+          return;
+        }
+        await applyImportItems(plan.items, plan.errors);
+      } catch (error) {
+        console.error("Error planning packed file import:", error);
+        props.showDialog(`Error importing packed files: ${error instanceof Error ? error.message : "Unknown error"}`, {
+          title: "Import Failed",
+        });
+      } finally {
+        setIsImporting(false);
       }
     };
 
@@ -1060,7 +1108,15 @@ const PackTablesTreeView = React.memo(
               onContextMenu={(e) => {
                 e.stopPropagation();
                 if (isBranch) {
-                  handleContextMenu(e, treeTab);
+                  if (treeTab === "files") {
+                    handleContextMenu(e, treeTab, {
+                      kind: "folder",
+                      packPath,
+                      folderPath: getNodeFullPath(element, fileNodeById),
+                    });
+                  } else {
+                    handleContextMenu(e, treeTab);
+                  }
                   return;
                 }
 
@@ -1124,7 +1180,13 @@ const PackTablesTreeView = React.memo(
         (contextMenu.treeTab === "db" && hasDBTables) ||
         (contextMenu.treeTab === "files" && hasFiles && !hasDBTables)),
     );
-    const showCopyIntoInContext = Boolean(contextMenu?.target && props.onCopyInto);
+    const showImportInContext = Boolean(contextMenu && !isVanillaPackOpen);
+    const importAnchor = contextMenu?.target?.kind === "folder" ? contextMenu.target.folderPath : "";
+    const importLabel = (kind: "file" | "folder") =>
+      `${kind === "file" ? "Import Files" : "Import Folders"}${importAnchor ? ` into ${importAnchor}` : ""}…`;
+    const showCopyIntoInContext = Boolean(
+      contextMenu?.target && contextMenu.target.kind !== "folder" && props.onCopyInto,
+    );
 
     return (
       <div
@@ -1218,19 +1280,40 @@ const PackTablesTreeView = React.memo(
                 {isLoadingNewTableOptions ? "Loading Tables..." : "Add New Table"}
               </button>
             )}
-            {contextMenu.treeTab === "db" && selectedDBTableSelections.length > 0 && (
+            {showImportInContext && (
+              <>
+                <button
+                  onClick={() => void handleImport("file")}
+                  disabled={isImporting}
+                  className="w-full text-left px-4 py-2 hover:bg-gray-700 text-white text-sm disabled:opacity-50"
+                >
+                  {isImporting ? "Importing…" : importLabel("file")}
+                </button>
+                <button
+                  onClick={() => void handleImport("folder")}
+                  disabled={isImporting}
+                  className="w-full text-left px-4 py-2 hover:bg-gray-700 text-white text-sm disabled:opacity-50"
+                >
+                  {isImporting ? "Importing…" : importLabel("folder")}
+                </button>
+              </>
+            )}
+            {selectedExportPaths.length > 0 && (
               <button
-                onClick={handleExportSelectedAsTSV}
-                disabled={isExportingSelection}
+                onClick={() => void handleExportSelection()}
+                disabled={isExportingSelection || isExportingWholePack}
                 className="w-full text-left px-4 py-2 hover:bg-gray-700 text-white text-sm disabled:opacity-50"
               >
-                {isExportingSelection
-                  ? "Exporting TSV..."
-                  : `Export ${selectedDBTableSelections.length} file${
-                      selectedDBTableSelections.length === 1 ? "" : "s"
-                    } as TSV`}
+                {isExportingSelection ? "Exporting…" : "Export Selection…"}
               </button>
             )}
+            <button
+              onClick={() => void handleExportWholePack()}
+              disabled={isExportingSelection || isExportingWholePack}
+              className="w-full text-left px-4 py-2 hover:bg-gray-700 text-white text-sm disabled:opacity-50"
+            >
+              {isExportingWholePack ? "Exporting…" : "Export Whole Pack…"}
+            </button>
           </div>
         )}
 

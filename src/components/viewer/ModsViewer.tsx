@@ -4,6 +4,7 @@ import { useAppDispatch, useAppSelector } from "../../hooks";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faChevronDown, faFile, faMagnifyingGlass, faXmark } from "@fortawesome/free-solid-svg-icons";
 import PackTablesTreeView, { CopyIntoSource, PackTablesTreeViewHandle, ViewerPackTarget } from "./PackTablesTreeView";
+import ImportConflictsModal from "./ImportConflictsModal";
 import PackFileView from "./PackFileView";
 import PackTablesTableView, { type GoToReferenceRequest, type ReferenceNavigationRequest } from "./PackTablesTableView";
 import { Resizable } from "re-resizable";
@@ -187,6 +188,8 @@ const ModsViewer = memo(() => {
   const [isFileMenuOpen, setIsFileMenuOpen] = useState(false);
   const [packCloseConfirmPath, setPackCloseConfirmPath] = useState<string | null>(null);
   const [copyOverwriteRequest, setCopyOverwriteRequest] = useState<CopyOverwriteRequest | null>(null);
+  const [importConflictRequest, setImportConflictRequest] = useState<PackImportConflictRequest | null>(null);
+  const [isImportProcessing, setIsImportProcessing] = useState(false);
   const [copyTableNameRequest, setCopyTableNameRequest] = useState<CopyTableNameRequest | null>(null);
   const [copyTableName, setCopyTableName] = useState("");
   const [isCopyProcessing, setIsCopyProcessing] = useState(false);
@@ -966,6 +969,40 @@ const ModsViewer = memo(() => {
     );
   }, [copyOverwriteRequest, handleCopyInto, isCopyProcessing]);
 
+  const handleImportConflicts = useCallback(
+    async (items: PackImportItem[]) => {
+      if (!importConflictRequest || isImportProcessing) return;
+      setIsImportProcessing(true);
+      try {
+        const result = await window.api?.applyPackImportFromDisk?.(importConflictRequest.packPath, items);
+        const errors = [
+          ...importConflictRequest.plan.errors.map((error) => `${error.diskPath || "Import"}: ${error.message}`),
+          ...(result?.errors ?? []).map((error) => `${error.diskPath || "Import"}: ${error.message}`),
+        ];
+        if (!result?.success && errors.length === 0) errors.push("Unknown import error");
+        if (errors.length > 0) {
+          showDialog(
+            `Imported ${result?.importedCount ?? 0} file(s), but ${errors.length} file(s) failed:\n${errors.join("\n")}`,
+            { title: "Import Finished With Errors" },
+          );
+        } else {
+          showDialog(`Imported ${result?.importedCount ?? 0} file(s). Press Save to write the pack.`, {
+            title: "Import Complete",
+          });
+        }
+      } catch (error) {
+        console.error("Error importing files after conflict confirmation:", error);
+        showDialog(`Error importing packed files: ${error instanceof Error ? error.message : "Unknown error"}`, {
+          title: "Import Failed",
+        });
+      } finally {
+        setIsImportProcessing(false);
+        setImportConflictRequest(null);
+      }
+    },
+    [importConflictRequest, isImportProcessing, showDialog],
+  );
+
   const handleCopyTableWithNewName = useCallback(() => {
     if (!copyTableNameRequest || isCopyProcessing) return;
     if (copyTableName.trim().toLowerCase() === copyTableNameRequest.tableName.trim().toLowerCase()) {
@@ -1673,6 +1710,15 @@ const ModsViewer = memo(() => {
         </Modal.Footer>
       </Modal>
 
+      <ImportConflictsModal
+        request={importConflictRequest}
+        isProcessing={isImportProcessing}
+        onCancel={() => {
+          if (!isImportProcessing) setImportConflictRequest(null);
+        }}
+        onImport={(items) => void handleImportConflicts(items)}
+      />
+
       {/* Destination table-name prompt for DB tables and copied rows */}
       <Modal
         onClose={() => {
@@ -2067,6 +2113,7 @@ const ModsViewer = memo(() => {
                           showDialog={showDialog}
                           otherOpenPacks={otherOpenPacksByPackPath.get(packTab.packPath) ?? EMPTY_PACK_TARGETS}
                           onCopyInto={handleCopyInto}
+                          onImportConflicts={setImportConflictRequest}
                           onOpenDBTable={handleOpenDBTable}
                           onOpenFlowFile={handleOpenFlowFile}
                           onOpenPackedFile={handleOpenPackedFile}

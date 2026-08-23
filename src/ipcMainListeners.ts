@@ -11,6 +11,15 @@ import {
   releaseParsedTables,
 } from "./utility/packFileHelpers";
 import { planSaveAs } from "./utility/saveAsPlan";
+import {
+  normalizePackFilePath,
+  normalizePackFilePathKey,
+  planPackImport,
+  type PackImportItem,
+  type PackImportSource,
+} from "./utility/packImportPlan";
+import { resolveExportOutputPath } from "./utility/exportPaths";
+import { buildRpfmTsvContent, convertRpfmTsvToPackedFile, getRpfmTsvExportPath } from "./utility/rpfmTsv";
 import { createInFlightTableRequests } from "./components/viewer/inFlightTableRequests";
 import { createSerializedBuilds } from "./utility/serializedBuilds";
 import { createPackReadRegistry } from "./utility/packReadRegistry";
@@ -667,9 +676,6 @@ const createDBIndirectReferenceCacheContext = (): DBIndirectReferenceCacheContex
   reverseRefTtlMs: 5 * 60 * 1000,
   maxReverseRefEntries: 32,
 });
-const normalizePackFilePath = (value: string) =>
-  value.replace(/\//g, "\\").replace(/\\+/g, "\\").replace(/^\\+/, "").trim();
-const normalizePackFilePathKey = (value: string) => normalizePackFilePath(value).toLowerCase();
 const toVariantMeshDefinitionPath = (value: string) => {
   let path = normalizePackFilePath(value);
   if (!path) return path;
@@ -12154,6 +12160,369 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
       if (requestingWindow && !requestingWindow.isDestroyed()) requestingWindow.focus();
     }
   });
+  ipcMain.handle("selectImportFiles", async (event): Promise<string[]> => {
+    const requestingWindow = BrowserWindow.fromWebContents(event.sender);
+    try {
+      const result = await dialog.showOpenDialog(requestingWindow || mainWindow || new BrowserWindow(), {
+        properties: ["openFile", "multiSelections"],
+      });
+      return result.canceled ? [] : result.filePaths;
+    } catch (error) {
+      console.error("Error selecting import files:", error);
+      return [];
+    } finally {
+      if (requestingWindow && !requestingWindow.isDestroyed()) requestingWindow.focus();
+    }
+  });
+  ipcMain.handle("selectImportFolders", async (event): Promise<string[]> => {
+    const requestingWindow = BrowserWindow.fromWebContents(event.sender);
+    try {
+      const result = await dialog.showOpenDialog(requestingWindow || mainWindow || new BrowserWindow(), {
+        properties: ["openDirectory", "multiSelections"],
+      });
+      return result.canceled ? [] : result.filePaths;
+    } catch (error) {
+      console.error("Error selecting import folders:", error);
+      return [];
+    } finally {
+      if (requestingWindow && !requestingWindow.isDestroyed()) requestingWindow.focus();
+    }
+  });
+  ipcMain.handle(
+    "planPackImportFromDisk",
+    async (event, packPath: string, sources: PackImportSource[], targetFolder: string): Promise<PackImportPlan> => {
+      try {
+        const unsavedPath = appData.unsavedPacksData[packPath] ?? [];
+        const packPathKey = packPath.replaceAll("/", "\\").toLowerCase();
+        const loadedPack = appData.packsData.find(
+          (pack) => pack.path === packPath || pack.path.replaceAll("/", "\\").toLowerCase() === packPathKey,
+        );
+        let packFilePaths = loadedPack?.packedFiles.map((packedFile) => packedFile.name);
+        if (!packFilePaths && !packPath.startsWith("memory://")) {
+          try {
+            packFilePaths = (await readPack(packPath, { skipParsingTables: true })).packedFiles.map(
+              (packedFile) => packedFile.name,
+            );
+          } catch {
+            packFilePaths = [];
+          }
+        }
+
+        return await planPackImport({
+          sources,
+          targetFolder,
+          existingPackFilePaths: {
+            pack: packFilePaths ?? [],
+            unsaved: unsavedPath.map((packedFile) => packedFile.name),
+          },
+          readDir: async (directoryPath) =>
+            (await fs.promises.readdir(directoryPath, { withFileTypes: true })).map((entry) => ({
+              name: entry.name,
+              kind: entry.isDirectory() ? "folder" : "file",
+            })),
+        });
+      } catch (error) {
+        console.error("Error planning pack import:", error);
+        return {
+          items: [],
+          errors: [
+            {
+              diskPath: "",
+              message: error instanceof Error ? error.message : "Failed to plan pack import",
+            },
+          ],
+        };
+      }
+    },
+  );
+  ipcMain.handle(
+    "applyPackImportFromDisk",
+    async (event, packPath: string, items: PackImportItem[]): Promise<PackImportApplyResult> => {
+      const errors: Array<{ diskPath: string; message: string }> = [];
+      let importedCount = 0;
+      const unsavedFiles = appData.unsavedPacksData[packPath] ?? [];
+      let tableSchemasPromise: Promise<Record<string, DBVersion[]>> | undefined;
+
+      try {
+        if (!Array.isArray(items)) {
+          return {
+            success: false,
+            importedCount: 0,
+            errors: [{ diskPath: "", message: "Invalid pack import item list" }],
+          };
+        }
+
+        for (const item of items) {
+          try {
+            const buffer = await fs.promises.readFile(item.diskPath);
+            let importedFile: PackedFile;
+            if (item.isRpfmTsv) {
+              tableSchemasPromise ??= getSchemaForGame(appData.currentGame);
+              const convertedFile = convertRpfmTsvToPackedFile(
+                buffer.toString("utf8"),
+                item.packFilePath,
+                await tableSchemasPromise,
+                item.diskPath,
+              );
+              if (!convertedFile?.schemaFields || !convertedFile.tableSchema) {
+                throw new Error("The TSV did not contain an RPFM table metadata line");
+              }
+              importedFile = {
+                name: convertedFile.name,
+                version: convertedFile.version,
+                tableSchema: convertedFile.tableSchema,
+                schemaFields: convertedFile.schemaFields,
+                file_size: 0,
+                start_pos: -1,
+                is_compressed: false,
+              };
+            } else {
+              importedFile = {
+                name: normalizePackFilePath(item.packFilePath),
+                buffer,
+                file_size: buffer.length,
+                start_pos: -1,
+                is_compressed: false,
+              };
+              if (getPackedFileViewerKind(importedFile.name) === "text") {
+                importedFile.text = decodePackedFileText(importedFile);
+              }
+            }
+
+            const existingIndex = unsavedFiles.findIndex(
+              (packedFile) => normalizePackFilePathKey(packedFile.name) === normalizePackFilePathKey(importedFile.name),
+            );
+            if (existingIndex >= 0) unsavedFiles.splice(existingIndex, 1, importedFile);
+            else unsavedFiles.push(importedFile);
+            importedCount += 1;
+          } catch (error) {
+            errors.push({
+              diskPath: item.diskPath,
+              message: error instanceof Error ? error.message : "Failed to import file",
+            });
+          }
+        }
+
+        appData.unsavedPacksData[packPath] = unsavedFiles;
+        mainWindow?.webContents.send("setUnsavedPacksData", packPath, unsavedFiles);
+        windows.viewerWindow?.webContents.send("setUnsavedPacksData", packPath, unsavedFiles);
+        return { success: errors.length === 0, importedCount, errors };
+      } catch (error) {
+        console.error("Error applying pack import:", error);
+        return {
+          success: false,
+          importedCount,
+          errors: [
+            ...errors,
+            { diskPath: "", message: error instanceof Error ? error.message : "Failed to import files" },
+          ],
+        };
+      }
+    },
+  );
+  ipcMain.handle(
+    "exportPackedFilesToDirectory",
+    async (
+      event,
+      packPath: string,
+      outputDirectory: string,
+      filePaths: string[] | "all",
+    ): Promise<PackExportResult> => {
+      const skipped: Array<{ name: string; reason: string }> = [];
+      let writtenCount = 0;
+      const writeErrors: string[] = [];
+
+      const addSkipped = (name: string, reason: string) => skipped.push({ name, reason });
+      const writeOutput = async (name: string, relativePath: string, contents: string | Buffer) => {
+        const outputPath = resolveExportOutputPath(outputDirectory, relativePath);
+        if (!outputPath) {
+          addSkipped(name, "Invalid output path");
+          return false;
+        }
+        try {
+          await fsExtra.ensureDir(nodePath.dirname(outputPath));
+          await fs.promises.writeFile(outputPath, contents);
+          writtenCount += 1;
+          return true;
+        } catch (error) {
+          writeErrors.push(`${name}: ${error instanceof Error ? error.message : "Failed to write file"}`);
+          return false;
+        }
+      };
+
+      try {
+        if (!outputDirectory) return { success: false, writtenCount, skipped, error: "No output directory selected" };
+        if (filePaths !== "all" && !Array.isArray(filePaths)) {
+          return { success: false, writtenCount, skipped, error: "Invalid export file list" };
+        }
+
+        const unsavedFiles = appData.unsavedPacksData[packPath] ?? [];
+        const packPathKey = packPath.replaceAll("/", "\\").toLowerCase();
+        let indexedPack = appData.packsData.find(
+          (pack) => pack.path === packPath || pack.path.replaceAll("/", "\\").toLowerCase() === packPathKey,
+        );
+        if (!indexedPack && !packPath.startsWith("memory://")) {
+          try {
+            indexedPack = await readPack(packPath, { skipParsingTables: true, skipSorting: true });
+          } catch (error) {
+            writeErrors.push(error instanceof Error ? error.message : "Could not read pack index");
+          }
+        }
+
+        const requestedKeys =
+          filePaths === "all" ? undefined : new Set(filePaths.map((filePath) => normalizePackFilePathKey(filePath)));
+        const candidates = new Map<string, { name: string; source: "unsaved" | "pack"; packedFile?: PackedFile }>();
+        for (const packedFile of unsavedFiles) {
+          const key = normalizePackFilePathKey(packedFile.name);
+          if (requestedKeys && !requestedKeys.has(key)) continue;
+          candidates.set(key, { name: packedFile.name, source: "unsaved", packedFile });
+        }
+        for (const packedFile of indexedPack?.packedFiles ?? []) {
+          const key = normalizePackFilePathKey(packedFile.name);
+          if (requestedKeys && !requestedKeys.has(key)) continue;
+          if (!candidates.has(key)) candidates.set(key, { name: packedFile.name, source: "pack" });
+        }
+        if (requestedKeys) {
+          for (const requestedPath of filePaths) {
+            const key = normalizePackFilePathKey(requestedPath);
+            if (!candidates.has(key))
+              candidates.set(key, { name: normalizePackFilePath(requestedPath), source: "pack" });
+          }
+        }
+
+        const dbCandidates = [...candidates.values()].filter((candidate) => parseDBTablePath(candidate.name));
+        const rawCandidates = [...candidates.values()].filter((candidate) => !parseDBTablePath(candidate.name));
+        const unsavedKeys = new Set<string>();
+        const rawPackKeys = new Set<string>();
+
+        for (const candidate of dbCandidates.filter((entry) => entry.source === "unsaved")) {
+          unsavedKeys.add(normalizePackFilePathKey(candidate.name));
+          const packedFile = candidate.packedFile;
+          const parsedPath = parseDBTablePath(candidate.name);
+          const schema = isLocPackedFilePath(candidate.name)
+            ? LocVersion
+            : (packedFile?.tableSchema ?? (packedFile && getDBVersion(packedFile)));
+          if (!packedFile?.schemaFields || !schema || !parsedPath) {
+            addSkipped(candidate.name, "No matching parsed table schema");
+            continue;
+          }
+          const rows = chunkSchemaIntoRows(packedFile.schemaFields, schema).map((row) =>
+            row.map((cell, index) => ({
+              resolvedKeyValue: resolveKeyValue(schema.fields[index].field_type, cell.fields),
+            })),
+          );
+          const content = buildRpfmTsvContent({
+            packedFilePath: candidate.name,
+            tableName: isLocPackedFilePath(candidate.name) ? "Loc" : parsedPath.dbName,
+            version: isLocPackedFilePath(candidate.name) ? LocVersion.version : (packedFile.version ?? schema.version),
+            schema,
+            rows,
+          });
+          await writeOutput(candidate.name, getRpfmTsvExportPath(candidate.name), content);
+        }
+
+        for (const candidate of rawCandidates.filter((entry) => entry.source === "unsaved")) {
+          unsavedKeys.add(normalizePackFilePathKey(candidate.name));
+          const packedFile = candidate.packedFile;
+          const buffer =
+            packedFile?.buffer ?? (packedFile?.text != null ? Buffer.from(packedFile.text, "utf8") : undefined);
+          if (!buffer) {
+            addSkipped(candidate.name, "No readable unsaved payload");
+            continue;
+          }
+          await writeOutput(candidate.name, candidate.name.replaceAll("\\", "/"), buffer);
+        }
+
+        const rawNames = rawCandidates
+          .filter(
+            (candidate) => candidate.source === "pack" && !unsavedKeys.has(normalizePackFilePathKey(candidate.name)),
+          )
+          .map((candidate) => {
+            const key = normalizePackFilePathKey(candidate.name);
+            rawPackKeys.add(key);
+            return key;
+          });
+        const rawNameKeys = new Set(rawNames);
+        if (rawNameKeys.size > 0 && !packPath.startsWith("memory://")) {
+          try {
+            await forEachPackedFileBuffer(
+              packPath,
+              (name) => rawNameKeys.has(normalizePackFilePathKey(name)),
+              async (packedFile, buffer) => {
+                const key = normalizePackFilePathKey(packedFile.name);
+                await writeOutput(packedFile.name, packedFile.name.replaceAll("\\", "/"), buffer);
+                rawPackKeys.delete(key);
+              },
+              {
+                onSkipped: (packedFile, reason) => {
+                  rawPackKeys.delete(normalizePackFilePathKey(packedFile.name));
+                  addSkipped(packedFile.name, reason === "tooLarge" ? "File is too large" : "Could not read payload");
+                },
+              },
+            );
+          } catch (error) {
+            writeErrors.push(error instanceof Error ? error.message : "Could not read raw pack files");
+          }
+        }
+        for (const key of rawPackKeys) {
+          const candidate = rawCandidates.find((entry) => normalizePackFilePathKey(entry.name) === key);
+          if (candidate) addSkipped(candidate.name, "File was not found in the pack");
+        }
+
+        const packDBCandidates = dbCandidates.filter((entry) => entry.source === "pack");
+        for (let start = 0; start < packDBCandidates.length; start += 50) {
+          const chunk = packDBCandidates.slice(start, start + 50);
+          const tablePaths = chunk.map((candidate) => candidate.name);
+          const chunkHasLoc = chunk.some((candidate) => isLocPackedFilePath(candidate.name));
+          let parsedPack: Pack;
+          try {
+            parsedPack = await readPack(packPath, { tablesToRead: tablePaths, readLocs: chunkHasLoc });
+          } catch (error) {
+            for (const candidate of chunk) {
+              addSkipped(candidate.name, error instanceof Error ? error.message : "Could not read DB table");
+            }
+            continue;
+          }
+
+          for (const candidate of chunk) {
+            const packedFile = findPackedFileInList(parsedPack.packedFiles, candidate.name);
+            const parsedPath = parseDBTablePath(candidate.name);
+            const schema = isLocPackedFilePath(candidate.name) ? LocVersion : packedFile && getDBVersion(packedFile);
+            if (!packedFile?.schemaFields || !schema || !parsedPath) {
+              addSkipped(candidate.name, "No matching parsed table schema");
+              continue;
+            }
+            const rows = chunkSchemaIntoRows(packedFile.schemaFields, schema).map((row) =>
+              row.map((cell, index) => ({
+                resolvedKeyValue: resolveKeyValue(schema.fields[index].field_type, cell.fields),
+              })),
+            );
+            const content = buildRpfmTsvContent({
+              packedFilePath: candidate.name,
+              tableName: isLocPackedFilePath(candidate.name) ? "Loc" : parsedPath.dbName,
+              version: isLocPackedFilePath(candidate.name)
+                ? LocVersion.version
+                : (packedFile.version ?? schema.version),
+              schema,
+              rows,
+            });
+            await writeOutput(candidate.name, getRpfmTsvExportPath(candidate.name), content);
+          }
+        }
+
+        const error = writeErrors.length > 0 ? writeErrors.join("\n") : undefined;
+        return { success: !error, writtenCount, skipped, ...(error ? { error } : {}) };
+      } catch (error) {
+        console.error("Error exporting packed files:", error);
+        return {
+          success: false,
+          writtenCount,
+          skipped,
+          error: error instanceof Error ? error.message : "Failed to export packed files",
+        };
+      }
+    },
+  );
   ipcMain.handle("selectFlowPackFile", async (event) => {
     const requestingWindow = BrowserWindow.fromWebContents(event.sender);
     try {
@@ -12199,15 +12568,8 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
         const resolvedBaseDirectory = nodePath.resolve(baseDirectory);
         const writtenFiles: string[] = [];
         for (const file of files) {
-          const normalizedRelativePath = file.relativePath.replace(/\\/g, "/").replace(/^\/+/, "");
-          if (normalizedRelativePath.includes("..")) {
-            return { success: false, error: `Invalid relative path: ${file.relativePath}` };
-          }
-          const outputPath = nodePath.resolve(resolvedBaseDirectory, normalizedRelativePath);
-          const baseWithSep = resolvedBaseDirectory.endsWith(nodePath.sep)
-            ? resolvedBaseDirectory
-            : `${resolvedBaseDirectory}${nodePath.sep}`;
-          if (outputPath !== resolvedBaseDirectory && !outputPath.startsWith(baseWithSep)) {
+          const outputPath = resolveExportOutputPath(resolvedBaseDirectory, file.relativePath);
+          if (!outputPath) {
             return { success: false, error: `Invalid output path: ${file.relativePath}` };
           }
           await fsExtra.ensureDir(nodePath.dirname(outputPath));
