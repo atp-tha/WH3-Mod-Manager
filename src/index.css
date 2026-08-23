@@ -812,6 +812,26 @@ body:not(.disable-row-hover) .row-hover-highlight:hover > div:not(.drop-ghost) {
 }
 
 /*
+ * Zebra striping plus row/column hover. A wide table is read by tracking one row across many
+ * near-identical numeric columns, and the eye loses the line long before the row ends.
+ *
+ * The stripe is translucent rather than a second flat colour, so it composites over whatever the
+ * row already sits on (theme background, and the pinned row-index column) and stays consistent.
+ * Both the theme's own dark defaults are near-invisible here: it ships the odd-row colour equal to
+ * the background, and its hover is a purple that clashes with the blue selection.
+ *
+ * Column hover is the counterpart for the other axis: it tints the hovered column all the way up
+ * into its header, which is how you check that a cell belongs to the header you think it does.
+ * Both are kept fainter than `--ag-range-selection-background-color` so a hover never reads as a
+ * selection.
+ */
+.ag-theme-material-dark.pack-tables-grid {
+  --ag-odd-row-background-color: rgba(148, 163, 184, 0.07);
+  --ag-row-hover-color: rgba(96, 165, 250, 0.12);
+  --ag-column-hover-color: rgba(148, 163, 184, 0.06);
+}
+
+/*
  * Headers keep the theme's wide gutter on the right, where the filter button sits, but not on the
  * left: that one exists for the sort arrow, and most columns are not sorted.
  *
