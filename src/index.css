@@ -875,6 +875,14 @@ body:not(.disable-row-hover) .row-hover-highlight:hover > div:not(.drop-ghost) {
   text-align: center;
 }
 
+/*
+ * A cell nobody has set. Dimmed through the text colour rather than `opacity`, which would fade the
+ * selection and hover backgrounds underneath it along with the value.
+ */
+.pack-tables-grid .pack-table-cell-default {
+  color: rgba(245, 245, 245, 0.4);
+}
+
 .pack-tables-grid .pack-table-cell-selected {
   background: rgba(59, 130, 246, 0.22) !important;
   box-shadow: inset 0 0 0 1px rgba(96, 165, 250, 0.7);

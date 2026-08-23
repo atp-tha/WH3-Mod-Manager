@@ -186,6 +186,69 @@ const formatFloatDisplayValue = (value: TableCellValue | null | undefined): stri
   return normalizedValue.replace(/\.0+$/, "");
 };
 
+/**
+ * A cell value reduced to the string the grid draws, so two of them can be compared. Floats go
+ * through the display formatter because the schema default for one is written "0" while the stored
+ * cell reads "0.0" - the same value, and the same thing on screen.
+ */
+const toComparableCellValue = (value: TableCellValue | null | undefined, fieldType: SCHEMA_FIELD_TYPE): string => {
+  if (typeof value === "boolean") return value ? "1" : "0";
+  const text = value == null ? "" : String(value);
+  return fieldType === "F32" || fieldType === "F64" ? formatFloatDisplayValue(text) : text;
+};
+
+/**
+ * What each column holds where nobody has set anything: exactly what Add Row would put there, since
+ * both go through buildDefaultCellValue.
+ */
+const getColumnDefaultValues = (currentSchema: DBVersion): string[] =>
+  currentSchema.fields.map((field) =>
+    toComparableCellValue(
+      resolveCellValue(buildDefaultCellValue(field.name, field.field_type, field.default_value ?? "", field.is_key)),
+      field.field_type,
+    ),
+  );
+
+/**
+ * Columns where every row still holds the schema default. Most tables in a mod touch a handful of
+ * columns and leave dozens untouched, and those dozens are what makes the table unreadably wide.
+ *
+ * Key columns are never reported, whatever they hold: they are what identifies the row, so hiding
+ * one would leave the rows it names anonymous. An empty table reports nothing either - every column
+ * of it is trivially all-default, and hiding the lot would leave nothing to add a row to.
+ */
+const findAllDefaultColumnIndexes = (
+  rows: RowData[],
+  currentSchema: DBVersion,
+  keyColumnNamesUnderscore: string[],
+): Set<number> => {
+  const allDefaultColumns = new Set<number>();
+  if (rows.length === 0) return allDefaultColumns;
+
+  const columnDefaultValues = getColumnDefaultValues(currentSchema);
+  const keyColumnSet = new Set(keyColumnNamesUnderscore);
+
+  for (let colIndex = 0; colIndex < currentSchema.fields.length; colIndex++) {
+    const field = currentSchema.fields[colIndex];
+    if (!field || keyColumnSet.has(field.name)) continue;
+
+    const fieldKey = getColumnFieldKey(colIndex);
+    const defaultValue = columnDefaultValues[colIndex];
+    const isAllDefault = rows.every((row) => toComparableCellValue(row[fieldKey], field.field_type) === defaultValue);
+    if (isAllDefault) allDefaultColumns.add(colIndex);
+  }
+
+  return allDefaultColumns;
+};
+
+const NO_HIDDEN_COLUMNS: ReadonlySet<number> = new Set<number>();
+
+const toggleButtonClass = (isActive: boolean): string =>
+  "px-2 py-1 text-sm rounded border " +
+  (isActive
+    ? "bg-blue-700 border-blue-500 text-white hover:bg-blue-600"
+    : "bg-gray-700 border-gray-600 text-gray-200 hover:bg-gray-600");
+
 const getDisplayColumnHeader = (headerName: string): string => {
   return COLUMN_HEADER_DISPLAY_NAMES[headerName] ?? headerName;
 };
@@ -540,6 +603,8 @@ const AgGridWrapper = memo(
     isBigTable,
     rowCount,
     tableSelectionKey,
+    hiddenColumnIndexes,
+    pinFirstKeyColumn,
   }: {
     rowData: RowData[];
     columns: Array<{ type: "numeric" | "checkbox" | "text" }>;
@@ -558,6 +623,8 @@ const AgGridWrapper = memo(
     isBigTable: boolean;
     rowCount: number;
     tableSelectionKey: string;
+    hiddenColumnIndexes: ReadonlySet<number>;
+    pinFirstKeyColumn: boolean;
   }) => {
     const keyColumnSet = useMemo(() => new Set(keyColumnNamesUnderscore), [keyColumnNamesUnderscore]);
     const gridRef = useRef<AgGridReact<RowData>>(null);
@@ -603,6 +670,8 @@ const AgGridWrapper = memo(
       const maxRowNumberWidth = measureTextWidth(String(Math.max(rowCount, 1)), ROW_INDEX_GRID_CELL_FONT);
       return Math.max(ROW_INDEX_COLUMN_MIN_WIDTH, Math.ceil(maxRowNumberWidth + ROW_INDEX_COLUMN_PADDING_PX));
     }, [rowCount]);
+
+    const columnDefaultValues = useMemo(() => getColumnDefaultValues(currentSchema), [currentSchema]);
 
     const firstKeyColumnIndex = useMemo(() => {
       if (keyColumnSet.size === 0) return -1;
@@ -727,9 +796,18 @@ const AgGridWrapper = memo(
         const headerName = (isKey ? "🔑 " : "") + displayHeaderName;
 
         const width = Math.max(getColumnWidth(colIndex), getHeaderMinWidth(displayHeaderName, isKey, headerChromePx));
+        const columnDefaultValue = columnDefaultValues[colIndex];
         defs.push({
           headerName,
           headerTooltip: fullHeaderName,
+          hide: hiddenColumnIndexes.has(colIndex),
+          // Beside the row number, so a row keeps its name however far right the table is scrolled.
+          //
+          // `null` rather than `undefined` for the unpinned case: on a column definition update
+          // ag-grid only re-applies `pinned` when it is not undefined (updateSomeColumnState),
+          // so leaving it off the def keeps whatever pinning the column already had - which made
+          // the toggle a one-way trip.
+          pinned: pinFirstKeyColumn && colIndex === firstKeyColumnIndex ? "left" : null,
           autoHeaderHeight: true,
           wrapHeaderText: true,
           headerClass: colType === "numeric" ? "pack-table-header pack-table-header-right" : "pack-table-header",
@@ -757,6 +835,11 @@ const AgGridWrapper = memo(
             const classes: string[] = [];
             if (colType === "numeric") classes.push("text-right", "tabular-nums");
             if (colType === "checkbox") classes.push("text-center");
+            // Untouched cells are most of a dense table and none of what the reader is looking for,
+            // so they are dimmed to let the values somebody actually set carry the eye.
+            if (field && toComparableCellValue(p.value, field.field_type) === columnDefaultValue) {
+              classes.push("pack-table-cell-default");
+            }
             if (typeof rowIndex === "number" && isCellSelected(rowIndex, colIndex)) {
               classes.push("pack-table-cell-selected");
             }
@@ -777,6 +860,10 @@ const AgGridWrapper = memo(
       rowIndexColumnWidth,
       isCellSelected,
       isRowSelected,
+      columnDefaultValues,
+      firstKeyColumnIndex,
+      hiddenColumnIndexes,
+      pinFirstKeyColumn,
     ]);
 
     const [menuState, setMenuState] = useState<
@@ -1268,6 +1355,8 @@ const PackTablesTableView = memo(({ showDialog, otherOpenPacks, onCopyInto }: Pa
   const startArgs = useAppSelector((state) => state.app.startArgs);
 
   const [keyFilter, setKeyFilter] = useState<string>("");
+  const [pinFirstKeyColumn, setPinFirstKeyColumn] = useState(true);
+  const [hideDefaultColumns, setHideDefaultColumns] = useState(false);
   const [tableFilterInput, setTableFilterInput] = useState<string>("");
   const [tableFilter, setTableFilter] = useState<string>("");
   const selectCurrentPackData = useMemo(makeSelectCurrentPackData, []);
@@ -1439,6 +1528,16 @@ const PackTablesTableView = memo(({ showDialog, otherOpenPacks, onCopyInto }: Pa
     if (!activePreparedTableData) return [];
     return filteredRowIndices.map((rowIndex) => activePreparedTableData.data[rowIndex]);
   }, [activePreparedTableData, filteredRowIndices]);
+
+  /**
+   * Scanned over the whole table rather than the filtered rows: which columns are hidden should not
+   * change under you as you type in the filter box. Only computed while the toggle is on, since it
+   * is a pass over every cell - the toggle is what pays for it, and it is off by default.
+   */
+  const hiddenColumnIndexes = useMemo(() => {
+    if (!hideDefaultColumns || !activePreparedTableData || !currentSchema) return NO_HIDDEN_COLUMNS;
+    return findAllDefaultColumnIndexes(activePreparedTableData.data, currentSchema, keyColumnNamesUnderscore);
+  }, [activePreparedTableData, currentSchema, hideDefaultColumns, keyColumnNamesUnderscore]);
 
   const handleContextMenuCallback = useCallback(
     (row: number, col: number) => {
@@ -1718,6 +1817,8 @@ const PackTablesTableView = memo(({ showDialog, otherOpenPacks, onCopyInto }: Pa
           isBigTable={isBigTable}
           rowCount={rowCount}
           tableSelectionKey={`${currentDBTableSelection.packPath}|${currentDBTableSelection.dbName}|${currentDBTableSelection.dbSubname}`}
+          hiddenColumnIndexes={hiddenColumnIndexes}
+          pinFirstKeyColumn={pinFirstKeyColumn}
         />
       </div>
       <div className="mt-3 px-2 flex gap-4 shrink-0 items-center flex-wrap">
@@ -1767,6 +1868,26 @@ const PackTablesTableView = memo(({ showDialog, otherOpenPacks, onCopyInto }: Pa
           onChange={(e) => onFilterInputChange(e.target.value)}
           className="bg-gray-50 w-48 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block px-2 py-1 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white dark:focus:ring-blue-500 dark:focus:border-blue-500 focus:outline-none"
         />
+        <button
+          type="button"
+          onClick={() => setPinFirstKeyColumn((isPinned) => !isPinned)}
+          aria-pressed={pinFirstKeyColumn}
+          title="Keep the first key column beside the row numbers when scrolling right"
+          className={toggleButtonClass(pinFirstKeyColumn)}
+        >
+          Pin key column
+        </button>
+        <button
+          type="button"
+          onClick={() => setHideDefaultColumns((isHidden) => !isHidden)}
+          aria-pressed={hideDefaultColumns}
+          title="Hide columns where every row still holds the schema default"
+          className={toggleButtonClass(hideDefaultColumns)}
+        >
+          {hideDefaultColumns && hiddenColumnIndexes.size > 0
+            ? `Empty columns hidden (${hiddenColumnIndexes.size})`
+            : "Hide empty columns"}
+        </button>
       </div>
     </div>
   );
