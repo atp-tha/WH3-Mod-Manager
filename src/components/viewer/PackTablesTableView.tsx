@@ -2314,6 +2314,13 @@ const PackTablesTableView = memo((props: PackTablesTableViewProps) => {
       }
 
       const key = event.key.toLowerCase();
+      if (event.shiftKey && key === "a") {
+        if (!activePackFile || !currentSchema || !activePreparedTableData) return;
+        event.preventDefault();
+        void handleAddRow();
+        return;
+      }
+
       if (!event.shiftKey && key === "z") {
         if (historyPastRef.current.length === 0) return;
         event.preventDefault();
@@ -2332,7 +2339,7 @@ const PackTablesTableView = memo((props: PackTablesTableViewProps) => {
     return () => {
       window.removeEventListener("keydown", onWindowKeyDown);
     };
-  }, [canEditTable, handleRedo, handleUndo]);
+  }, [activePackFile, activePreparedTableData, canEditTable, currentSchema, handleAddRow, handleRedo, handleUndo]);
 
   if (!currentDBTableSelection || !packData || !activePackFile || !currentSchema || !activePreparedTableData) {
     return <></>;
@@ -2375,6 +2382,7 @@ const PackTablesTableView = memo((props: PackTablesTableViewProps) => {
             <button
               type="button"
               onClick={() => void handleAddRow()}
+              title="Add Row (Ctrl/Cmd+Shift+A)"
               className="px-3 py-2 text-sm rounded bg-blue-600 hover:bg-blue-700 text-white"
             >
               Add Row
