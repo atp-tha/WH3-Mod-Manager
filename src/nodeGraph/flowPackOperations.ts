@@ -7,6 +7,9 @@ export interface FlowPackCatalogEntry {
   isInData?: boolean;
 }
 
+export const isPackedFlowName = (fileName: string): boolean =>
+  fileName.trim().replaceAll("/", "\\").toLowerCase().startsWith("whmmflows\\");
+
 export const normalizePackedFlowName = (flowName: string): string | undefined => {
   let normalized = flowName.trim().replaceAll("/", "\\");
   normalized = normalized.replace(/^whmmflows\\/i, "");

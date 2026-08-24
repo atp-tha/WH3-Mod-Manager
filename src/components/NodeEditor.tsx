@@ -615,9 +615,12 @@ const NodeEditor: React.FC<NodeEditorProps> = ({ currentFile, currentPack }: Nod
 
       const nodeData = JSON.parse(type) as Partial<DraggableNodeData> & { type?: string; label?: string };
 
+      // screenToFlowPosition expects viewport/screen coordinates and applies the React Flow
+      // viewport transform itself. Subtract the grab offset in screen pixels first; subtracting
+      // the wrapper bounds or scaling the offset here applies the transform twice.
       const position = reactFlowInstance.screenToFlowPosition({
-        x: event.clientX - nodeDropOffset.left * reactFlowInstance.getZoom(),
-        y: event.clientY - reactFlowBounds.top,
+        x: event.clientX - nodeDropOffset.left,
+        y: event.clientY - nodeDropOffset.top,
       });
 
       if (typeof nodeData.type !== "string" || typeof nodeData.label !== "string") {

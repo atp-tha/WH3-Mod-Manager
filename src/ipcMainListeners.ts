@@ -25,6 +25,7 @@ import { clonePackIndexForTable } from "./components/viewer/viewerPackIndex";
 import { selectPacksToCheck } from "./modCompat/compatScope";
 import {
   findExistingPackedFlowName,
+  isPackedFlowName,
   normalizePackedFlowName,
   orderFlowPackCatalog,
   type FlowPackCatalogEntry,
@@ -1381,6 +1382,15 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
     const payload: ApplySavedPackDataPayload = { packPath, savedFileData, deletedFilePaths };
     mainWindow?.webContents.send("applySavedPackData", payload);
     windows.viewerWindow?.webContents.send("applySavedPackData", payload);
+  };
+  const clearDeletedPackFilePath = (packPath: string, filePath: string) => {
+    const deletedFilePaths = appData.deletedPackFilePaths[packPath];
+    if (!deletedFilePaths?.length) return;
+
+    const fileKey = normalizePackFilePathKey(filePath);
+    const remainingPaths = deletedFilePaths.filter((deletedPath) => normalizePackFilePathKey(deletedPath) !== fileKey);
+    if (remainingPaths.length > 0) appData.deletedPackFilePaths[packPath] = remainingPaths;
+    else delete appData.deletedPackFilePaths[packPath];
   };
   const materializePackedFileForStaging = async (
     sourcePackPath: string,
@@ -5340,7 +5350,6 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
             const vanillaDBFileNames = packedFileNames
               .map((name) => name.match(matchTableNamePart))
               .filter((matchResult) => matchResult)
-              // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
               .map((matchResult) => matchResult![1]);
             if (vanillaDBFileNames.length > 0) {
               appData.vanillaPacksDBFileNames = Array.from(
@@ -5629,7 +5638,6 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
       const cacheFilePath = nodePath.join(app.getPath("userData"), CACHE_FILE_NAME);
       const data = await fs.promises.readFile(cacheFilePath, "utf8");
       customizableModsCache = JSON.parse(data);
-      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
       return customizableModsCache!;
     } catch (err) {
       // Cache file doesn't exist or is invalid, return empty cache
@@ -6604,27 +6612,37 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
   ipcMain.handle("saveNodeFlow", async (event, flowName: string, flowData: string, packPath: string) => {
     try {
       console.log("saveNodeFlow:", flowName);
+      const normalizedFlowName = normalizePackedFlowName(flowName);
+      if (!normalizedFlowName) {
+        return { success: false, error: "Enter a valid flow name" };
+      }
+
       let unsavedFiles = appData.unsavedPacksData[packPath];
       if (!unsavedFiles) {
         unsavedFiles = [];
         appData.unsavedPacksData[packPath] = unsavedFiles;
       }
-      if (!flowName.startsWith("whmmflows\\")) flowName = `whmmflows\\${flowName}`;
+      const existingFileIndex = unsavedFiles.findIndex(
+        (file) => normalizePackFilePathKey(file.name) === normalizePackFilePathKey(normalizedFlowName),
+      );
+      const storedFlowName = existingFileIndex >= 0 ? unsavedFiles[existingFileIndex].name : normalizedFlowName;
       const buffer = Buffer.from(flowData);
       const newFile = {
-        name: flowName,
+        name: storedFlowName,
         file_size: buffer.length,
         start_pos: -1,
         text: flowData,
       } as PackedFile;
-      const existingFileIndex = unsavedFiles.findIndex((file) => file.name == flowName);
       if (existingFileIndex != -1) {
         unsavedFiles.splice(existingFileIndex, 1, newFile);
       } else {
         unsavedFiles.push(newFile);
       }
+      // Editing a file after deleting it is an explicit re-add, so the deletion must not win when
+      // the staged pack is eventually written.
+      clearDeletedPackFilePath(packPath, storedFlowName);
       broadcastPackStagingState(packPath);
-      return { success: true, filePath: flowName };
+      return { success: true, filePath: storedFlowName };
     } catch (error) {
       console.error("Error saving node flow:", error);
       return {
@@ -6668,6 +6686,7 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
         unsavedFiles.push(nextUnsavedFile);
       }
 
+      clearDeletedPackFilePath(packPath, packedFile.name);
       broadcastPackStagingState(packPath);
 
       return { success: true };
@@ -6703,6 +6722,7 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
         unsavedFiles.push(nextUnsavedFile);
       }
 
+      clearDeletedPackFilePath(packPath, filePath);
       broadcastPackStagingState(packPath);
 
       return { success: true };
@@ -7509,10 +7529,19 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
         }
         return { success: true, text: decodePackedFileText(unsavedFile) };
       }
+      const deletedFileKeys = new Set(
+        (appData.deletedPackFilePaths[packPath] ?? []).map(normalizePackFilePathKey),
+      );
+      if (deletedFileKeys.has(normalizePackFilePathKey(fileName))) {
+        return {
+          success: false,
+          error: `File "${fileName}" was deleted from the pack and has not been saved yet`,
+        };
+      }
       // Read the pack with the specific file
       const pack = await readPack(packPath, { filesToRead: [fileName] });
       // Find the file
-      const file = pack.packedFiles.find((pf) => pf.name === fileName);
+      const file = findPackedFileCaseInsensitive(pack, fileName);
       if (!file) {
         return {
           success: false,
@@ -7562,19 +7591,25 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
       console.log("getFlowFilesFromPack:", packPath);
       // Check if there are unsaved flow files for this pack
       const unsavedFiles = appData.unsavedPacksData[packPath] || [];
-      const unsavedFlowFiles = unsavedFiles.filter((file) => file.name.startsWith("whmmflows\\"));
+      const unsavedFlowFiles = unsavedFiles.filter((file) => isPackedFlowName(file.name));
+      const deletedFileKeys = new Set(
+        (appData.deletedPackFilePaths[packPath] ?? []).map(normalizePackFilePathKey),
+      );
       // Read the pack to get flow files
       const pack = await readPack(packPath, { skipParsingTables: true, readFlows: true });
       // Find all flow files in the pack
-      const packFlowFiles = pack.packedFiles.filter((pf) => pf.name.startsWith("whmmflows\\"));
+      const packFlowFiles = pack.packedFiles.filter(
+        (pf) => isPackedFlowName(pf.name) && !deletedFileKeys.has(normalizePackFilePathKey(pf.name)),
+      );
+      const unsavedFlowKeys = new Set(unsavedFlowFiles.map((file) => normalizePackFilePathKey(file.name)));
       // Combine pack files with unsaved files (unsaved takes priority)
       const flowFiles: { name: string; content: string }[] = [];
       // Add pack flow files
       for (const file of packFlowFiles) {
         // Skip if there's an unsaved version
-        if (unsavedFlowFiles.some((uf) => uf.name === file.name)) continue;
+        if (unsavedFlowKeys.has(normalizePackFilePathKey(file.name))) continue;
         let text: string;
-        if (file.text) {
+        if (file.text != null) {
           text = file.text;
         } else if (file.buffer) {
           text = file.buffer.toString("utf-8");
@@ -7587,7 +7622,7 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
       // Add unsaved flow files
       for (const file of unsavedFlowFiles) {
         let text: string;
-        if (file.text) {
+        if (file.text != null) {
           text = file.text;
         } else if (file.buffer) {
           text = file.buffer.toString("utf-8");
@@ -7844,10 +7879,16 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
       if (seenPaths.has(resolvedPath)) continue;
       seenPaths.add(resolvedPath);
 
-      let hasFlows = appData.unsavedPacksData[mod.path]?.some((file) => file.name.startsWith("whmmflows\\")) ?? false;
+      const unsavedFlowFiles = appData.unsavedPacksData[mod.path] ?? [];
+      const deletedFileKeys = new Set(
+        (appData.deletedPackFilePaths[mod.path] ?? []).map(normalizePackFilePathKey),
+      );
+      let hasFlows = unsavedFlowFiles.some((file) => isPackedFlowName(file.name));
       const retainedPack = appData.packsData.find((pack) => nodePath.resolve(pack.path) === resolvedPath);
       if (!hasFlows && retainedPack) {
-        hasFlows = retainedPack.packedFiles.some((file) => file.name.startsWith("whmmflows\\"));
+        hasFlows = retainedPack.packedFiles.some(
+          (file) => isPackedFlowName(file.name) && !deletedFileKeys.has(normalizePackFilePathKey(file.name)),
+        );
       }
 
       // Only enabled packs need an accurate answer for the promoted group. Other packs stay in the
@@ -7856,7 +7897,9 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
       if (!hasFlows && isEnabled) {
         try {
           const pack = await readPack(mod.path, { skipParsingTables: true });
-          hasFlows = pack.packedFiles.some((file) => file.name.startsWith("whmmflows\\"));
+          hasFlows = pack.packedFiles.some(
+            (file) => isPackedFlowName(file.name) && !deletedFileKeys.has(normalizePackFilePathKey(file.name)),
+          );
         } catch (error) {
           console.error(`Failed to inspect pack for flows: ${mod.path}`, error);
         }
@@ -7888,8 +7931,16 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
         const targetExists = fsExtra.existsSync(normalizedPackPath);
         const existingPack = targetExists ? await readPack(normalizedPackPath, { skipParsingTables: true }) : undefined;
         const unsavedFiles = appData.unsavedPacksData[normalizedPackPath] || [];
+        const deletedFileKeys = new Set(
+          (appData.deletedPackFilePaths[normalizedPackPath] ?? []).map(normalizePackFilePathKey),
+        );
         const existingFlowName = findExistingPackedFlowName(
-          [...(existingPack?.packedFiles || []), ...unsavedFiles].map((file) => file.name),
+          [
+            ...(existingPack?.packedFiles || [])
+              .filter((file) => !deletedFileKeys.has(normalizePackFilePathKey(file.name)))
+              .map((file) => file.name),
+            ...unsavedFiles.map((file) => file.name),
+          ],
           normalizedFlowName,
         );
         if (existingFlowName && !overwriteExisting) {
@@ -7909,12 +7960,15 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
           normalizedPackPath,
           existingPack,
           !!existingPack,
+          [],
+          [flowNameToWrite],
         );
         await invalidateCachedPackData(normalizedPackPath);
+        clearDeletedPackFilePath(normalizedPackPath, flowNameToWrite);
 
         if (unsavedFiles.length > 0) {
           const remainingUnsavedFiles = unsavedFiles.filter(
-            (file) => file.name.toLowerCase() !== flowNameToWrite.toLowerCase(),
+            (file) => normalizePackFilePathKey(file.name) !== normalizePackFilePathKey(flowNameToWrite),
           );
           if (remainingUnsavedFiles.length > 0) {
             appData.unsavedPacksData[normalizedPackPath] = remainingUnsavedFiles;
@@ -8027,7 +8081,6 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
         ipcMain.emit(
           "requestOpenModInViewer",
           null,
-          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
           nodePath.join(appData.gamesToGameFolderPaths[appData.currentGame].dataFolder!, "db.pack"),
         );
     }
@@ -12306,7 +12359,15 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
           // Execute flows for enabled mods
           enabledModsWithFlows = sortedMods.filter((iterMod) => {
             const pack = appData.packsData.find((packData) => packData.path == iterMod.path);
-            return pack && pack.packedFiles.some((file) => file.name.startsWith("whmmflows\\"));
+            const deletedFileKeys = new Set(
+              (appData.deletedPackFilePaths[iterMod.path] ?? []).map(normalizePackFilePathKey),
+            );
+            return (
+              pack &&
+              pack.packedFiles.some(
+                (file) => isPackedFlowName(file.name) && !deletedFileKeys.has(normalizePackFilePathKey(file.name)),
+              )
+            );
           });
           if (enabledModsWithFlows.length > 0) {
             console.log(`Found ${enabledModsWithFlows.length} mods with flows to execute`);
@@ -12363,6 +12424,7 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
                 pack.name,
                 sourcePackForFlowExecution,
                 packPathSubstitutes,
+                appData.deletedPackFilePaths[pack.path] ?? [],
               );
               createdFlowPacks.push(...createdPackPaths);
               for (const replacedPath of flowReplacedPackPaths) replacedPackPaths.add(replacedPath);

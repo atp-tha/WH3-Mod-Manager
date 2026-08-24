@@ -31,6 +31,7 @@ import { groupPackedFilesIntoReadRuns } from "./utility/packedFileReadRuns";
 import { normalizePackFilePathKey } from "./utility/packFilePathUtils";
 import type { SerializedNodeGraph } from "./nodeGraph/types";
 import { resolveRadioChoiceId } from "./nodeGraph/types";
+import { isPackedFlowName } from "./nodeGraph/flowPackOperations";
 import {
   substituteDeepCloneOptionValues,
   substituteFilterOptionValues,
@@ -1485,6 +1486,7 @@ export const executeFlowsForPack = async (
   sourcePack?: Pick<Pack, "packedFiles" | "lastChangedLocal" | "size">,
   /** Packs whose data overwrites were written to a copy, so flows read that copy instead. */
   packPathSubstitutes?: Map<string, string>,
+  deletedFlowFileNames: Iterable<string> = [],
 ): Promise<{ createdPackPaths: string[]; replacedPackPaths: string[]; hadErrors: boolean }> => {
   void pathTarget;
   const createdPackPaths = new Set<string>();
@@ -1508,8 +1510,12 @@ export const executeFlowsForPack = async (
     const sourceMod = canReuseFlowSourcePack(sourcePack, sourceStat)
       ? sourcePack
       : await readPack(pathSource, { readFlows: true, skipParsingTables: true });
-    // Filter for flow files
-    const flowFiles = sourceMod.packedFiles.filter((file) => file.name.startsWith("whmmflows\\"));
+    // Filter for flow files. Deletions staged in the editor must affect an automatic launch before
+    // the user has written the pack back to disk.
+    const deletedFlowKeys = new Set(Array.from(deletedFlowFileNames, normalizePackFilePathKey));
+    const flowFiles = sourceMod.packedFiles.filter(
+      (file) => isPackedFlowName(file.name) && !deletedFlowKeys.has(normalizePackFilePathKey(file.name)),
+    );
     if (flowFiles.length === 0) {
       console.log("No flow files found in pack");
       return {

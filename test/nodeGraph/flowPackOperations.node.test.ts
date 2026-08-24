@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   findExistingPackedFlowName,
+  isPackedFlowName,
   normalizePackedFlowName,
   orderFlowPackCatalog,
   type FlowPackCatalogEntry,
@@ -16,6 +17,11 @@ const entry = (overrides: Partial<FlowPackCatalogEntry>): FlowPackCatalogEntry =
 });
 
 describe("flow names stored in packs", () => {
+  it("recognizes flow paths regardless of slash direction or case", () => {
+    expect(isPackedFlowName("WHMMFLOWS/my_flow.JSON")).toBe(true);
+    expect(isPackedFlowName("scripts/my_flow.json")).toBe(false);
+  });
+
   it("adds the internal folder and JSON extension", () => {
     expect(normalizePackedFlowName("my_flow")).toBe("whmmflows\\my_flow.json");
   });
