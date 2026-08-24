@@ -361,6 +361,7 @@ const SkillsView = memo(
     const isCheckingSkillRequirements = useAppSelector((state) => state.app.isCheckingSkillRequirements);
     const [factionFilter, setFactionFilter] = useState<string>(initialSnapshot?.factionFilter ?? "all");
     const [isEditMode, setIsEditMode] = useState(initialSnapshot?.isEditMode ?? false);
+    const isEditModeRef = useRef(isEditMode);
     /**
      * The editor's pickers work off every skill and icon in the game, which is far too much to ship
      * with each tree, so it is fetched the first time the editor is opened and kept for the session.
@@ -423,6 +424,7 @@ const SkillsView = memo(
 
     isRequirementsModeRef.current = isRequirementsMode;
     isSkillLocksModeRef.current = isSkillLocksMode;
+    isEditModeRef.current = isEditMode;
 
     useEffect(() => {
       if (isSavePackModalOpen && savePackNameInputRef.current) {
@@ -3857,13 +3859,15 @@ const SkillsView = memo(
       resetCounter,
     ]);
 
-    // Faction filter is an explicit user action — reset nodes/edges even in edit mode.
+    // Faction filter is an explicit user action. Do not also run this when edit mode changes:
+    // the edit-mode transition owns that state update, and applying this normal-mode snapshot
+    // first makes the transition interpret normal-mode coordinates as edit-mode coordinates.
     useEffect(() => {
       if (isRestoringSnapshot.current) return;
-      if (isEditMode) return;
+      if (isEditModeRef.current) return;
       setNodes(deepClone(skillNodes));
       setEdges(deepClone(initialEdges));
-    }, [factionFilter, isEditMode]);
+    }, [factionFilter]);
 
     // Enter edit mode automatically after a "New Skill Tree" load
     useEffect(() => {
