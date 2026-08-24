@@ -335,6 +335,10 @@ const ModRows = memo((props: ModRowsProps) => {
     [alwaysEnabledModNamesList, dispatch, runPreservingScroll],
   );
 
+  const onModOpenInViewer = useCallback((mod: Mod) => {
+    window.api?.requestOpenModInViewer(mod.path);
+  }, []);
+
   /**
    * The two panes of the dual layout sort separately: the disabled one keeps the sorting type the single
    * list uses, the enabled one has its own. Holding shift while picking a column sorts both by it, and
@@ -831,6 +835,7 @@ const ModRows = memo((props: ModRowsProps) => {
       onSetLoadOrderMode,
       onSelectLoadOrderPosition,
       onModToggled,
+      onModOpenInViewer,
       onModRightClick,
       onCustomizeModClicked,
       onCustomizeModRightClick,
@@ -843,6 +848,7 @@ const ModRows = memo((props: ModRowsProps) => {
       onFlowOptionsClicked,
       onModRightClick,
       onModToggled,
+      onModOpenInViewer,
       onRemoveModOrder,
       onRowHoverEnd,
       onRowHoverStart,

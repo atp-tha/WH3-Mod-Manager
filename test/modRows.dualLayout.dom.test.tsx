@@ -327,6 +327,23 @@ describe("dual mod list layout", () => {
     expect(within(left).queryByText("alpha human name")).toBeNull();
   });
 
+  it("opens a mod in the viewer instead of toggling it on Ctrl-click", async () => {
+    const requestOpenModInViewer = vi.fn();
+    window.api = {
+      ...window.api,
+      requestOpenModInViewer,
+    } as NonNullable<Window["api"]>;
+    const { testStore } = renderDualLayout([createMod("alpha", false)]);
+
+    const { left } = getPanes();
+    const modName = await waitFor(() => within(left).getByText("alpha human name"));
+
+    await act(async () => fireEvent.click(modName, { button: 0, ctrlKey: true }));
+
+    expect(requestOpenModInViewer).toHaveBeenCalledWith("/mods/alpha.pack");
+    expect(testStore.getState().app.currentPreset.mods[0].isEnabled).toBe(false);
+  });
+
   it("only shows the configuration column on the enabled pane", async () => {
     renderDualLayout([createMod("alpha", false), createMod("beta", true, 0)], {
       customizableMods: {

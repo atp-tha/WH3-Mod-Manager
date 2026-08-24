@@ -34,6 +34,7 @@ export type ModRowCallbacks = {
   onSetLoadOrderMode: (mod: Mod) => void;
   onSelectLoadOrderPosition: (position: number) => void;
   onModToggled: (mod: Mod) => void;
+  onModOpenInViewer: (mod: Mod) => void;
   onModRightClick: (e: React.MouseEvent<HTMLDivElement, MouseEvent>, mod: Mod) => void;
   onCustomizeModClicked: (e: React.MouseEvent<HTMLOrSVGElement, MouseEvent>, mod: Mod) => void;
   onCustomizeModRightClick: (e: React.MouseEvent<HTMLOrSVGElement, MouseEvent>, mod: Mod) => void;

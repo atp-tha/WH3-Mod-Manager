@@ -22,6 +22,7 @@ type ModRowProps = {
   onSetLoadOrderMode: (mod: Mod) => void;
   onSelectLoadOrderPosition: (position: number) => void;
   onModToggled: (mod: Mod) => void;
+  onModOpenInViewer: (mod: Mod) => void;
   onModRightClick: (e: React.MouseEvent<HTMLDivElement, MouseEvent>, mod: Mod) => void;
   onCustomizeModClicked: (e: React.MouseEvent<HTMLOrSVGElement, MouseEvent>, mod: Mod) => void;
   onCustomizeModRightClick: (e: React.MouseEvent<HTMLOrSVGElement, MouseEvent>, mod: Mod) => void;
@@ -206,6 +207,7 @@ const ModRow = memo(
     onSetLoadOrderMode,
     onSelectLoadOrderPosition,
     onModToggled,
+    onModOpenInViewer,
     onModRightClick,
     onRemoveModOrder,
     isAlwaysEnabled,
@@ -316,6 +318,17 @@ const ModRow = memo(
         key={mod.name}
         onMouseEnter={(e) => onRowHoverStart(e)}
         onMouseLeave={(e) => onRowHoverEnd(e)}
+        onClickCapture={(event) => {
+          if (!event.ctrlKey || event.button !== 0) return;
+
+          // Controls inside a row keep their own Ctrl-click behaviour. The rest of the row opens the
+          // viewer before a label can activate its checkbox.
+          if (event.target instanceof Element && event.target.closest("button, input, .bigger-gear-icon")) return;
+
+          event.preventDefault();
+          event.stopPropagation();
+          onModOpenInViewer(mod);
+        }}
         id={rowId}
         data-load-order={mod.loadOrder}
         style={style}
