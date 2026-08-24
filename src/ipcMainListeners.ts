@@ -1616,7 +1616,9 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
         const sortedMods = sortByNameAndLoadOrder(mods);
         const unsortedModPacksTableData = getPacksTableData(enabledModPacks, tablesToRead, true) || [];
         const orderedModPacksTableData = [] as PackViewData[];
-        for (const mod of sortedMods.toReversed()) {
+        // Overlay rows are applied in order and the later row wins. Keep the game's load order
+        // (lowest priority first) so the highest-priority mod remains the final override.
+        for (const mod of sortedMods) {
           const packTableData = unsortedModPacksTableData.find((ptd) => ptd.packPath == mod.path);
           if (packTableData) orderedModPacksTableData.push(packTableData);
         }
@@ -1681,7 +1683,9 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
       .map((pack) => unsortedPacksTableData.find((ptd) => ptd.packPath == pack.path))
       .filter((packTableData): packTableData is PackViewData => !!packTableData);
     packsTableData.push(...vanillaPacksTableData);
-    for (const mod of sortedMods.toReversed()) {
+    // Overlay rows are applied in order and the later row wins. Keep the game's load order
+    // (lowest priority first) so the highest-priority mod remains the final override.
+    for (const mod of sortedMods) {
       const packTableData = unsortedPacksTableData.find((ptd) => ptd.packPath == mod.path);
       if (packTableData) packsTableData.push(packTableData);
     }

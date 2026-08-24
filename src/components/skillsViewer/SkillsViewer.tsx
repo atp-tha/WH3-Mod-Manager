@@ -189,6 +189,21 @@ const SkillsViewer = memo(() => {
       return;
     } else if (tabs.length === 0) {
       // First load: create the initial tab
+      // Record the initial response as accepted as well. Without this, a delayed duplicate of the
+      // initial exact-token response can look like a fresh selection after another tab was accepted.
+      if (!pendingNewTab.current && !pendingActiveTab.current) {
+        if (skillsData.requestId) {
+          markSelectionAccepted({
+            subtype: skillsData.currentSubtype,
+            subtypeIndex: skillsData.currentSubtypeIndex,
+            requestId: skillsData.requestId,
+          });
+        } else {
+          const initialSelection = { subtype: skillsData.currentSubtype, subtypeIndex: skillsData.currentSubtypeIndex };
+          acceptedSelectionKey.current = selectionKey(initialSelection);
+          staleSelectionKeys.current.delete(selectionKey(initialSelection));
+        }
+      }
       const id = `tab_${nextTabId++}`;
       const newTab: SkillTab = {
         id,
@@ -234,6 +249,11 @@ const SkillsViewer = memo(() => {
 
   const onTreeSelect = useCallback((subtype: string, subtypeIndex: number) => {
     const requestId = makeSkillsRequestId();
+    const previousPending = pendingActiveTab.current;
+    if (previousPending) {
+      staleRequestIds.current.add(previousPending.requestId);
+      staleSelectionKeys.current.add(selectionKey(previousPending));
+    }
     pendingActiveTab.current = { subtype, subtypeIndex, requestId };
     window.api?.getSkillsForSubtype(subtype, subtypeIndex, requestId);
   }, []);
@@ -241,6 +261,11 @@ const SkillsViewer = memo(() => {
   const onTreeDoubleClick = useCallback((subtype: string, subtypeIndex: number) => {
     console.log("Double clicked", subtype);
     const requestId = makeSkillsRequestId();
+    const previousPending = pendingNewTab.current;
+    if (previousPending) {
+      staleRequestIds.current.add(previousPending.requestId);
+      staleSelectionKeys.current.add(selectionKey(previousPending));
+    }
     pendingNewTab.current = { subtype, subtypeIndex, requestId };
     window.api?.getSkillsForSubtype(subtype, subtypeIndex, requestId);
   }, []);

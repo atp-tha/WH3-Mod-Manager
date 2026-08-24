@@ -116,4 +116,49 @@ describe("SkillsView edit-mode layout", () => {
     expect(nodes.find((node) => node.id === "node_4")?.position.y).toBe(400);
     expect(nodes.find((node) => node.id === "node_5")?.position.y).toBe(500);
   });
+
+  it("reapplies normal-mode hidden-skill filtering after edit mode", async () => {
+    const filteredSkillsData = {
+      ...skillsData,
+      currentSkills: skillsData.currentSkills.map((skill) =>
+        skill.nodeId === "node_5" ? { ...skill, isHiddentInUI: true } : skill,
+      ),
+    } as SkillsData;
+    window.api = {
+      ...window.api,
+      getSkillsEditorData: vi.fn().mockResolvedValue(undefined),
+    } as NonNullable<Window["api"]>;
+
+    const viewRef = createRef<SkillsViewHandle>();
+    const store = configureStore({
+      reducer: { app: appReducer },
+      preloadedState: {
+        app: {
+          ...initialState,
+          isFeaturesForModdersEnabled: true,
+          isShowingHiddenSkills: false,
+          skillsData: filteredSkillsData,
+        },
+      },
+    });
+
+    render(
+      <Provider store={store}>
+        <SkillsView ref={viewRef} skillsData={filteredSkillsData} />
+      </Provider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    await waitFor(() => expect(viewRef.current?.getSnapshot().isEditMode).toBe(true));
+    expect(viewRef.current?.getSnapshot().nodes.some((node) => node.id === "node_5")).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit Mode: ON" }));
+    await waitFor(() => expect(viewRef.current?.getSnapshot().isEditMode).toBe(false));
+
+    expect(viewRef.current?.getSnapshot().nodes.some((node) => node.id === "node_5")).toBe(false);
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    await waitFor(() => expect(viewRef.current?.getSnapshot().isEditMode).toBe(true));
+    expect(viewRef.current?.getSnapshot().nodes.some((node) => node.id === "node_5")).toBe(true);
+  });
 });

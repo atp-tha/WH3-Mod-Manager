@@ -25,6 +25,7 @@ vi.mock("../src/components/skillsViewer/SkillsTreeView", () => ({
     <div>
       <div data-testid="tree-filter">{tableFilter}</div>
       <button onClick={() => onSelect?.("beta", 0)}>select-beta</button>
+      <button onClick={() => onSelect?.("delta", 0)}>select-delta</button>
       <button onClick={() => onDoubleClick?.("gamma", 0)}>open-gamma</button>
     </div>
   ),
@@ -78,25 +79,28 @@ vi.mock("../src/components/skillsViewer/SkillsView", async () => {
   };
 });
 
-const createSkillsData = (subtype: string, subtypeIndex = 0): SkillsData =>
+const createSkillsData = (subtype: string, subtypeIndex = 0, requestId?: string): SkillsData =>
   ({
+    requestId,
     currentSubtype: subtype,
     currentSubtypeIndex: subtypeIndex,
     currentSkills: [],
     subtypeToNumSets: {
       alpha: 1,
       beta: 1,
+      delta: 1,
       gamma: 1,
     },
     subtypesToSet: {
       alpha: ["alpha"],
       beta: ["beta"],
+      delta: ["delta"],
       gamma: ["gamma"],
     },
     nodeLinks: {},
     nodeRequirements: {},
     icons: {},
-    subtypes: ["alpha", "beta", "gamma"],
+    subtypes: ["alpha", "beta", "delta", "gamma"],
     subtypesToLocalizedNames: {},
     nodeToSkillLocks: {},
     abilityTooltipsByKey: {},
@@ -197,5 +201,25 @@ describe("SkillsViewer", () => {
     });
 
     expect(screen.getByTestId("skills-view")).toHaveTextContent("view-gamma-0");
+  });
+
+  it("ignores an older exact-token response after a newer active selection", () => {
+    const store = renderViewer();
+
+    fireEvent.click(screen.getByRole("button", { name: "select-beta" }));
+    fireEvent.click(screen.getByRole("button", { name: "select-delta" }));
+
+    const betaRequestId = getSkillsForSubtypeMock.mock.calls[0][2];
+    const deltaRequestId = getSkillsForSubtypeMock.mock.calls[1][2];
+
+    act(() => {
+      store.dispatch(setSkillsData(createSkillsData("delta", 0, deltaRequestId)));
+    });
+    expect(screen.getByTestId("skills-view")).toHaveTextContent("view-delta-0");
+
+    act(() => {
+      store.dispatch(setSkillsData(createSkillsData("beta", 0, betaRequestId)));
+    });
+    expect(screen.getByTestId("skills-view")).toHaveTextContent("view-delta-0");
   });
 });
