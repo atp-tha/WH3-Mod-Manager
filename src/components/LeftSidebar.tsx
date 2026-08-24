@@ -1,4 +1,4 @@
-import React, { memo, useCallback, useContext, useEffect, useMemo } from "react";
+import React, { memo, useCallback, useContext, useEffect, useMemo, useRef } from "react";
 import { Tab, TabList, TabPanel, Tabs } from "react-tabs";
 import "../styles/LeftSidebar.css";
 import { IoIosList, IoMdCheckboxOutline } from "react-icons/io";
@@ -61,14 +61,29 @@ const LeftSidebar = memo(() => {
     showVisualsTab,
   ]);
 
-  const onTabSelected = (index: number) => {
+  const onTabSelected = useCallback((index: number) => {
     const tabType = tabIndexToTabType[index];
     if (!tabType) return;
     console.log("setting tab", tabType);
     dispatch(setCurrentTab(tabType));
-  };
+  }, [dispatch, tabIndexToTabType]);
 
   const localized: Record<string, string> = useContext(localizationContext);
+
+  const shortcutBufferRef = useRef("");
+  const shortcutTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
+  const clearShortcutBuffer = useCallback(() => {
+    if (shortcutTimeoutRef.current) clearTimeout(shortcutTimeoutRef.current);
+    shortcutTimeoutRef.current = undefined;
+    shortcutBufferRef.current = "";
+  }, []);
+  const selectShortcut = useCallback(
+    (shortcutNumber: number) => {
+      clearShortcutBuffer();
+      onTabSelected(shortcutNumber - 1);
+    },
+    [clearShortcutBuffer, onTabSelected],
+  );
 
   useEffect(() => {
     if (!tabIndexToTabType.includes(currentTab)) {
@@ -78,20 +93,51 @@ const LeftSidebar = memo(() => {
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.ctrlKey) {
-        const keyNum = parseInt(e.key, 10);
-        if (!Number.isNaN(keyNum)) {
-          onTabSelected(keyNum - 1);
+      if (!e.ctrlKey || e.repeat || !/^\d$/.test(e.key)) return;
+
+      const digit = e.key;
+      const currentBuffer = shortcutBufferRef.current;
+      if (currentBuffer === "1") {
+        const shortcutNumber = Number(currentBuffer + digit);
+        if (shortcutNumber >= 10 && shortcutNumber <= tabIndexToTabType.length) {
+          e.preventDefault();
+          selectShortcut(shortcutNumber);
+          return;
         }
+
+        // The two-digit shortcut was invalid. Complete Ctrl+1, then let a valid
+        // single-digit shortcut through if the second key can represent one.
+        selectShortcut(1);
+        if (digit === "0") return;
+      }
+
+      const shortcutNumber = Number(digit);
+      if (digit === "1" && tabIndexToTabType.length >= 10) {
+        e.preventDefault();
+        shortcutBufferRef.current = "1";
+        shortcutTimeoutRef.current = setTimeout(() => selectShortcut(1), 450);
+        return;
+      }
+
+      if (shortcutNumber >= 1 && shortcutNumber <= tabIndexToTabType.length) {
+        e.preventDefault();
+        selectShortcut(shortcutNumber);
       }
     };
 
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.key === "Control" && shortcutBufferRef.current) selectShortcut(1);
+    };
+
     document.addEventListener("keydown", onKeyDown);
+    document.addEventListener("keyup", onKeyUp);
 
     return () => {
       document.removeEventListener("keydown", onKeyDown);
+      document.removeEventListener("keyup", onKeyUp);
+      clearShortcutBuffer();
     };
-  });
+  }, [clearShortcutBuffer, selectShortcut, tabIndexToTabType.length]);
 
   return (
     <>

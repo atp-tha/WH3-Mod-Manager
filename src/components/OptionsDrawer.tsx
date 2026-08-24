@@ -18,7 +18,7 @@ import {
   setModdersPrefix,
   setIsCreateSteamCollectionOpen,
   setIsImportSteamCollectionOpen,
-  setDataModsToEnableByName,
+  queueDataModsToEnableByName,
   createBisectedModListPresets,
   toggleIsCompatCheckingVanillaPacks,
   setIsPackSearcherOpen,
@@ -118,7 +118,6 @@ const OptionsDrawer = memo(() => {
   const hiddenMainWindowTabs = useAppSelector((state) => state.app.hiddenMainWindowTabs);
   const isDev = useAppSelector((state) => state.app.isDev);
   const isAdmin = useAppSelector((state) => state.app.isAdmin);
-  const dataModsToEnableByName = useAppSelector((state) => state.app.dataModsToEnableByName);
   const availableLanguages = useAppSelector((state) => state.app.availableLanguages);
   const currentLanguage = useAppSelector((state) => state.app.currentLanguage);
   const currentGame = useAppSelector((state) => state.app.currentGame);
@@ -434,11 +433,12 @@ const OptionsDrawer = memo(() => {
       if (e.shiftKey) {
         window.api?.copyToDataAsSymbolicLink();
       } else {
-        window.api?.copyToDataAsSymbolicLink(enabledMods.map((mod) => mod.path));
-        dispatch(setDataModsToEnableByName([...dataModsToEnableByName, ...enabledMods.map((mod) => mod.name)]));
+        const modsToCopy = enabledMods.filter((mod) => !mod.isInData);
+        window.api?.copyToDataAsSymbolicLink(modsToCopy.map((mod) => mod.path));
+        dispatch(queueDataModsToEnableByName(modsToCopy.map((mod) => mod.name)));
       }
     },
-    [enabledMods],
+    [dispatch, enabledMods],
   );
 
   const SingleValue = ({ children, ...props }: SingleValueProps<OptionType, false>) => (
@@ -525,6 +525,7 @@ const OptionsDrawer = memo(() => {
           className="w-36 text-white bg-blue-700 hover:bg-blue-800 focus:ring-4 focus:ring-blue-300 font-medium rounded-lg text-sm px-5 py-2.5 mx-2 mb-2 m-auto dark:bg-transparent dark:hover:bg-gray-700 dark:border-gray-600 dark:border-2 focus:outline-none dark:focus:ring-gray-800"
           type="button"
           aria-controls="drawer-example"
+          aria-expanded={areOptionsOpen}
         >
           {localized.otherOptions}
         </button>
@@ -540,12 +541,19 @@ const OptionsDrawer = memo(() => {
             aria-modal="true"
             role="dialog"
           >
-            <h5
-              id="drawer-label"
-              className="inline-flex items-center mb-4 text-base font-semibold text-gray-500 dark:text-gray-400 mt-6 cursor-default"
-            >
-              {localized.otherOptions}
-            </h5>
+            <div className="mt-6 mb-4 flex items-center justify-between">
+              <h5 id="drawer-label" className="inline-flex items-center text-base font-semibold text-gray-500 dark:text-gray-400 cursor-default">
+                {localized.otherOptions}
+              </h5>
+              <button
+                type="button"
+                aria-label={localized.close || "Close"}
+                className="rounded px-2 py-1 text-2xl leading-none text-gray-500 hover:bg-gray-700 hover:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                onClick={() => setAreOptionsOpen(false)}
+              >
+                ×
+              </button>
+            </div>
 
             <div className="flex justify-center relative">
               <div className="absolute flex font-normal text-lg items-center bg-gray-800 justify-center w-[5.5rem] h-6 top-[-12px] rounded mt-[-0.05rem] cursor-default">
@@ -588,10 +596,7 @@ const OptionsDrawer = memo(() => {
                 onChange={onLanguageChange}
                 isClearable={false}
                 isSearchable={false}
-                defaultValue={{
-                  value: currentLanguage as string,
-                  label: ISO6391.getName(currentLanguage as string),
-                }}
+                value={languageOptions.find((option) => option.value === currentLanguage) ?? null}
               ></Select>
             </div>
 

@@ -24,6 +24,7 @@ import localizationContext from "../localizationContext";
 import Help from "./Help";
 import { gameToPackWithDBTablesName } from "../supportedGames";
 import { isWorkshopMod } from "../modSources";
+import { toPresetEntries } from "../config/presetEntries";
 import { Modal } from "../flowbite";
 import { getConflictingStartposMods } from "../utility/startposConflicts";
 import { getEnabledMods } from "../modsHelpers";
@@ -108,6 +109,8 @@ const Sidebar = memo(() => {
   const [isShowingRequiredMods, setIsShowingRequiredMods] = useState<boolean>(false);
   const [isWaitingForRelaunch, setIsWaitingForRelaunch] = useState<boolean>(false);
   const [isWaitingForContinueRelaunch, setIsWaitingForContinueRelaunch] = useState<boolean>(false);
+  const [isPlayDelayPending, setIsPlayDelayPending] = useState(false);
+  const [isContinueDelayPending, setIsContinueDelayPending] = useState(false);
   const [isTreeMenuOpen, setIsTreeMenuOpen] = useState(false);
   const [isWorkshopRepairModalOpen, setIsWorkshopRepairModalOpen] = useState(false);
   const [workshopRepairCandidateIds, setWorkshopRepairCandidateIds] = useState<string[]>([]);
@@ -170,9 +173,11 @@ const Sidebar = memo(() => {
           Date.now(),
         );
         if (!playDelayTimeoutId.current) {
+          setIsPlayDelayPending(true);
           playDelayTimeoutId.current = setTimeout(() => {
             console.log("playGameClicked: triggering delayed play game", Date.now());
             playDelayTimeoutId.current = undefined;
+            setIsPlayDelayPending(false);
             dispatch(createOnGameStartPreset());
             window.api?.startGame(mods, areModsInOrder, {
               isMakeUnitsGeneralsEnabled,
@@ -234,9 +239,11 @@ const Sidebar = memo(() => {
           Date.now(),
         );
         if (!continueDelayTimeoutId.current) {
+          setIsContinueDelayPending(true);
           continueDelayTimeoutId.current = setTimeout(() => {
             console.log("onContinueGameClicked: triggering delayed continue game", Date.now());
             continueDelayTimeoutId.current = undefined;
+            setIsContinueDelayPending(false);
             window.api?.startGame(
               mods,
               areModsInOrder,
@@ -299,8 +306,10 @@ const Sidebar = memo(() => {
   );
 
   const newPresetMade = (name: string) => {
-    dispatch(addPreset({ name: name, mods: mods }));
-    console.log(name);
+    const trimmedName = name.trim();
+    if (!trimmedName) return;
+    dispatch(addPreset({ name: trimmedName, mods: toPresetEntries(mods) }));
+    console.log(trimmedName);
   };
 
   const onChange = (newValue: SingleValue<OptionType>, actionMeta: ActionMeta<OptionType>) => {
@@ -649,7 +658,7 @@ const Sidebar = memo(() => {
         setIsOpen={setIsShowingRequiredMods}
         modDependencies={missingModDependencies}
       />
-      <div className="fixed h-[90vh] z-[40]">
+      <div className="fixed h-[90vh] max-h-[90vh] overflow-y-auto z-[40]">
         <div id="presetSection">
           <Tooltip
             placement="left"
@@ -977,7 +986,7 @@ const Sidebar = memo(() => {
                     className="aspect-square w-10"
                     src={require(`../assets/game_icons/${currentGame}.png`)}
                   />
-                  {((isWaitingForRelaunch || playDelayTimeoutId.current) && (
+                  {((isWaitingForRelaunch || isPlayDelayPending) && (
                     <div className="dots-loader h-3 w-3 self-center mt-2 opacity-90"></div>
                   )) || <span className="playButtonText uppercase">{localized.play}</span>}
                 </div>
@@ -995,7 +1004,7 @@ const Sidebar = memo(() => {
               >
                 <div className="make-tooltip-w-full">
                   <Tooltip placement="left" content={(saves[0] && `Load ${saves[0].name}`) || "No saves found!"}>
-                    {((isWaitingForContinueRelaunch || continueDelayTimeoutId.current) && (
+                    {((isWaitingForContinueRelaunch || isContinueDelayPending) && (
                       <div className="dots-loader mb-1 ml-2 h-3 w-3 self-center mt-2 opacity-90"></div>
                     )) || <span className="ml-[-25%]">{localized.continue}</span>}
                   </Tooltip>

@@ -8273,29 +8273,44 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
     mainWindow?.webContents.send("setPackCollisions", packCollisions);
     emptyAllCompatDataCollections();
   });
-  ipcMain.on("copyToData", async (event, modPathsToCopy?: string[]) => {
-    if (!appData.gamesToGameFolderPaths[appData.currentGame].gamePath) return;
-    console.log("copyToData: modPathsToCopy:", modPathsToCopy);
-    const mods = await getMods(log);
-    let withoutDataMods = mods.filter((mod) => !mod.isInData);
-    if (modPathsToCopy) {
-      withoutDataMods = withoutDataMods.filter((mod) =>
-        modPathsToCopy.some((modPathToCopy) => modPathToCopy == mod.path),
-      );
+  const reportFileOperationFailures = (operation: string, failures: unknown[]) => {
+    if (failures.length === 0) return;
+
+    for (const failure of failures) {
+      const message = failure instanceof Error ? failure.message : String(failure);
+      mainWindow?.webContents.send("handleLog", `${operation} failed: ${message}`);
     }
-    const copyPromises = withoutDataMods.map((mod) => {
-      mainWindow?.webContents.send(
-        "handleLog",
-        `COPYING ${mod.path} to ${appData.gamesToGameFolderPaths[appData.currentGame].gamePath}\\data\\${mod.name}`,
+    mainWindow?.webContents.send("addToast", {
+      type: "warning",
+      messages: [`${operation} failed for ${failures.length} file(s).`],
+      startTime: Date.now(),
+    } as Toast);
+  };
+  ipcMain.on("copyToData", async (event, modPathsToCopy?: string[]) => {
+    try {
+      const gamePath = appData.gamesToGameFolderPaths[appData.currentGame].gamePath;
+      if (!gamePath) return;
+      console.log("copyToData: modPathsToCopy:", modPathsToCopy);
+      const mods = await getMods(log);
+      let withoutDataMods = mods.filter((mod) => !mod.isInData);
+      if (modPathsToCopy) {
+        withoutDataMods = withoutDataMods.filter((mod) =>
+          modPathsToCopy.some((modPathToCopy) => modPathToCopy == mod.path),
+        );
+      }
+      const results = await Promise.allSettled(
+        withoutDataMods.map(async (mod) => {
+          mainWindow?.webContents.send("handleLog", `COPYING ${mod.path} to ${gamePath}\\data\\${mod.name}`);
+          await fs.promises.copyFile(mod.path, nodePath.join(gamePath, "data", mod.name));
+        }),
       );
-      if (!appData.gamesToGameFolderPaths[appData.currentGame].gamePath) throw new Error("game path not set");
-      return fs.copyFileSync(
-        mod.path,
-        nodePath.join(appData.gamesToGameFolderPaths[appData.currentGame].gamePath as string, "/data/", mod.name),
+      reportFileOperationFailures(
+        "Copy to Data",
+        results.filter((result) => result.status === "rejected").map((result) => result.reason),
       );
-    });
-    await Promise.allSettled(copyPromises);
-    // getAllMods();
+    } catch (error) {
+      reportFileOperationFailures("Copy to Data", [error]);
+    }
   });
   const normalizeComparablePath = (folderPath: string) => {
     const normalizedPath = nodePath.resolve(folderPath);
@@ -8490,45 +8505,63 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
     },
   );
   ipcMain.on("copyToDataAsSymbolicLink", async (event, modPathsToCopy?: string[]) => {
-    console.log("copyToDataAsSymbolicLink modPathsToCopy:", modPathsToCopy);
-    const mods = await getMods(log);
-    let withoutDataMods = mods.filter((mod) => !mod.isInData);
-    if (modPathsToCopy) {
-      withoutDataMods = withoutDataMods.filter((mod) =>
-        modPathsToCopy.some((modPathToCopy) => modPathToCopy == mod.path),
+    try {
+      console.log("copyToDataAsSymbolicLink modPathsToCopy:", modPathsToCopy);
+      const mods = await getMods(log);
+      let withoutDataMods = mods.filter((mod) => !mod.isInData);
+      if (modPathsToCopy) {
+        withoutDataMods = withoutDataMods.filter((mod) =>
+          modPathsToCopy.some((modPathToCopy) => modPathToCopy == mod.path),
+        );
+      }
+      const gamePath = appData.gamesToGameFolderPaths[appData.currentGame].gamePath;
+      if (!gamePath) return;
+      const results = await Promise.allSettled(
+        withoutDataMods.map(async (mod) => {
+          const destinationPath = nodePath.join(gamePath, "data", mod.name);
+          mainWindow?.webContents.send("handleLog", `CREATING SYMLINK of ${mod.path} to ${gamePath}\\data\\${mod.name}`);
+          await fsExtra.symlink(mod.path, destinationPath);
+          return destinationPath;
+        }),
       );
+      const pathsOfNewSymLinks: string[] = [];
+      const failures: unknown[] = [];
+      for (const result of results) {
+        if (result.status === "fulfilled") pathsOfNewSymLinks.push(result.value);
+        else failures.push(result.reason);
+      }
+      reportFileOperationFailures("Create symbolic links in Data", failures);
+      // Should be tracked automatically by the data watcher, but chokidar can choke on symlinks here.
+      await Promise.all(pathsOfNewSymLinks.map((path) => onNewPackFound(path)));
+    } catch (error) {
+      reportFileOperationFailures("Create symbolic links in Data", [error]);
     }
-    const gamePath = appData.gamesToGameFolderPaths[appData.currentGame].gamePath;
-    if (!gamePath) return;
-    const pathsOfNewSymLinks = withoutDataMods.map((mod) => nodePath.join(gamePath ?? "", "/data/", mod.name));
-    const copyPromises = withoutDataMods.map((mod) => {
-      mainWindow?.webContents.send("handleLog", `CREATING SYMLINK of ${mod.path} to ${gamePath}\\data\\${mod.name}`);
-      if (!gamePath) throw new Error("game path not set");
-      return fsExtra.symlink(mod.path, nodePath.join(gamePath, "/data/", mod.name));
-    });
-    await Promise.allSettled(copyPromises);
-    // should be tracked automatically by the data watcher, but chokidar can choke on symlinks here
-    for (const pathsOfNewSymLink of pathsOfNewSymLinks) {
-      onNewPackFound(pathsOfNewSymLink);
-    }
-    // getAllMods();
   });
   ipcMain.on("cleanData", async () => {
-    const mods = await getMods(log);
-    mods.forEach((mod) => {
-      if (mod.isInData) mainWindow?.webContents.send("handleLog", `is in data ${mod.name}`);
-    });
-    const modsInBothPlaces = mods.filter(
-      (mod) =>
-        mod.isInData &&
-        !mod.isInModding &&
-        mods.find((modSecond) => !modSecond.isInData && !modSecond.isInData && modSecond.name === mod.name),
-    );
-    const deletePromises = modsInBothPlaces.map((mod) => {
-      mainWindow?.webContents.send("handleLog", `DELETING ${mod.path}`);
-      return fs.unlinkSync(mod.path);
-    });
-    await Promise.allSettled(deletePromises);
+    try {
+      const mods = await getMods(log);
+      mods.forEach((mod) => {
+        if (mod.isInData) mainWindow?.webContents.send("handleLog", `is in data ${mod.name}`);
+      });
+      const modsInBothPlaces = mods.filter(
+        (mod) =>
+          mod.isInData &&
+          !mod.isInModding &&
+          mods.find((modSecond) => !modSecond.isInData && !modSecond.isInData && modSecond.name === mod.name),
+      );
+      const results = await Promise.allSettled(
+        modsInBothPlaces.map(async (mod) => {
+          mainWindow?.webContents.send("handleLog", `DELETING ${mod.path}`);
+          await fs.promises.unlink(mod.path);
+        }),
+      );
+      reportFileOperationFailures(
+        "Clean Data",
+        results.filter((result) => result.status === "rejected").map((result) => result.reason),
+      );
+    } catch (error) {
+      reportFileOperationFailures("Clean Data", [error]);
+    }
     // Clear whmm_overwrites directory
     try {
       const gamePath = appData.gamesToGameFolderPaths[appData.currentGame]?.gamePath;
@@ -8546,19 +8579,29 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
     // getAllMods();
   });
   ipcMain.on("cleanSymbolicLinksInData", async () => {
-    const mods = await getMods(log);
-    const symLinksToDelete = mods.filter((mod) => mod.isInData && mod.isSymbolicLink);
-    console.log("symLinksToDelete", symLinksToDelete);
-    const deletePromises = symLinksToDelete.map((mod) => {
-      mainWindow?.webContents.send("handleLog", `DELETING SYMLINK ${mod.path}`);
-      return fs.unlinkSync(mod.path);
-    });
-    await Promise.allSettled(deletePromises);
-    // should be tracked automatically by the data watcher, but chokidar can choke on symlinks here
-    for (const deletedSymLink of symLinksToDelete) {
-      onPackDeleted(deletedSymLink.path);
+    try {
+      const mods = await getMods(log);
+      const symLinksToDelete = mods.filter((mod) => mod.isInData && mod.isSymbolicLink);
+      console.log("symLinksToDelete", symLinksToDelete);
+      const results = await Promise.allSettled(
+        symLinksToDelete.map(async (mod) => {
+          mainWindow?.webContents.send("handleLog", `DELETING SYMLINK ${mod.path}`);
+          await fs.promises.unlink(mod.path);
+          return mod.path;
+        }),
+      );
+      const deletedSymLinkPaths: string[] = [];
+      const failures: unknown[] = [];
+      for (const result of results) {
+        if (result.status === "fulfilled") deletedSymLinkPaths.push(result.value);
+        else failures.push(result.reason);
+      }
+      reportFileOperationFailures("Clean symbolic links in Data", failures);
+      // Should be tracked automatically by the data watcher, but chokidar can choke on symlinks here.
+      await Promise.all(deletedSymLinkPaths.map((path) => onPackDeleted(path)));
+    } catch (error) {
+      reportFileOperationFailures("Clean symbolic links in Data", [error]);
     }
-    // getAllMods();
   });
   ipcMain.on("saveConfig", (event, payload: ConfigSavePayload) => {
     console.log("saveConfig");

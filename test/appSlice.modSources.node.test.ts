@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import appReducer, { setAppFolderPaths, setModLoadOrderRelativeTo, setMods } from "../src/appSlice";
+import appReducer, {
+  addMod,
+  queueDataModsToEnableByName,
+  setAppFolderPaths,
+  setModLoadOrderRelativeTo,
+  setMods,
+} from "../src/appSlice";
 import initialState from "../src/initialAppState";
 import { sortByNameAndLoadOrder } from "../src/modSortingHelpers";
 
@@ -25,6 +31,21 @@ const createMod = (path: string, sourceId: string, sourceKind: ModSourceKind, is
 });
 
 describe("app mod source reconciliation", () => {
+  it("deduplicates queued Data mods and enables each one when it arrives", () => {
+    const dataMod = createMod("/game/data/example.pack", "data", "data", true);
+    let state = appReducer(
+      { ...initialState, dataModsToEnableByName: ["example.pack"] },
+      queueDataModsToEnableByName(["example.pack", "other.pack"]),
+    );
+
+    expect(state.dataModsToEnableByName).toEqual(["example.pack", "other.pack"]);
+
+    state = appReducer(state, addMod(dataMod));
+
+    expect(state.currentPreset.mods[0].isEnabled).toBe(true);
+    expect(state.dataModsToEnableByName).toEqual(["other.pack"]);
+  });
+
   it("switches duplicate winners without losing enabled state", () => {
     const folderPaths = {
       gamePath: "/game",

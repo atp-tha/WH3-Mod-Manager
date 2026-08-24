@@ -1686,6 +1686,11 @@ const appSlice = createSlice({
     setDataModsToEnableByName: (state: AppState, action: PayloadAction<string[]>) => {
       state.dataModsToEnableByName = action.payload;
     },
+    queueDataModsToEnableByName: (state: AppState, action: PayloadAction<string[]>) => {
+      const queuedNames = new Set(state.dataModsToEnableByName);
+      action.payload.forEach((name) => queuedNames.add(name));
+      state.dataModsToEnableByName = Array.from(queuedNames);
+    },
     setIsCreateSteamCollectionOpen: (state: AppState, action: PayloadAction<boolean>) => {
       state.isCreateSteamCollectionOpen = action.payload;
     },
@@ -1935,6 +1940,7 @@ export const {
   setToastDismissed,
   toggleIsCompatCheckingVanillaPacks,
   setDataModsToEnableByName,
+  queueDataModsToEnableByName,
   addCategory,
   removeCategory,
   renameCategory,

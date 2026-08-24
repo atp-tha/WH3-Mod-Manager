@@ -61,6 +61,20 @@ describe("hidden sidebar tabs", () => {
     expect(store.getState().app.currentTab).toBe("presets");
   });
 
+  it("supports two-digit Ctrl shortcuts", () => {
+    const store = renderSidebar({
+      isDev: true,
+      isFeaturesForModdersEnabled: true,
+      skillTreesDisplayMode: "tab",
+      technologyTreesDisplayMode: "tab",
+    });
+
+    fireEvent.keyDown(document, { key: "1", ctrlKey: true });
+    fireEvent.keyDown(document, { key: "0", ctrlKey: true });
+
+    expect(store.getState().app.currentTab).toBe("map");
+  });
+
   it("never hides All Mods", () => {
     const store = configureStore({ reducer: { app: appReducer } });
 
