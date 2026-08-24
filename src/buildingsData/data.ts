@@ -44,6 +44,23 @@ export const VAMPIRE_BUILDING_CHAIN_PREFIX = "wh2_main_VAMPIRES_";
 export const VAMPIRE_BUILDING_AVAILABILITY_SET = "wh_main_bas_vmp";
 export const ROGUE_PORT_BUILDING_CHAIN = "wh2_main_rogue_port";
 export const ROGUE_BUILDING_AVAILABILITY_SET = "wh2_main_bas_rogue";
+export const CHAOS_HORDE_BUILDING_CHAIN_PREFIX = "wh_main_horde_chaos_";
+export const CHAOS_HORDE_BUILDING_AVAILABILITY_SET = "wh_main_bas_chs";
+
+/**
+ * Chain families vanilla leaves with no availability row of their own, and the set that describes
+ * who actually builds them.
+ *
+ * `wh2_main_VAMPIRES_*` and `wh_main_horde_chaos_*` reach a board through a generic chain set and
+ * carry nothing to narrow them: their culture variants leave `culture` empty throughout, so the
+ * "chain naming only other cultures" rule cannot classify them either. Without this they show for
+ * every culture - which is what `wh_main_horde_chaos_dragon_ogres` did on the horde board, the only
+ * chain of the 124 there that did.
+ */
+export const AVAILABILITY_SET_BY_CHAIN_PREFIX: ReadonlyArray<readonly [prefix: string, setId: string]> = [
+  [VAMPIRE_BUILDING_CHAIN_PREFIX, VAMPIRE_BUILDING_AVAILABILITY_SET],
+  [CHAOS_HORDE_BUILDING_CHAIN_PREFIX, CHAOS_HORDE_BUILDING_AVAILABILITY_SET],
+];
 
 export const BUILDINGS_TABLES = [
   "building_superchains_tables",
@@ -564,9 +581,11 @@ export const buildBuildingsData = (tables: BuildingsTableRows, getLoc: Buildings
     if (chain && setId) (availabilitySetsByChain[chain] ||= []).push(setId);
   }
   for (const chain of Object.keys(chains)) {
-    if (!chain.startsWith(VAMPIRE_BUILDING_CHAIN_PREFIX)) continue;
-    const setIds = (availabilitySetsByChain[chain] ||= []);
-    if (!setIds.includes(VAMPIRE_BUILDING_AVAILABILITY_SET)) setIds.push(VAMPIRE_BUILDING_AVAILABILITY_SET);
+    for (const [prefix, setId] of AVAILABILITY_SET_BY_CHAIN_PREFIX) {
+      if (!chain.startsWith(prefix)) continue;
+      const setIds = (availabilitySetsByChain[chain] ||= []);
+      if (!setIds.includes(setId)) setIds.push(setId);
+    }
   }
   if (chains[ROGUE_PORT_BUILDING_CHAIN]) {
     const roguePortSetIds = (availabilitySetsByChain[ROGUE_PORT_BUILDING_CHAIN] ||= []);

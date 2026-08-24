@@ -85,6 +85,7 @@ describe("buildBuildingsData", () => {
       { key: "chain_a", building_superchain: "super_a", optional_sort_order: "2" },
       { key: "chain_b", building_superchain: "super_a", optional_sort_order: "1" },
       { key: "wh2_main_VAMPIRES_legacy", building_superchain: "super_vmp", optional_sort_order: "1" },
+      { key: "wh_main_horde_chaos_dragon_ogres", building_superchain: "super_chs", optional_sort_order: "1" },
     ],
     building_levels_tables: [
       { level_name: "a_3", chain: "chain_a", level: "2", create_cost: "300", visible_in_ui: "true" },
@@ -222,6 +223,14 @@ describe("buildBuildingsData", () => {
 
   it("binds legacy Vampire chains to the Vampire availability set", () => {
     expect(data.availabilitySetsByChain.wh2_main_VAMPIRES_legacy).toContain("wh_main_bas_vmp");
+  });
+
+  it("binds legacy Chaos horde chains to the Chaos availability set", () => {
+    expect(data.availabilitySetsByChain.wh_main_horde_chaos_dragon_ogres).toContain("wh_main_bas_chs");
+  });
+
+  it("leaves a chain outside both prefixes with no availability set of its own", () => {
+    expect(data.availabilitySetsByChain.chain_a).toBeUndefined();
   });
 
   it("starts numeric id cursors above the highest observed id", () => {

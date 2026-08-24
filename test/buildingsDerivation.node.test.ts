@@ -305,6 +305,68 @@ describe("resolveRegionBuildings: availability", () => {
     expect(chainKeysIn(resolveRegionBuildings(data, query({ culture: "vmp" })))).toContain(vampireChain);
   });
 
+  it("scopes legacy Chaos horde chains through wh_main_bas_chs", () => {
+    // `wh_main_horde_chaos_dragon_ogres` carries nothing to narrow it: no availability set of its
+    // own, and every culture variant leaves `culture` empty, so the other-culture rule cannot
+    // classify it either. Without the override it was the one chain of the horde board's 124 that
+    // showed for all 25 cultures.
+    const tables = baseTables();
+    const chaosChain = "wh_main_horde_chaos_dragon_ogres";
+    tables.building_chains_tables.push({ key: chaosChain, building_superchain: "super_chs" });
+    tables.building_levels_tables.push({
+      level_name: "dragon_ogres_1",
+      chain: chaosChain,
+      level: "0",
+      visible_in_ui: "true",
+    });
+    tables.building_culture_variants_tables.push({
+      building: "dragon_ogres_1",
+      culture: "",
+      subculture: "",
+      faction: "",
+      disables: "false",
+    });
+    tables.building_set_to_building_junctions_tables.push({
+      building_chain: chaosChain,
+      building_level: "",
+      building_set: "set_one",
+      exclude: "false",
+    });
+    tables.military_force_type_horde_details_tables = [
+      {
+        force_type: "HORDE",
+        primary_slot_template: "horde_primary",
+        primary_slot_type: "horde_primary",
+        secondary_slot_template: "horde_secondary",
+        secondary_slot_type: "horde_secondary",
+      },
+    ];
+    tables.slot_template_permitted_building_chains_tables.push({
+      slot_template: "horde_secondary",
+      chain: chaosChain,
+      chain_set: "",
+      super_chain: "",
+      remove: "false",
+    });
+    tables.building_chain_availabilities_tables = [
+      // Vanilla's own row: it names both, and a culture-only query resolves the subculture through
+      // its culture.
+      { id: "chs", set_id: "wh_main_bas_chs", culture: "chs", sub_culture: "chs_sub", faction: "", campaign: "" },
+    ];
+    tables.cultures_tables = [...tables.cultures_tables, { key: "chs" }];
+    tables.cultures_subcultures_tables = [
+      ...tables.cultures_subcultures_tables,
+      { subculture: "chs_sub", culture: "chs" },
+    ];
+    const data = buildBuildingsData(tables, noLoc);
+
+    const hordeQuery = (culture?: string) => query({ mode: "horde", region: "", culture });
+    expect(chainKeysIn(resolveRegionBuildings(data, hordeQuery("emp")))).not.toContain(chaosChain);
+    expect(chainKeysIn(resolveRegionBuildings(data, hordeQuery("chs")))).toContain(chaosChain);
+    // Nothing to narrow against, so an unfiltered board still shows it.
+    expect(chainKeysIn(resolveRegionBuildings(data, hordeQuery()))).toContain(chaosChain);
+  });
+
   it("scopes the Rogue Port chain through the Rogue culture availability set", () => {
     const tables = baseTables();
     const roguePortChain = "wh2_main_rogue_port";

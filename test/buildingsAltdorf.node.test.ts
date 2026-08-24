@@ -497,10 +497,25 @@ describe.skipIf(!haveDbDump)("horde boards against the shipped tables", () => {
       "wh3_main_ogr_camp_recruitment",
       "wh3_main_ogr_camp_town_centre",
       "wh3_main_ogr_camp_upkeep",
-      // Names no culture of its own, so nothing in the data marks it as somebody else's - the same
-      // documented extra a region board carries.
-      "wh_main_horde_chaos_dragon_ogres",
     ]);
+  });
+
+  it("scopes the legacy Chaos horde chains to Chaos", () => {
+    // `wh_main_horde_chaos_dragon_ogres` is a real member of `wh3_main_secondary_core_generic_horde`
+    // but carries nothing to narrow it: no availability set row of its own, and both culture
+    // variants leave `culture` empty, so the other-culture rule cannot classify it. It was the one
+    // chain of the board's 124 that showed for every culture; `wh_main_bas_chs` is what pins it.
+    const dragonOgres = "wh_main_horde_chaos_dragon_ogres";
+    expect(data.availabilitySetsByChain[dragonOgres]).toContain("wh_main_bas_chs");
+    expect(chainsIn(hordeView("wh_main_chs_chaos"))).toContain(dragonOgres);
+    expect(chainsIn(hordeView("wh3_main_ogr_ogre_kingdoms"))).not.toContain(dragonOgres);
+    expect(chainsIn(hordeView("wh_dlc03_bst_beastmen"))).not.toContain(dragonOgres);
+
+    // Asserted exactly, so a *new* chain that nothing in the data narrows still fails here.
+    const universal = data.cultures
+      .map((culture) => new Set(chainsIn(hordeView(culture.key))))
+      .reduce((shared, chains) => new Set([...shared].filter((chain) => chains.has(chain))));
+    expect([...universal]).toEqual([]);
   });
 
   it("numbers horde tiers from zero rather than treating them as settlements", () => {
