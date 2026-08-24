@@ -160,6 +160,9 @@ const api = {
     ipcRenderer.on("setPackHeaderData", callback),
   setPacksData: (callback: (event: Electron.IpcRendererEvent, packsData: PackViewData[]) => void) =>
     ipcRenderer.on("setPacksData", callback),
+  applySavedPackData: (
+    callback: (event: Electron.IpcRendererEvent, payload: ApplySavedPackDataPayload) => void,
+  ) => ipcRenderer.on("applySavedPackData", callback),
   setUnsavedPacksData: (
     callback: (event: Electron.IpcRendererEvent, packPath: string, unsavedFileData: PackedFile[]) => void,
   ) => ipcRenderer.on("setUnsavedPacksData", callback),
@@ -517,6 +520,7 @@ const api = {
   ): Promise<{
     success: boolean;
     savedPath?: string;
+    replacedOriginal?: boolean;
     warning?: string;
     error?: string;
   }> => ipcRenderer.invoke("savePackWithUnsavedFiles", packPath),

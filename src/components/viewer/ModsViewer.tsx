@@ -448,16 +448,25 @@ const ModsViewer = memo(() => {
   }, [isFeaturesForModdersEnabled]);
 
   const [dbTableFilter, setDBTableFilter] = useState("");
+  const [dbTableFilterInput, setDBTableFilterInput] = useState("");
 
   const onFilterChangeDebounced = useMemo(
     () =>
       debounce((value: string) => {
         setDBTableFilter(value);
       }, 250),
-    [setDBTableFilter],
+    [],
   );
 
+  useEffect(() => {
+    return () => {
+      (onFilterChangeDebounced as unknown as { cancel?: () => void }).cancel?.();
+    };
+  }, [onFilterChangeDebounced]);
+
   const clearFilter = () => {
+    (onFilterChangeDebounced as unknown as { cancel?: () => void }).cancel?.();
+    setDBTableFilterInput("");
     setDBTableFilter("");
   };
 
@@ -1561,6 +1570,13 @@ const ModsViewer = memo(() => {
       const result = await window.api?.savePackWithUnsavedFiles(activeViewerPackPath);
       if (result?.success) {
         console.log("Pack saved successfully:", result.savedPath);
+        if (result.replacedOriginal !== false) {
+          // The main process invalidates its pack cache and sends the staged files as the new base
+          // data. Drop renderer-side parsed/prepared copies too, otherwise reference navigation or a
+          // later table switch can still read the pre-save snapshot.
+          clearPackDataStoreForPack(activeViewerPackPath);
+          clearPreparedTableForPack(activeViewerPackPath);
+        }
         // A warning is something to read, so it keeps the dialog; a plain success does not.
         if (result.warning) {
           showDialog(
@@ -2435,8 +2451,11 @@ const ModsViewer = memo(() => {
                         id="dbTableFilter"
                         type="text"
                         placeholder={localized.filter}
-                        onChange={(e) => onFilterChangeDebounced(e.target.value)}
-                        defaultValue={dbTableFilter}
+                        onChange={(e) => {
+                          setDBTableFilterInput(e.target.value);
+                          onFilterChangeDebounced(e.target.value);
+                        }}
+                        value={dbTableFilterInput}
                         className="block bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 w-full px-2 py-1 pr-6 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white dark:focus:ring-blue-500 dark:focus:border-blue-500"
                       ></input>
 

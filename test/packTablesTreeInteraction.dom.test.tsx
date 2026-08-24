@@ -137,6 +137,35 @@ describe("pack table tree interactions", () => {
     expect(screen.getByRole("button", { name: "Add New Flow", exact: true })).toBeInTheDocument();
   });
 
+  it("opens a newly created flow and reports a failed flow save", async () => {
+    const saveNodeFlow = vi
+      .fn()
+      .mockResolvedValueOnce({ success: true, filePath: "whmmflows\\new_flow.json" })
+      .mockResolvedValueOnce({ success: false, error: "disk full" });
+    const onOpenFlowFile = vi.fn();
+    const showDialog = vi.fn();
+    window.api = { saveNodeFlow } as unknown as NonNullable<Window["api"]>;
+
+    const tree = renderPackTree([], "files", { onOpenFlowFile, showDialog });
+    fireEvent.contextMenu(tree);
+    fireEvent.click(screen.getByRole("button", { name: "Add New Flow", exact: true }));
+    fireEvent.change(screen.getByPlaceholderText("Enter flow name..."), { target: { value: "new_flow.json" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create", exact: true }));
+
+    await waitFor(() => expect(saveNodeFlow).toHaveBeenCalled());
+    expect(onOpenFlowFile).toHaveBeenCalledWith({
+      flowFile: "whmmflows\\new_flow.json",
+      packPath: "K:\\mods\\menu.pack",
+    });
+
+    fireEvent.contextMenu(tree);
+    fireEvent.click(screen.getByRole("button", { name: "Add New Flow", exact: true }));
+    fireEvent.change(screen.getByPlaceholderText("Enter flow name..."), { target: { value: "broken.json" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create", exact: true }));
+
+    await waitFor(() => expect(showDialog).toHaveBeenCalledWith(expect.stringContaining("disk full"), expect.anything()));
+  });
+
   it("offers active packs and a selectable mod catalog when copying a table", async () => {
     const copyInto = vi.fn();
     window.api = {

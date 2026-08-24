@@ -364,8 +364,9 @@ const GlobalSearchPanel = memo(
           onOpenDbResult(result);
           return;
         }
-        // A model is binary, so there is no viewer for it; only its location is useful.
-        if (result.kind === "rigidModel") return;
+        // Loc tables and rigid models have no compatible content pane. Keep their results useful as
+        // search hits, but do not send them into PackFileView where they can only produce an error.
+        if (result.kind === "loc" || result.kind === "rigidModel") return;
         onOpenFileResult(result);
       },
       [onOpenDbResult, onOpenFileResult],
@@ -429,7 +430,12 @@ const GlobalSearchPanel = memo(
         }
 
         const { result } = row;
-        const isOpenable = result.kind !== "rigidModel";
+        const isOpenable = result.kind === "db" || result.kind === "text";
+        const unsupportedTitle =
+          result.kind === "loc"
+            ? localized.globalSearchLocUnavailable || "Loc tables cannot be opened in this viewer."
+            : localized.globalSearchRigidModelTitle ||
+              "Rigid models have no viewer; use the path to locate the file.";
         return (
           <div key={key} style={style} className="flex items-center">
             <button
@@ -439,8 +445,7 @@ const GlobalSearchPanel = memo(
               title={
                 isOpenable
                   ? undefined
-                  : localized.globalSearchRigidModelTitle ||
-                    "Rigid models have no viewer; use the path to locate the file."
+                  : unsupportedTitle
               }
               className={
                 "flex w-full items-center gap-3 pl-9 pr-2 text-left text-sm " +

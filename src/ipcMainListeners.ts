@@ -1377,6 +1377,11 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
     windows.viewerWindow?.webContents.send("setUnsavedPacksData", packPath, unsavedFiles);
     windows.viewerWindow?.webContents.send("setDeletedPackFilePaths", packPath, deletedFilePaths);
   };
+  const broadcastSavedPackData = (packPath: string, savedFileData: PackedFile[], deletedFilePaths: string[]) => {
+    const payload: ApplySavedPackDataPayload = { packPath, savedFileData, deletedFilePaths };
+    mainWindow?.webContents.send("applySavedPackData", payload);
+    windows.viewerWindow?.webContents.send("applySavedPackData", payload);
+  };
   const materializePackedFileForStaging = async (
     sourcePackPath: string,
     filePath: string,
@@ -6781,6 +6786,7 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
       }
       if (replacedOriginal) {
         await invalidateCachedPackData(savePath);
+        broadcastSavedPackData(packPath, unsavedFiles, deletedPaths);
       }
       // Clear unsaved files for this pack
       delete appData.unsavedPacksData[packPath];
@@ -6789,6 +6795,7 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
       return {
         success: true,
         savedPath: savePath,
+        replacedOriginal,
         warning: !replacedOriginal
           ? "Could not replace original pack (file in use). Saved as _modified.pack instead."
           : undefined,

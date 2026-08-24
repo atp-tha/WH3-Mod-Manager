@@ -163,6 +163,12 @@ declare global {
     deletedFilePaths: string[];
   }
 
+  interface ApplySavedPackDataPayload {
+    packPath: string;
+    savedFileData: PackedFile[];
+    deletedFilePaths: string[];
+  }
+
   interface AppState {
     categories: string[];
     categoryColors: Record<string, string>;

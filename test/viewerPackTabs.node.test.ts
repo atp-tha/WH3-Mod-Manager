@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import appReducer, { removePackData, requestOpenPackTab } from "../src/appSlice";
+import appReducer, { applySavedPackData, removePackData, requestOpenPackTab } from "../src/appSlice";
 import initialState from "../src/initialAppState";
 import type { PackedFile } from "../src/packFileTypes";
 
@@ -73,5 +73,42 @@ describe("viewer pack tabs", () => {
     expect(afterOther.currentDBTableSelection?.packPath).toBe(selectedPackPath);
     expect(afterOther.currentFlowFileSelection).toBeUndefined();
     expect(afterOther.currentFlowFilePackPath).toBeUndefined();
+  });
+
+  it("promotes saved files into the pack cache and removes deleted files and staging", () => {
+    const packPath = "/mods/saved.pack";
+    const oldPath = "db\\units_tables\\old";
+    const changedPath = "db\\units_tables\\changed";
+    const state = {
+      ...initialState,
+      packsData: {
+        [packPath]: {
+          packName: "saved.pack",
+          packPath,
+          tables: [oldPath, changedPath],
+          packedFiles: {
+            [oldPath]: file(oldPath),
+            [changedPath]: file(changedPath),
+          },
+        },
+      },
+      unsavedPacksData: { [packPath]: [file(changedPath)] },
+      deletedPackFilePaths: { [packPath]: [oldPath] },
+    };
+
+    const next = appReducer(
+      state,
+      applySavedPackData({
+        packPath,
+        savedFileData: [{ ...file(changedPath), text: "new contents" }],
+        deletedFilePaths: [oldPath],
+      }),
+    );
+
+    expect(next.packsData[packPath].tables).toEqual([changedPath]);
+    expect(next.packsData[packPath].packedFiles[oldPath]).toBeUndefined();
+    expect(next.packsData[packPath].packedFiles[changedPath]?.text).toBe("new contents");
+    expect(next.unsavedPacksData[packPath]).toBeUndefined();
+    expect(next.deletedPackFilePaths[packPath]).toBeUndefined();
   });
 });

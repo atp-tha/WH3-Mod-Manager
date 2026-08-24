@@ -60,6 +60,18 @@ const rigidResult: GlobalSearchResult = {
   matchEndInExcerpt: 14,
 };
 
+const locResult: GlobalSearchResult = {
+  kind: "loc",
+  packPath: "C:\\game\\data\\local_en.pack",
+  packLabel: "local_en.pack",
+  filePath: "text\\db\\local.loc",
+  key: "unit_name_chaos_warriors",
+  value: "Chaos Warriors",
+  matchedIn: "value",
+  matchStart: 0,
+  matchEnd: 14,
+};
+
 const emptyResponse = (searchId: string, results: GlobalSearchResult[] = []): GlobalSearchResponse => ({
   success: true,
   searchId,
@@ -303,6 +315,20 @@ describe("GlobalSearchPanel", () => {
     expect(row).toBeDisabled();
 
     await userEvent.click(row as HTMLButtonElement);
+    expect(onOpenFileResult).not.toHaveBeenCalled();
+  });
+
+  it("does not offer to open a loc result, which has no file viewer", async () => {
+    setupApi(async (request) => emptyResponse(request.searchId, [locResult]));
+    const { onOpenFileResult } = renderPanel();
+
+    await userEvent.type(screen.getByLabelText("Global search"), "chaos");
+    await userEvent.click(searchButton());
+
+    const row = await screen.findByText("Chaos Warriors");
+    expect(row.closest("button")).toBeDisabled();
+
+    await userEvent.click(row.closest("button") as HTMLButtonElement);
     expect(onOpenFileResult).not.toHaveBeenCalled();
   });
 

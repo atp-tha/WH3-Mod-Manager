@@ -18,6 +18,7 @@ import {
   setStartArgs,
   setDeletedPackFilePaths,
   setUnsavedPacksData,
+  applySavedPackData,
 } from "./appSlice";
 import { DBFieldName, DBFileName, DBVersion, Pack, PackedFile } from "./packFileTypes";
 import { dataFromBackend, doneRequests, packDataStore } from "./components/viewer/packDataStore";
@@ -57,6 +58,15 @@ window.api?.openModInViewer((event, modPath: string) => {
 window.api?.setPacksData((event, packsData: PackViewData[]) => {
   if (!packsData || packsData.length == 0) return;
   store.dispatch(setPacksData(packsData));
+});
+
+window.api?.applySavedPackData((event, payload: ApplySavedPackDataPayload) => {
+  store.dispatch(
+    applySavedPackData({
+      ...payload,
+      savedFileData: stripUnsavedFileBuffers(payload.savedFileData),
+    }),
+  );
 });
 
 window.api?.setUnsavedPacksData((event, packPath: string, unsavedFileData: PackedFile[]) => {

@@ -250,7 +250,10 @@ const ModRow = memo(
     );
 
     const isCompact = layout === "compact";
-    const checkboxId = mod.workshopId + "enabled";
+    // Local/data packs do not have Workshop IDs. Using that empty value made every such row share
+    // one label target, so clicking any row toggled whichever checkbox happened to be first in the DOM.
+    const checkboxIdentity = mod.workshopId || mod.path || mod.name;
+    const checkboxId = `mod-enabled-${encodeURIComponent(checkboxIdentity)}`;
 
     /*
      * A data mod with no workshop counterpart has neither a title nor an author, so the pack name is the
@@ -332,7 +335,7 @@ const ModRow = memo(
               <input
                 className="sr-only"
                 type="checkbox"
-                name={mod.workshopId}
+                name={checkboxIdentity}
                 id={checkboxId}
                 checked={mod.isEnabled}
                 disabled={isLoadOrderPlacementMode}
@@ -451,7 +454,7 @@ const ModRow = memo(
                     {}
                   }
                   type="checkbox"
-                  name={mod.workshopId}
+                  name={checkboxIdentity}
                   id={checkboxId}
                   checked={mod.isEnabled}
                   disabled={isLoadOrderPlacementMode}

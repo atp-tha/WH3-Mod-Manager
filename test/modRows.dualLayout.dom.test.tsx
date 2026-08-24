@@ -139,6 +139,18 @@ describe("dual mod list layout", () => {
     expect(document.getElementById("sortHeader")).toBeNull();
   });
 
+  it("chooses the bulk-toggle direction from the whole preset, not the filter", async () => {
+    const { testStore } = renderDualLayout(
+      [createMod("target", false), createMod("other", true)],
+      { isDualModListLayoutEnabled: false, filter: "target" },
+    );
+
+    await waitFor(() => expect(document.getElementById("enabledHeader")).toBeInTheDocument());
+    fireEvent.contextMenu(document.getElementById("enabledHeader") as HTMLElement);
+
+    expect(testStore.getState().app.currentPreset.mods.every((mod) => !mod.isEnabled)).toBe(true);
+  });
+
   it("stacks the human name, author and pack name in one cell", async () => {
     renderDualLayout([createMod("alpha", false)]);
 
@@ -146,6 +158,23 @@ describe("dual mod list layout", () => {
     await waitFor(() => expect(within(left).queryByText("alpha human name")).toBeInTheDocument());
     expect(within(left).queryByText("alpha author")).toBeInTheDocument();
     expect(within(left).queryByText("alpha")).toBeInTheDocument();
+  });
+
+  it("gives local rows with no Workshop ID distinct checkbox targets", async () => {
+    renderDualLayout([
+      { ...createMod("local_a", false), workshopId: "", isInData: false },
+      { ...createMod("local_b", false), workshopId: "", isInData: false },
+    ]);
+
+    const { left } = getPanes();
+    await waitFor(() => expect(within(left).queryByText("local_a human name")).toBeInTheDocument());
+
+    const inputs = Array.from(left.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'));
+    expect(inputs).toHaveLength(2);
+    expect(new Set(inputs.map((input) => input.id)).size).toBe(2);
+    for (const input of inputs) {
+      expect(Array.from(left.querySelectorAll("label")).some((label) => label.htmlFor === input.id)).toBe(true);
+    }
   });
 
   it("blanks the position index for disabled mods but keeps a pinned load order", async () => {

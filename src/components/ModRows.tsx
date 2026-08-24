@@ -359,12 +359,14 @@ const ModRows = memo((props: ModRowsProps) => {
   );
 
   const onEnabledRightClick = useCallback(() => {
-    if (mods.some((mod) => mod.isEnabled)) {
+    // The header action applies to the whole preset, so its direction must not depend on a search
+    // filter that may only show one side of the preset.
+    if (currentPresetMods.some((mod) => mod.isEnabled)) {
       dispatch(disableAllMods());
     } else {
       dispatch(enableAll());
     }
-  }, [dispatch, mods]);
+  }, [currentPresetMods, dispatch]);
 
   const onOrderRightClick = useCallback(() => {
     dispatch(resetModLoadOrderAll());

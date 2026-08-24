@@ -217,6 +217,7 @@ const PackTablesTreeView = React.memo(
     } | null>(null);
     const [isNewFlowDialogOpen, setIsNewFlowDialogOpen] = React.useState(false);
     const [newFlowName, setNewFlowName] = React.useState("");
+    const [isCreatingNewFlow, setIsCreatingNewFlow] = React.useState(false);
     const [isNewTableDialogOpen, setIsNewTableDialogOpen] = React.useState(false);
     const [newTableName, setNewTableName] = React.useState("");
     const [newTableSuffix, setNewTableSuffix] = React.useState("");
@@ -1120,9 +1121,17 @@ const PackTablesTreeView = React.memo(
     };
 
     const handleCreateNewFlow = async () => {
+      if (isCreatingNewFlow) return;
       if (!newFlowName.trim()) {
         props.showDialog(localized.viewerEnterValidFlowName || "Please enter a valid flow name", {
           title: localized.viewerMissingName || "Missing Name",
+        });
+        return;
+      }
+
+      if (!packData) {
+        props.showDialog(localized.viewerPackNotLoaded || "The pack is still loading. Please try again.", {
+          title: localized.viewerCreateFailed || "Create Failed",
         });
         return;
       }
@@ -1140,19 +1149,28 @@ const PackTablesTreeView = React.memo(
 
       const flowData = JSON.stringify(emptyFlow, null, 2);
 
+      setIsCreatingNewFlow(true);
       try {
-        const result = await window.api?.saveNodeFlow(newFlowName, flowData, packData!.packPath);
-        if (result?.success) {
-          console.log("Flow created successfully at:", result.filePath);
-        } else {
-          console.error("Failed to create flow:", result?.error);
+        const result = await window.api?.saveNodeFlow(newFlowName.trim(), flowData, packData.packPath);
+        if (!result?.success || !result.filePath) {
+          throw new Error(result?.error || localized.viewerFailedToCreateFlow || "Failed to create flow");
         }
+        console.log("Flow created successfully at:", result.filePath);
+        props.onOpenFlowFile({ flowFile: result.filePath, packPath: packData.packPath });
+        setIsNewFlowDialogOpen(false);
+        setNewFlowName("");
       } catch (error) {
         console.error("Error creating flow:", error);
+        props.showDialog(
+          (localized.viewerCreateFlowError || "Failed to create flow: {{error}}").replace(
+            "{{error}}",
+            error instanceof Error ? error.message : localized.viewerUnknownError || "Unknown error",
+          ),
+          { title: localized.viewerCreateFailed || "Create Failed" },
+        );
+      } finally {
+        setIsCreatingNewFlow(false);
       }
-
-      setIsNewFlowDialogOpen(false);
-      setNewFlowName("");
     };
 
     const handleCreateNewTable = async () => {
@@ -1224,7 +1242,12 @@ const PackTablesTreeView = React.memo(
         dispatch(
           setUnsavedPacksData({
             packPath: packData.packPath,
-            unsavedFileData: [nextPackedFile],
+            // Keep earlier staged edits visible. The IPC handler also merges this file into its
+            // authoritative staging list, but this local update can win the render race.
+            unsavedFileData: [
+              ...unsavedFiles.filter((file) => file.name !== nextPackedFile.name),
+              nextPackedFile,
+            ],
           }),
         );
         props.onOpenDBTable({
@@ -1684,6 +1707,7 @@ const PackTablesTreeView = React.memo(
                   type="text"
                   value={newFlowName}
                   onChange={(e) => setNewFlowName(e.target.value)}
+                  disabled={isCreatingNewFlow}
                   onKeyDown={(e) => {
                     if (e.key === "Enter") {
                       handleCreateNewFlow();
@@ -1701,18 +1725,21 @@ const PackTablesTreeView = React.memo(
               <div className="flex gap-2 justify-end">
                 <button
                   onClick={() => {
+                    if (isCreatingNewFlow) return;
                     setIsNewFlowDialogOpen(false);
                     setNewFlowName("");
                   }}
+                  disabled={isCreatingNewFlow}
                   className="px-4 py-2 bg-gray-600 hover:bg-gray-500 text-white rounded"
                 >
                   {localized.cancel || "Cancel"}
                 </button>
                 <button
                   onClick={handleCreateNewFlow}
+                  disabled={isCreatingNewFlow || !newFlowName.trim()}
                   className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded"
                 >
-                  {localized.viewerCreate || "Create"}
+                  {isCreatingNewFlow ? localized.viewerCreating || "Creating..." : localized.viewerCreate || "Create"}
                 </button>
               </div>
             </div>

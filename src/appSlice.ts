@@ -28,6 +28,8 @@ import { sharedModMatchesInstalledMod } from "./sharedModList";
 import { isHideableMainWindowTab } from "./utility/frontend/mainWindowTabs";
 import { DEFAULT_DB_TABLE_ROOT } from "./utility/packFileHelpers";
 
+const packFilePathKey = (path: string) => path.replaceAll("/", "\\").toLowerCase();
+
 const isMainWindowTabAvailable = (state: AppState, tab: MainWindowTab) => {
   if (isHideableMainWindowTab(tab) && state.hiddenMainWindowTabs.includes(tab)) return false;
 
@@ -999,6 +1001,34 @@ const appSlice = createSlice({
         packsData.map((pd) => pd.packName),
       );
     },
+    applySavedPackData: (state: AppState, action: PayloadAction<ApplySavedPackDataPayload>) => {
+      const { packPath, savedFileData, deletedFilePaths } = action.payload;
+      const packData = state.packsData[packPath];
+
+      if (packData) {
+        const deletedKeys = new Set(deletedFilePaths.map(packFilePathKey));
+        packData.tables = (packData.tables || []).filter((path) => !deletedKeys.has(packFilePathKey(path)));
+
+        for (const packedFilePath of Object.keys(packData.packedFiles || {})) {
+          if (deletedKeys.has(packFilePathKey(packedFilePath))) delete packData.packedFiles[packedFilePath];
+        }
+
+        for (const savedFile of savedFileData) {
+          const savedFileKey = packFilePathKey(savedFile.name);
+          const existingFilePath = Object.keys(packData.packedFiles || {}).find(
+            (path) => packFilePathKey(path) === savedFileKey,
+          );
+          if (existingFilePath && existingFilePath !== savedFile.name) delete packData.packedFiles[existingFilePath];
+          packData.packedFiles[savedFile.name] = savedFile;
+          if (!packData.tables.some((path) => packFilePathKey(path) === savedFileKey)) {
+            packData.tables.push(savedFile.name);
+          }
+        }
+      }
+
+      delete state.unsavedPacksData[packPath];
+      delete state.deletedPackFilePaths[packPath];
+    },
     removePackData: (state: AppState, action: PayloadAction<string>) => {
       const packPath = action.payload;
       delete state.packsData[packPath];
@@ -1827,6 +1857,7 @@ export const {
   importModsFromUsedMods,
   resolveUsedModsImport,
   setPacksData,
+  applySavedPackData,
   removePackData,
   setUnsavedPacksData,
   setDeletedPackFilePaths,

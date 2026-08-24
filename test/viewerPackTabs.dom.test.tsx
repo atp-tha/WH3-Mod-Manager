@@ -16,6 +16,7 @@ vi.mock("../src/components/viewer/PackTablesTreeView", () => {
     React.useImperativeHandle(ref, () => ({ openNewFlowDialog: vi.fn() }), []);
     return (
       <div data-testid={`tree-${props.packPath}`}>
+        <span data-testid={`tree-filter-${props.packPath}`}>{props.tableFilter}</span>
         <button
           type="button"
           data-testid={`open-table-${props.packPath}`}
@@ -181,6 +182,37 @@ describe("multiple pack viewer tabs", () => {
     await waitFor(() =>
       expect(screen.getByRole("button", { name: /^second_units_tables\/data__/ })).toBeInTheDocument(),
     );
+  });
+
+  it("clears the visible and applied DB table filter together", async () => {
+    const packPath = "A:\\mods\\filter.pack";
+    window.api = { getPackData: vi.fn(), setViewerActivePack: vi.fn() } as unknown as NonNullable<Window["api"]>;
+    const store = configureStore({
+      reducer: { app: appReducer },
+      preloadedState: {
+        app: {
+          ...initialState,
+          packsData: { [packPath]: pack(packPath, "Filter") },
+        },
+      },
+    });
+
+    render(
+      <Provider store={store}>
+        <LocalizationContext.Provider value={{ filter: "Filter" }}>
+          <ModsViewer />
+        </LocalizationContext.Provider>
+      </Provider>,
+    );
+
+    store.dispatch(requestOpenPackTab(packPath));
+    const filterInput = await screen.findByPlaceholderText("Filter");
+    fireEvent.change(filterInput, { target: { value: "units" } });
+    await waitFor(() => expect(screen.getByTestId(`tree-filter-${packPath}`)).toHaveTextContent("units"));
+
+    fireEvent.click(filterInput.parentElement?.querySelector("button") as HTMLButtonElement);
+    expect(filterInput).toHaveValue("");
+    await waitFor(() => expect(screen.getByTestId(`tree-filter-${packPath}`)).toHaveTextContent(""));
   });
 
   it("switches to the previous table's tab when history crosses a viewer tab", async () => {

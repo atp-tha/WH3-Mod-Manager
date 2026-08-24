@@ -13,6 +13,7 @@ import { setupRendererLogging } from "./rendererCommon";
 import {
   addMod,
   addToast,
+  applySavedPackData,
   createdMergedPack,
   enableModsByName,
   importModsFromUsedMods,
@@ -295,6 +296,15 @@ window.api?.setPacksData((event, packsData: PackViewData[]) => {
 
 const stripUnsavedFileBuffers = (unsavedFileData: PackedFile[]): PackedFile[] =>
   unsavedFileData.map(({ buffer, ...unsavedFile }) => unsavedFile);
+
+window.api?.applySavedPackData((event, payload: ApplySavedPackDataPayload) => {
+  store.dispatch(
+    applySavedPackData({
+      ...payload,
+      savedFileData: stripUnsavedFileBuffers(payload.savedFileData),
+    }),
+  );
+});
 
 window.api?.setUnsavedPacksData((event, packPath: string, unsavedFileData) => {
   store.dispatch(
