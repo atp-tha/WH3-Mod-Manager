@@ -30,6 +30,8 @@ import {
 import { useLocalizations } from "../localizationContext";
 import { getModsSortedByHumanName } from "../modSortingHelpers";
 import { getDecodedModAuthor, getModThumbnailSrc } from "../utility/frontend/modDisplay";
+import { getModCategories } from "../utility/frontend/modListLayout";
+import { uncategorizedCategoryName } from "../utility/categoryNames";
 import { decodeModText } from "../utility/htmlEntities";
 import selectStyle from "../styles/selectStyle";
 import { getCategoryColorClasses } from "../utility/frontend/categoryColors";
@@ -97,6 +99,13 @@ const getNextEnabledSortMode = (mode: EnabledSortMode): EnabledSortMode => {
   if (mode === "none") return "enabledFirst";
   if (mode === "enabledFirst") return "enabledLast";
   return "none";
+};
+
+const isModEffectivelyEnabled = (mod: Mod, alwaysEnabledModNames: Set<string>) =>
+  mod.isEnabled || alwaysEnabledModNames.has(mod.name);
+
+const cancelDebounced = (callback: unknown) => {
+  (callback as { cancel?: () => void }).cancel?.();
 };
 
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
@@ -238,6 +247,7 @@ const Categories = memo(() => {
   const mods = useAppSelector((state) => state.app.currentPreset.mods);
   const categories = useAppSelector((state) => state.app.categories);
   const categoryColors = useAppSelector((state) => state.app.categoryColors || {});
+  const alwaysEnabledModNames = useAppSelector((state) => state.app.alwaysEnabledModNames);
   const isDev = useAppSelector((state) => state.app.isDev);
   const isAuthorShown = useAppSelector((state) => state.app.isCategoryAuthorEnabled);
   const isThumbnailShown = useAppSelector((state) => state.app.areCategoryThumbnailsEnabled);
@@ -256,7 +266,8 @@ const Categories = memo(() => {
     };
   }, [isOptionsMenuOpen]);
   const categoriesWithUncategorized = useMemo(
-    () => (categories.includes("Uncategorized") ? categories : categories.concat(["Uncategorized"])),
+    () =>
+      categories.includes(uncategorizedCategoryName) ? categories : categories.concat([uncategorizedCategoryName]),
     [categories],
   );
 
@@ -331,7 +342,8 @@ const Categories = memo(() => {
         const selectedMods = getSelectedMods();
         if (selectedMods.length === 0) return;
 
-        const toEnable = selectedMods.some((mod) => !mod.isEnabled);
+        const alwaysEnabledSet = new Set(alwaysEnabledModNames);
+        const toEnable = selectedMods.some((mod) => !isModEffectivelyEnabled(mod, alwaysEnabledSet));
         dispatch(setAreModsEnabled(selectedMods.map((mod) => ({ mod, isEnabled: toEnable }))));
         event.preventDefault();
       }
@@ -356,14 +368,14 @@ const Categories = memo(() => {
       document.removeEventListener("keyup", onKeyUp);
       window.removeEventListener("blur", onWindowBlur);
     };
-  }, [dispatch, getSelectedMods, isContextMenuOpen]);
+  }, [alwaysEnabledModNames, dispatch, getSelectedMods, isContextMenuOpen]);
 
   const groupedCategories = useMemo<CategoryGroup[]>(() => {
     const rowsByCategory = new Map<string, { category: string; mods: Mod[]; total: number; enabled: number }>();
+    const alwaysEnabledSet = new Set(alwaysEnabledModNames);
 
     for (const mod of getModsSortedByHumanName(mods) as Mod[]) {
-      let modCategories = mod.categories ?? ["Uncategorized"];
-      if (modCategories.length === 0) modCategories = ["Uncategorized"];
+      const modCategories = getModCategories(mod);
 
       for (const category of modCategories) {
         let categoryInfo = rowsByCategory.get(category);
@@ -374,7 +386,7 @@ const Categories = memo(() => {
 
         categoryInfo.mods.push(mod);
         categoryInfo.total += 1;
-        if (mod.isEnabled) categoryInfo.enabled += 1;
+        if (isModEffectivelyEnabled(mod, alwaysEnabledSet)) categoryInfo.enabled += 1;
       }
     }
 
@@ -386,11 +398,11 @@ const Categories = memo(() => {
         filteredMods: categoryInfo.mods,
       }))
       .sort((firstCategory, secondCategory) => {
-        if (firstCategory.category === "Uncategorized") return -1;
-        if (secondCategory.category === "Uncategorized") return 1;
+        if (firstCategory.category === uncategorizedCategoryName) return -1;
+        if (secondCategory.category === uncategorizedCategoryName) return 1;
         return firstCategory.category.localeCompare(secondCategory.category);
       });
-  }, [mods]);
+  }, [alwaysEnabledModNames, mods]);
 
   const filteredGroups = useMemo<CategoryGroup[]>(() => {
     let data = groupedCategories.map((group) => ({ ...group, filteredMods: [...group.mods] }));
@@ -440,7 +452,7 @@ const Categories = memo(() => {
       for (const categoryGroup of data) {
         categoryGroup.filteredMods = categoryGroup.filteredMods.filter((mod) =>
           filterCategories.some((filterCategory) =>
-            (mod.categories ?? []).some((category) => category.toLowerCase().includes(filterCategory)),
+            getModCategories(mod).some((category) => category.toLowerCase().includes(filterCategory)),
           ),
         );
       }
@@ -461,11 +473,14 @@ const Categories = memo(() => {
     }
 
     if (enabledSortMode !== "none") {
+      const alwaysEnabledSet = new Set(alwaysEnabledModNames);
       for (const categoryGroup of data) {
         categoryGroup.filteredMods = [...categoryGroup.filteredMods].sort((firstMod, secondMod) => {
-          if (firstMod.isEnabled === secondMod.isEnabled) return 0;
-          if (enabledSortMode === "enabledFirst") return firstMod.isEnabled ? -1 : 1;
-          return firstMod.isEnabled ? 1 : -1;
+          const firstIsEnabled = isModEffectivelyEnabled(firstMod, alwaysEnabledSet);
+          const secondIsEnabled = isModEffectivelyEnabled(secondMod, alwaysEnabledSet);
+          if (firstIsEnabled === secondIsEnabled) return 0;
+          if (enabledSortMode === "enabledFirst") return firstIsEnabled ? -1 : 1;
+          return firstIsEnabled ? 1 : -1;
         });
       }
     }
@@ -476,6 +491,7 @@ const Categories = memo(() => {
     categoryFilter,
     enabledSortMode,
     groupedCategories,
+    alwaysEnabledModNames,
     isAuthorShown,
     localized.noMatches,
     nameFilter,
@@ -483,6 +499,7 @@ const Categories = memo(() => {
 
   const displayedRows = useMemo(() => {
     const rows: CategoriesGridRow[] = [];
+    const alwaysEnabledSet = new Set(alwaysEnabledModNames);
 
     for (const group of filteredGroups) {
       const isCollapsed = hiddenCategories.includes(group.category);
@@ -507,7 +524,7 @@ const Categories = memo(() => {
           id: buildModRowId(group.category, mod.path),
           kind: "mod",
           category: group.category,
-          isEnabled: mod.isEnabled,
+          isEnabled: isModEffectivelyEnabled(mod, alwaysEnabledSet),
           path: mod.path,
           humanName: normalizeModLabel(mod),
           name: mod.name,
@@ -517,7 +534,7 @@ const Categories = memo(() => {
     }
 
     return rows;
-  }, [filteredGroups, hiddenCategories]);
+  }, [alwaysEnabledModNames, filteredGroups, hiddenCategories]);
 
   const onOverlayClick = useCallback(() => {
     clearSelection();
@@ -639,9 +656,10 @@ const Categories = memo(() => {
 
       const selectedMod = modByPath.get(row.path);
       if (!selectedMod) return;
+      if (alwaysEnabledModNames.includes(selectedMod.name)) return;
       dispatch(toggleMod(selectedMod));
     },
-    [dispatch, modByPath],
+    [alwaysEnabledModNames, dispatch, modByPath],
   );
 
   const onSelectCategoryChange = useCallback(
@@ -664,7 +682,7 @@ const Categories = memo(() => {
   const onCreateNewCategory = useCallback(
     (name: string) => {
       const trimmedName = name.trim();
-      if (trimmedName === "") return;
+      if (trimmedName === "" || trimmedName === uncategorizedCategoryName) return;
 
       dispatch(addCategory({ category: trimmedName, mods: getSelectedMods() }));
       clearSelection();
@@ -675,10 +693,12 @@ const Categories = memo(() => {
 
   const options = useMemo(
     () =>
-      categories.map((category) => ({
-        value: category,
-        label: category,
-      })),
+      categories
+        .filter((category) => category !== uncategorizedCategoryName)
+        .map((category) => ({
+          value: category,
+          label: category,
+        })),
     [categories],
   );
 
@@ -793,7 +813,9 @@ const Categories = memo(() => {
                 ) : (
                   <span className="w-5" />
                 )}
-                <span className="font-semibold">{row.category}</span>
+                <span className="font-semibold">
+                  {row.category === uncategorizedCategoryName ? localized.uncategorized || row.category : row.category}
+                </span>
               </div>
             );
           }
@@ -814,8 +836,20 @@ const Categories = memo(() => {
           const row = params.data;
           if (!row) return null;
 
-          const ariaLabel = isCategoryRow(row) ? `Toggle category ${row.category}` : `Toggle mod ${row.humanName}`;
-          const isDisabled = isCategoryRow(row) && row.allModPaths.length === 0;
+          const categoryLabel =
+            isCategoryRow(row) && row.category === uncategorizedCategoryName
+              ? localized.uncategorized || row.category
+              : isCategoryRow(row)
+                ? row.category
+                : undefined;
+          const ariaLabel = isCategoryRow(row) ? `Toggle category ${categoryLabel}` : `Toggle mod ${row.humanName}`;
+          const isDisabled = isCategoryRow(row)
+            ? row.allModPaths.length === 0 ||
+              row.allModPaths.every((path) => {
+                const mod = modByPath.get(path);
+                return mod ? alwaysEnabledModNames.includes(mod.name) : false;
+              })
+            : alwaysEnabledModNames.includes(modByPath.get(row.path)?.name ?? "");
 
           return (
             <div className={`flex h-full items-center justify-center ${isThumbnailShown && "scale-125"}`}>
@@ -917,6 +951,7 @@ const Categories = memo(() => {
     enabledSortMode,
     handleToggleEnabled,
     hiddenCategories,
+    alwaysEnabledModNames,
     isAuthorShown,
     isDev,
     isThumbnailShown,
@@ -928,6 +963,7 @@ const Categories = memo(() => {
     localized.name,
     localized.removeBadge,
     localized.thumbnail,
+    localized.uncategorized,
     modByPath,
     resolveColumnSizing,
     toggleCategoryVisibility,
@@ -1108,6 +1144,7 @@ const Categories = memo(() => {
             <span className="absolute right-2 top-2 text-gray-400">
               <button
                 onClick={() => {
+                  cancelDebounced(setNewCategoryFilter);
                   setCategoryFilterInput("");
                   setCategoryFilter("");
                 }}
@@ -1134,6 +1171,7 @@ const Categories = memo(() => {
             <span className="absolute right-2 top-2 text-gray-400">
               <button
                 onClick={() => {
+                  cancelDebounced(setNewNameFilter);
                   setNameFilterInput("");
                   setNameFilter("");
                 }}
@@ -1160,6 +1198,7 @@ const Categories = memo(() => {
             <span className="absolute right-2 top-2 text-gray-400">
               <button
                 onClick={() => {
+                  cancelDebounced(setNewCategoriesFilter);
                   setCategoriesFilterInput("");
                   setCategoriesFilter("");
                 }}

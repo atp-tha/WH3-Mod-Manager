@@ -10,6 +10,7 @@ import Categories from "../src/components/Categories";
 import initialState from "../src/initialAppState";
 import localizationContext from "../src/localizationContext";
 import enTranslation from "../locales/en/translation.json";
+import esTranslation from "../locales/es/translation.json";
 
 vi.mock("../src/components/EditCategoriesModal", () => ({
   default: () => null,
@@ -54,7 +55,11 @@ const createMod = (overrides: Partial<Mod> & Pick<Mod, "name" | "path">): Mod =>
   ...overrides,
 });
 
-const renderCategories = (mods?: Mod[]) => {
+const renderCategories = (
+  mods?: Mod[],
+  alwaysEnabledModNames: string[] = [],
+  translation: typeof enTranslation = enTranslation,
+) => {
   const defaultMods = [
     createMod({
       name: "mod-one.pack",
@@ -95,6 +100,7 @@ const renderCategories = (mods?: Mod[]) => {
     preloadedState: {
       app: {
         ...initialState,
+        alwaysEnabledModNames,
         categories: categoryNames,
         categoryColors: {
           Alpha: "blue",
@@ -110,7 +116,7 @@ const renderCategories = (mods?: Mod[]) => {
 
   render(
     <Provider store={store}>
-      <localizationContext.Provider value={enTranslation}>
+      <localizationContext.Provider value={translation}>
         <Categories />
       </localizationContext.Provider>
     </Provider>,
@@ -199,6 +205,19 @@ describe("Categories", () => {
     expect(screen.getByText("Bretonnia & Co")).toBeInTheDocument();
   });
 
+  it("does not reapply a pending name filter after the filter is cleared", async () => {
+    const user = userEvent.setup();
+    renderCategories();
+
+    const input = await screen.findByPlaceholderText(enTranslation.nameFilter);
+    await user.type(input, "one");
+    await user.click(input.parentElement!.querySelector("button")!);
+
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(screen.getByText("Mod Two")).toBeInTheDocument();
+    expect(screen.getByText("Mod Three")).toBeInTheDocument();
+  });
+
   it("selects visible children from a category row and toggles them with space", async () => {
     const user = userEvent.setup();
     const { store } = renderCategories();
@@ -229,6 +248,47 @@ describe("Categories", () => {
       expect(mods.find((mod) => mod.name === "mod-two.pack")?.isEnabled).toBe(true);
       expect(mods.find((mod) => mod.name === "mod-three.pack")?.isEnabled).toBe(true);
     });
+  });
+
+  it("counts always-enabled mods as enabled and leaves them enabled when a category is switched off", async () => {
+    const user = userEvent.setup();
+    const { store } = renderCategories(
+      [
+        createMod({ name: "always.pack", path: "/mods/always.pack", humanName: "Always", categories: ["Alpha"] }),
+        createMod({
+          name: "regular.pack",
+          path: "/mods/regular.pack",
+          humanName: "Regular",
+          categories: ["Alpha"],
+          isEnabled: true,
+        }),
+      ],
+      ["always.pack"],
+    );
+
+    const categoryToggle = await screen.findByLabelText("Toggle category Alpha");
+    expect(categoryToggle).toBeChecked();
+    expect(screen.getByLabelText("Toggle mod Always")).toBeDisabled();
+
+    await user.click(categoryToggle);
+
+    expect(store.getState().app.currentPreset.mods).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "always.pack", isEnabled: true }),
+        expect.objectContaining({ name: "regular.pack", isEnabled: false }),
+      ]),
+    );
+  });
+
+  it("localizes the synthetic Uncategorized label without changing its stored key", async () => {
+    renderCategories(
+      [createMod({ name: "uncategorized.pack", path: "/mods/uncategorized.pack", humanName: "Uncategorized Mod" })],
+      [],
+      esTranslation as typeof enTranslation,
+    );
+
+    expect(await screen.findByText("Sin categoría")).toBeInTheDocument();
+    expect(screen.queryByText("Uncategorized")).not.toBeInTheDocument();
   });
 
   it("keeps the grid scroll position when toggling a mod or category visibility", async () => {

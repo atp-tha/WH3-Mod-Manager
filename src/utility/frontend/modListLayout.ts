@@ -1,3 +1,5 @@
+import { uncategorizedCategoryName } from "../categoryNames";
+
 /**
  * The mod list is rendered in one of two shapes.
  *
@@ -67,8 +69,8 @@ export const getModListGhostClass = (
   return "grid-column-6";
 };
 
-/** The category a mod with none of its own is filed under, matching the categories tab's own fallback. */
-export const uncategorizedCategoryName = "Uncategorized";
+/** Re-exported for callers that already consume the category grouping helpers. */
+export { uncategorizedCategoryName } from "../categoryNames";
 
 /** A mod row, tagged so it can share the list with the category headers. */
 export type ModListModRow = { kind: "mod" } & ModRowDatum;
