@@ -16,6 +16,8 @@ import { boardModeOf } from "../../buildingsData/derive";
 export type BuildingsFiltersProps = {
   catalog: BuildingsCatalog;
   query: BuildingsRegionQuery;
+  /** Cultures the current board draws nothing for. Populated on the horde board only. */
+  culturesWithoutChains: string[];
   /** Populated by the derivation; empty means the region has no mutually exclusive primary chains. */
   settlementTypeOptions: BuildingsOption[];
   settlementTypeDisabled: boolean;
@@ -29,7 +31,7 @@ export type BuildingsFiltersProps = {
  * `label` stays the `Name — key` pair so the built-in filter still matches either half; `name` is
  * what the menu draws on its own line, and `value` doubles as the key line under it.
  */
-type SelectOption = { value: string; label: string; name?: string; tone?: "quest" | "rebel" };
+type SelectOption = { value: string; label: string; name?: string; tone?: "quest" | "rebel" | "empty" };
 
 const optionLabel = (option: BuildingsOption) =>
   option.localizedName === option.key ? option.key : `${option.localizedName} — ${option.key}`;
@@ -93,6 +95,27 @@ export const buildFactionOptions = (factions: BuildingsFactionOption[]): SelectO
       tone: faction.isQuestFaction ? "quest" : faction.isRebel ? "rebel" : undefined,
     }));
 };
+
+/**
+ * Cultures the board draws nothing for are sorted below the ones it does and marked.
+ *
+ * They stay selectable rather than being dropped: a modder may be about to write the first chain for
+ * one, and a culture silently missing from the list is harder to explain than one that is present
+ * and visibly empty. Within each group the usual localised ordering applies.
+ */
+export const buildCultureOptions = (cultures: BuildingsOption[], withoutChains: ReadonlySet<string>): SelectOption[] =>
+  [...cultures]
+    .sort(
+      (first, second) =>
+        Number(withoutChains.has(first.key)) - Number(withoutChains.has(second.key)) ||
+        compareLocalizedOptions(first, second),
+    )
+    .map((culture) => ({
+      value: culture.key,
+      label: optionLabel(culture),
+      name: culture.localizedName,
+      tone: withoutChains.has(culture.key) ? ("empty" as const) : undefined,
+    }));
 
 const findOption = (options: SelectOption[], value: string | undefined) =>
   (value && options.find((option) => option.value === value)) || null;
@@ -236,7 +259,11 @@ const FilterSelect = ({
       formatOptionLabel={(option, meta) => {
         const entry = option as SelectOption;
         const toneClass =
-          entry.tone === "quest" ? "text-yellow-300" : entry.tone === "rebel" ? "text-red-400" : "text-slate-100";
+          entry.tone === "quest" || entry.tone === "empty"
+            ? "text-yellow-300"
+            : entry.tone === "rebel"
+              ? "text-red-400"
+              : "text-slate-100";
         // The closed control has one line to work with, and an option whose key is its own name
         // would only repeat itself on a second line.
         if (meta.context === "value" || !entry.name || entry.name === entry.value) {
@@ -261,6 +288,7 @@ const BuildingsFilters = memo(
   ({
     catalog,
     query,
+    culturesWithoutChains,
     settlementTypeOptions,
     settlementTypeDisabled,
     zoom,
@@ -309,15 +337,16 @@ const BuildingsFilters = memo(
       [catalog.regions, query.campaign],
     );
 
+    const emptyCultures = useMemo(() => new Set(culturesWithoutChains), [culturesWithoutChains]);
     const cultureOptions = useMemo(
       () => [
         noneOption,
-        ...toOptions(
+        ...buildCultureOptions(
           catalog.cultures.filter((entry) => !foreignSlotType || foreignSlotType.cultures.includes(entry.key)),
-          true,
+          emptyCultures,
         ),
       ],
-      [catalog.cultures, foreignSlotType, noneOption],
+      [catalog.cultures, emptyCultures, foreignSlotType, noneOption],
     );
 
     const subcultureOptions = useMemo(

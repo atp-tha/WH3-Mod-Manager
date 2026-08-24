@@ -486,6 +486,15 @@ export interface BuildingsRegionView {
   buildingFrameUrl?: string;
   bands: BuildingsSetBand[];
   edges: BuildingsUpgradeEdge[];
+  /**
+   * Cultures this query would leave with an empty board, so the picker can mark and demote them.
+   *
+   * Populated on the horde board only: most of the game's cultures have no horde at all, and a
+   * culture the board shows nothing for is otherwise indistinguishable from one it does. A region
+   * board has a chain for every culture somewhere, and the undercity picker is already narrowed to
+   * the cultures its slot type names.
+   */
+  culturesWithoutChains?: string[];
   /** Distinct settlement types the available chains bind to; empty means: hide the dropdown. */
   settlementTypeOptions: BuildingsOption[];
   /** True when the selected culture has no chain assigned to any settlement type. */

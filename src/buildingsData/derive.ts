@@ -540,6 +540,38 @@ export const resolveForeignSlotTypes = (data: BuiltBuildingsData): BuildingsFore
       };
     });
 
+/**
+ * The cultures this query would leave with an empty board.
+ *
+ * Horde boards only. Most of the game's cultures have no horde at all - 17 of vanilla's 27 draw
+ * nothing - and nothing on a board distinguishes "this culture has no horde" from "these filters
+ * happen to exclude everything". A region board has a chain for every culture somewhere, and the
+ * undercity picker is already narrowed to the cultures its slot type names, so neither needs it.
+ *
+ * Derived by running the query once per culture rather than approximated: a culture affects which
+ * chains survive availability, which of them are somebody else's, and which levels have a variant to
+ * draw, so only the real derivation answers it. The full sweep against the largest board - horde,
+ * 124 chains - measures at ~25ms against ~2ms for the view itself.
+ *
+ * The candidate query mirrors what picking a culture actually does (see the picker's own `onSelect`):
+ * choosing one clears the subculture, faction and settlement type that hang off it.
+ */
+export const resolveCulturesWithoutChains = (data: BuiltBuildingsData, query: BuildingsRegionQuery): string[] => {
+  if (boardModeOf(query) !== "horde") return [];
+  return data.cultures
+    .filter(
+      (culture) =>
+        resolveRegionBuildings(data, {
+          ...query,
+          culture: culture.key,
+          subculture: undefined,
+          faction: undefined,
+          settlementType: undefined,
+        }).bands.length === 0,
+    )
+    .map((culture) => culture.key);
+};
+
 export const resolveRegionSettlementTypes = (data: BuiltBuildingsData, query: BuildingsRegionQuery): string[] => {
   const { cultureChains } = resolveRegionChainContext(data, query);
   const settlementTypeKeys = new Set<string>();

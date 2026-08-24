@@ -32,13 +32,14 @@ const catalog = {
   ],
 } as unknown as BuildingsCatalog;
 
-const renderFilters = (query: Partial<BuildingsRegionQuery>) => {
+const renderFilters = (query: Partial<BuildingsRegionQuery>, culturesWithoutChains: string[] = []) => {
   const onQueryChange = vi.fn();
   const rendered = render(
     <localizationContext.Provider value={enTranslation}>
       <BuildingsFilters
         catalog={catalog}
         query={{ mode: "normal", campaign: "camp", region: "region", ...query }}
+        culturesWithoutChains={culturesWithoutChains}
         settlementTypeOptions={[]}
         settlementTypeDisabled={false}
         zoom={1}
@@ -148,5 +149,38 @@ describe("BuildingsFilters foreign slot types", () => {
       subculture: undefined,
       faction: undefined,
     });
+  });
+});
+
+describe("BuildingsFilters cultures with no chains", () => {
+  /** react-select renders menu options in order, so the rendered names are the order. */
+  const cultureNamesInMenu = () => {
+    openMenu("Culture");
+    return screen
+      .getAllByText(/^(Khorne|Empire)$/)
+      .map((element) => element.textContent)
+      .filter((text): text is string => !!text);
+  };
+
+  it("leaves the order alone when every culture has chains", () => {
+    renderFilters({ mode: "horde" });
+    expect(cultureNamesInMenu()).toEqual(["Empire", "Khorne"]);
+  });
+
+  it("sorts a culture the board draws nothing for below the ones it does", () => {
+    renderFilters({ mode: "horde" }, ["emp"]);
+    expect(cultureNamesInMenu()).toEqual(["Khorne", "Empire"]);
+  });
+
+  it("marks it in yellow, in the menu and in the closed control", () => {
+    renderFilters({ mode: "horde", culture: "emp" }, ["emp"]);
+
+    openMenu("Culture");
+    const menuEntry = screen.getAllByText("Empire").find((element) => element.className.includes("truncate"));
+    expect(menuEntry?.className).toContain("text-yellow-300");
+    expect(screen.getByText("Khorne").className).not.toContain("text-yellow-300");
+
+    // The control draws the `Name — key` label rather than the two-line menu row.
+    expect(screen.getByText("Empire — emp").className).toContain("text-yellow-300");
   });
 });

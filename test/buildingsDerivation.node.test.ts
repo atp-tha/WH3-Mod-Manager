@@ -4,6 +4,7 @@ import { buildBuildingsData } from "../src/buildingsData/data";
 import {
   expandChainSet,
   NO_SET_KEY,
+  resolveCulturesWithoutChains,
   resolveForeignSlotTypes,
   resolveRegionBuildings,
   resolveRegionSettlementTypes,
@@ -1350,6 +1351,33 @@ describe("horde boards", () => {
 
     expect(chainKeysIn(resolveRegionBuildings(data, query()))).not.toContain("wh_main_horde_legacy");
     expect(chainKeysIn(resolveRegionBuildings(data, hordeQuery()))).toContain("wh_main_horde_legacy");
+  });
+
+  it("reports which cultures the board draws nothing for", () => {
+    const data = build({
+      ...hordeTables(),
+      // Only `emp` has a variant for either horde chain, so `dwf` gets an empty board.
+      building_culture_variants_tables: baseTables().building_culture_variants_tables,
+    });
+
+    expect(resolveCulturesWithoutChains(data, hordeQuery())).toEqual(["dwf"]);
+    expect(chainKeysIn(resolveRegionBuildings(data, hordeQuery({ culture: "dwf" })))).toEqual([]);
+    expect(chainKeysIn(resolveRegionBuildings(data, hordeQuery({ culture: "emp" })))).not.toEqual([]);
+  });
+
+  it("reports nothing off a horde board, where the question does not arise", () => {
+    const data = build(hordeTables());
+    expect(resolveCulturesWithoutChains(data, query())).toEqual([]);
+    expect(resolveCulturesWithoutChains(data, query({ mode: "undercity", foreignSlotType: "CULT" }))).toEqual([]);
+  });
+
+  it("judges each culture on its own, not on the filters the current one carries", () => {
+    const data = build(hordeTables());
+    // A subculture and faction of the *current* culture would exclude everything for any other, so
+    // the sweep has to clear them the way picking a culture does.
+    expect(resolveCulturesWithoutChains(data, hordeQuery({ subculture: "emp_sub", faction: "emp_faction" }))).toEqual([
+      "dwf",
+    ]);
   });
 
   it("shows nothing when the install defines no horde force type", () => {

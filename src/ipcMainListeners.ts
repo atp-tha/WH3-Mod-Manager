@@ -52,7 +52,7 @@ import {
   BUILDINGS_TABLES,
   variantLocKey,
 } from "./buildingsData/data";
-import { resolveForeignSlotTypes, resolveRegionBuildings } from "./buildingsData/derive";
+import { resolveCulturesWithoutChains, resolveForeignSlotTypes, resolveRegionBuildings } from "./buildingsData/derive";
 import { validateNewRows } from "./buildingsData/validate";
 import { applyNewRowsToBuildingsData, LOC_TABLE, newRowsByTable, type BuildingsEditState } from "./buildingsData/edits";
 import {
@@ -4471,7 +4471,10 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
       try {
         const built = await ensureBuildingsData(enabledMods);
         const data = applyPendingBuildingsRows(built, pendingEdits);
-        const view = resolveRegionBuildings(data, query);
+        const view = {
+          ...resolveRegionBuildings(data, query),
+          culturesWithoutChains: resolveCulturesWithoutChains(data, query),
+        };
         // Validated against the base data, not `data`: every pending row exists in the latter by
         // construction, so an override would look like a perfectly ordinary key.
         const rowIssues = pendingEdits ? validateNewRows(built.data, pendingEdits) : undefined;

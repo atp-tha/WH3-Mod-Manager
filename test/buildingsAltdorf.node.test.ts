@@ -3,7 +3,11 @@ import * as nodePath from "path";
 import { describe, expect, it } from "vitest";
 
 import { BUILDINGS_TABLES, buildBuildingsData } from "../src/buildingsData/data";
-import { resolveForeignSlotTypes, resolveRegionBuildings } from "../src/buildingsData/derive";
+import {
+  resolveCulturesWithoutChains,
+  resolveForeignSlotTypes,
+  resolveRegionBuildings,
+} from "../src/buildingsData/derive";
 import { computeBoardLayout } from "../src/components/buildings/buildingsLayout";
 import type { BuildingsRegionView, BuildingsTableRows } from "../src/buildingsData/types";
 import {
@@ -533,6 +537,50 @@ describe.skipIf(!haveDbDump)("horde boards against the shipped tables", () => {
     ]);
     expect(tilesFor(view, "wh_dlc03_horde_beastmen_herd").every((tile) => !tile.isRuin)).toBe(true);
     expect(tilesFor(view, "wh_dlc03_horde_beastmen_herd").every((tile) => !tile.isSettlementOrPort)).toBe(true);
+  });
+
+  it("names the cultures with no horde at all", () => {
+    const withoutChains = resolveCulturesWithoutChains(data, {
+      mode: "horde",
+      campaign: CAMPAIGN,
+      region: "",
+    });
+
+    // The ones that do have a horde must not be listed.
+    for (const culture of [
+      "wh3_main_ogr_ogre_kingdoms",
+      "wh_dlc03_bst_beastmen",
+      "wh_main_chs_chaos",
+      "wh2_dlc11_cst_vampire_coast",
+      "wh2_main_lzd_lizardmen",
+      "wh_main_dwf_dwarfs",
+      "wh2_main_hef_high_elves",
+    ]) {
+      expect(withoutChains).not.toContain(culture);
+      expect(chainsIn(hordeView(culture))).not.toEqual([]);
+    }
+
+    // The ones that do not: settled cultures with no horde force type of their own.
+    for (const culture of ["wh_main_emp_empire", "wh3_main_ksl_kislev", "wh3_main_cth_cathay"]) {
+      expect(withoutChains).toContain(culture);
+      expect(chainsIn(hordeView(culture))).toEqual([]);
+    }
+
+    // Asserted as a count so a vanilla change moves it rather than passing silently.
+    expect(withoutChains).toHaveLength(17);
+    expect(data.cultures).toHaveLength(27);
+  });
+
+  it("reports nothing off a horde board", () => {
+    expect(resolveCulturesWithoutChains(data, { campaign: CAMPAIGN, region: REGION })).toEqual([]);
+    expect(
+      resolveCulturesWithoutChains(data, {
+        mode: "undercity",
+        campaign: CAMPAIGN,
+        region: "",
+        foreignSlotType: "UNDEREMPIRE",
+      }),
+    ).toEqual([]);
   });
 
   it("reads a horde secondary's primary requirement as the row itself", () => {

@@ -557,6 +557,7 @@ const BuildingsTab = memo(({ isActive = true }: BuildingsTabProps) => {
         <BuildingsFilters
           catalog={catalog}
           query={query}
+          culturesWithoutChains={view?.culturesWithoutChains ?? []}
           settlementTypeOptions={view?.settlementTypeOptions ?? []}
           settlementTypeDisabled={view?.settlementTypeDisabled ?? true}
           zoom={zoom}

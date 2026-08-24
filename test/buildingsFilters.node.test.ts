@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   boardModeQueryPatch,
+  buildCultureOptions,
   buildFactionOptions,
   firstRegionForCampaign,
   foreignSlotTypeQueryPatch,
@@ -10,6 +11,7 @@ import {
 import type {
   BuildingsCatalog,
   BuildingsFactionOption,
+  BuildingsOption,
   BuildingsForeignSlotTypeOption,
   BuildingsRegionQuery,
 } from "../src/buildingsData/types";
@@ -249,5 +251,39 @@ describe("boardModeQueryPatch", () => {
     expect(
       boardModeQueryPatch("normal", { ...query, mode: "undercity", foreignSlotType: "CULT" }, modeCatalog),
     ).toEqual({ mode: "normal", foreignSlotType: undefined, settlementType: undefined });
+  });
+});
+
+describe("buildCultureOptions", () => {
+  const cultures: BuildingsOption[] = [
+    { key: "kho", localizedName: "Khorne" },
+    { key: "emp", localizedName: "Empire" },
+    { key: "wh_unlocalized", localizedName: "wh_unlocalized" },
+  ];
+
+  it("keeps the localized ordering when the board draws something for every culture", () => {
+    expect(buildCultureOptions(cultures, new Set()).map((option) => option.value)).toEqual([
+      "emp",
+      "kho",
+      "wh_unlocalized",
+    ]);
+  });
+
+  it("sorts the cultures with no chains below the rest and tones them", () => {
+    const options = buildCultureOptions(cultures, new Set(["emp"]));
+    expect(options.map((option) => option.value)).toEqual(["kho", "wh_unlocalized", "emp"]);
+    expect(options.map((option) => option.tone)).toEqual([undefined, undefined, "empty"]);
+  });
+
+  it("still orders the empty group among itself", () => {
+    expect(buildCultureOptions(cultures, new Set(["kho", "emp"])).map((option) => option.value)).toEqual([
+      "wh_unlocalized",
+      "emp",
+      "kho",
+    ]);
+  });
+
+  it("keeps every culture selectable", () => {
+    expect(buildCultureOptions(cultures, new Set(["kho", "emp", "wh_unlocalized"]))).toHaveLength(3);
   });
 });
