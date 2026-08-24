@@ -156,7 +156,7 @@ const SkillsTreeView = memo((props: SkillsTreeViewProps) => {
   // console.log("TREE DATA is", data);
 
   return (
-    <div>
+    <div className="skills-node-sets-tree">
       <TreeView
         data={data}
         aria-label="Controlled expanded node tree"

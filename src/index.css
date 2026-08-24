@@ -891,6 +891,10 @@ body:not(.disable-row-hover) .row-hover-highlight:hover > div:not(.drop-ghost) {
   font-family: "Inter", "Roboto", Arial, sans-serif;
 }
 
+.skills-node-sets-tree {
+  font-family: "Inter", "Roboto", Arial, sans-serif;
+}
+
 /*
  * Zebra striping plus row hover. A wide table is read by tracking one row across many
  * near-identical numeric columns, and the eye loses the line long before the row ends.
