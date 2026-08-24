@@ -2510,7 +2510,11 @@ const ModsViewer = memo(() => {
                   )}
                 </div>
                 <div className="flex-1 min-h-0">
-                  {!currentPackData ? (
+                  {!activePackPath ? (
+                    <div className="h-full flex items-center justify-center text-sm text-gray-400">
+                      {localized.viewerSelectPack || "Select a pack to view"}
+                    </div>
+                  ) : !currentPackData ? (
                     <div className="h-full flex items-center justify-center text-sm text-gray-400">
                       {localized.viewerLoadingPack || "Loading pack…"}
                     </div>

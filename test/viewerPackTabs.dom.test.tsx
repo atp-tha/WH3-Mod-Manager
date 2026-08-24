@@ -419,6 +419,40 @@ describe("multiple pack viewer tabs", () => {
     expect(screen.getByRole("button", { name: "B", exact: true })).toBeInTheDocument();
   });
 
+  it("shows the pack selection state after the last pack is closed", async () => {
+    const user = userEvent.setup();
+    const packPath = "A:\\mods\\last-pack.pack";
+    window.api = {
+      viewerClosedPack: vi.fn(),
+      setViewerActivePack: vi.fn(),
+    } as unknown as NonNullable<Window["api"]>;
+    const store = configureStore({
+      reducer: { app: appReducer },
+      preloadedState: {
+        app: {
+          ...initialState,
+          packsData: { [packPath]: pack(packPath, "Last Pack") },
+        },
+      },
+    });
+
+    render(
+      <Provider store={store}>
+        <LocalizationContext.Provider value={{ filter: "Filter" }}>
+          <ModsViewer />
+        </LocalizationContext.Provider>
+      </Provider>,
+    );
+
+    store.dispatch(requestOpenPackTab(packPath));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Last Pack", exact: true })).toBeInTheDocument());
+
+    await user.click(screen.getByRole("button", { name: "Close Last Pack" }));
+
+    await waitFor(() => expect(screen.getByText("Select a pack to view")).toBeInTheDocument());
+    expect(screen.queryByText("Loading pack…")).not.toBeInTheDocument();
+  });
+
   it("waits for confirmation before purging a dirty pack", async () => {
     const user = userEvent.setup();
     const packPath = "A:\\mods\\dirty.pack";
