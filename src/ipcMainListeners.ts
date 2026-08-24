@@ -341,9 +341,11 @@ declare const SKILLS_PRELOAD_WEBPACK_ENTRY: string;
 declare const TECH_TREES_WEBPACK_ENTRY: string;
 declare const TECH_TREES_PRELOAD_WEBPACK_ENTRY: string;
 const normalizeGeneratedPrefix = (prefix: string) => prefix.trim().replace(/_+$/, "");
-const appendScopedTechNodeHash = (nodeKey: string, campaignKey?: string, factionKey?: string) => {
-  const scopeSource = `${campaignKey || ""}${factionKey || ""}`.trim();
-  if (!scopeSource) return nodeKey;
+const appendScopedTechNodeHash = (nodeKey: string, campaignKey?: string | null, factionKey?: string | null) => {
+  const normalizedCampaignKey = campaignKey?.trim() || "";
+  const normalizedFactionKey = factionKey?.trim() || "";
+  if (!normalizedCampaignKey && !normalizedFactionKey) return nodeKey;
+  const scopeSource = JSON.stringify([normalizedCampaignKey, normalizedFactionKey]);
   const scopeHash = createHash("sha256").update(scopeSource).digest().subarray(0, 8).toString("base64url");
   return nodeKey.endsWith("_") ? `${nodeKey}${scopeHash}` : `${nodeKey}_${scopeHash}`;
 };
@@ -1165,8 +1167,8 @@ const getVanillaLocalisationPackPaths = (dataFolder: string) =>
  *
  * Returns the cache reader under one synthetic key rather than a trie per pack, which is the whole
  * saving: the tries these replace cost ~97 MB of heap and are retained for as long as the skills or
- * technology data is. Consumers spread this first so mod locs, which stay on the live path, keep
- * whatever precedence they had.
+ * technology data is. Technology data places live mod tries before this cached lookup so a mod
+ * localization can override a vanilla value.
  *
  * Falls back to reading the packs and building tries, so a cache that cannot be built or opened
  * degrades to the old behaviour instead of losing every localised string.
@@ -3194,7 +3196,7 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
     const withoutExtension = iconName.replace(TECHNOLOGY_ICON_EXTENSION, "");
     return `${TECHNOLOGY_ICON_PREFIX}${withoutExtension}.png`;
   };
-  const getTechnologyIconNameFromPath = (iconPath: string | undefined) => {
+  const getTechnologyIconNameFromPath = (iconPath: string | null | undefined) => {
     if (!iconPath || iconPath.trim() === "") return "";
     return iconPath
       .trim()
@@ -3202,9 +3204,10 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
       .replace(/\.(png|jpg|jpeg)$/i, "");
   };
   const getTechnologyBuildingLevelForWrite = (
-    buildingLevel: string | undefined,
+    buildingLevel: string | null | undefined,
     originalTechnologyRow?: Record<string, string>,
   ) => {
+    if (buildingLevel === null) return "";
     const explicitBuildingLevel = (buildingLevel || "").trim();
     if (explicitBuildingLevel !== "") return explicitBuildingLevel;
     if (originalTechnologyRow && "building_level" in originalTechnologyRow) {
@@ -3243,6 +3246,8 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
   const getTechnologyDataCacheKey = () =>
     hash({
       game: appData.currentGame,
+      language: appData.currentLanguage || "",
+      useEnglishLocalizations: appData.isUsingEnglishLocalizations,
       dataFolder: appData.gamesToGameFolderPaths[appData.currentGame]?.dataFolder || "",
       enabledMods: sortByNameAndLoadOrder(appData.enabledMods).map((mod) => ({
         path: mod.path,
@@ -3522,12 +3527,11 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
       ).values(),
     );
     const iconPaths = Array.from(new Set([...techIconPaths, ...allTechnologyIconPaths, ...effectIconPaths]).values());
-    // orderedPacks is vanilla then mods, and getLocById takes the first hit, so the cache reader
-    // goes first to keep that precedence. The packs were read for their tables either way; what is
-    // saved is the tries, which the cached technology data used to retain.
+    // Mod packs are ordered from highest to lowest load priority. Put them before the vanilla
+    // lookup because getLocById intentionally returns the first matching localization.
     const locs = {
-      ...(await getVanillaLocLookup(getVanillaLocalisationPackPaths(dataFolder))),
       ...getLocsFromPacks(orderedModPacks, getLocsTrie),
+      ...(await getVanillaLocLookup(getVanillaLocalisationPackPaths(dataFolder))),
     };
     // The table packs hold hardly any of these, so the packs the icons are read out of are resolved
     // separately and indexed only if they turn out to carry one.
@@ -7933,7 +7937,12 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
       try {
         const appState = await readConfig();
         mainWindow?.webContents.send("fromAppConfig", appState);
-        appData.isUsingEnglishLocalizations = !!appState.isUsingEnglishLocalizations;
+        const nextUseEnglishLocalizations = !!appState.isUsingEnglishLocalizations;
+        if (appData.isUsingEnglishLocalizations !== nextUseEnglishLocalizations) {
+          cachedTechnologyData = undefined;
+          cachedTechnologyDataKey = undefined;
+        }
+        appData.isUsingEnglishLocalizations = nextUseEnglishLocalizations;
         console.log("appState.currentLanguage:", appState.currentLanguage);
         if (appState.currentLanguage) {
           const languageInConfig = appState.currentLanguage || "en";
@@ -9467,7 +9476,9 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
         const generatedTechnologyKey = resolveGenerationTemplate(technologyKeyTemplate, templateVariables);
         const finalNode = {
           ...sourceNode,
-          nodeKey: appendScopedTechNodeHash(generatedNodeKey, sourceNode.campaignKey, sourceNode.factionKey),
+          nodeKey: shouldCloneNodeSet
+            ? appendScopedTechNodeHash(generatedNodeKey, sourceNode.campaignKey, sourceNode.factionKey)
+            : sourceNode.nodeKey,
           technologyKey: shouldCloneTechnologies
             ? appendScopedTechNodeHash(generatedTechnologyKey, sourceNode.campaignKey, sourceNode.factionKey)
             : sourceNode.technologyKey,
@@ -9479,6 +9490,7 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
 
       const seenNodeKeys = new Set<string>();
       const seenTechnologyKeys = new Set<string>();
+      const newTechnologyDefinitionByKey = new Map<string, string>();
       for (const { finalNode } of remappedNodes) {
         if (seenNodeKeys.has(finalNode.nodeKey)) {
           return {
@@ -9487,6 +9499,12 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
           };
         }
         seenNodeKeys.add(finalNode.nodeKey);
+        if (shouldCloneNodeSet && technologyData.nodesByKey[finalNode.nodeKey]) {
+          return {
+            success: false,
+            error: `Generated technology node key already exists: ${finalNode.nodeKey}`,
+          };
+        }
         if (shouldCloneTechnologies) {
           if (seenTechnologyKeys.has(finalNode.technologyKey)) {
             return {
@@ -9495,13 +9513,59 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
             };
           }
           seenTechnologyKeys.add(finalNode.technologyKey);
+          if (technologyData.technologyRowsByKey[finalNode.technologyKey]) {
+            return {
+              success: false,
+              error: `Generated technology key already exists: ${finalNode.technologyKey}`,
+            };
+          }
+        }
+        if (!technologyData.technologyRowsByKey[finalNode.technologyKey]) {
+          const definition = JSON.stringify({
+            displayName: finalNode.displayName || finalNode.technologyKey,
+            shortDescription: finalNode.shortDescription ?? "",
+            longDescription: finalNode.longDescription ?? "",
+            researchPointsRequired: finalNode.researchPointsRequired,
+            iconPath: finalNode.iconPath ?? "",
+            isHidden: !!finalNode.isHidden,
+            buildingLevel: finalNode.buildingLevel ?? "",
+            effects: (finalNode.effects || [])
+              .map((effect) => ({ effectKey: effect.effectKey, value: effect.value || "" }))
+              .sort((left, right) =>
+                left.effectKey === right.effectKey
+                  ? left.value.localeCompare(right.value)
+                  : left.effectKey.localeCompare(right.effectKey),
+              ),
+          });
+          const existingDefinition = newTechnologyDefinitionByKey.get(finalNode.technologyKey);
+          if (existingDefinition && existingDefinition !== definition) {
+            return {
+              success: false,
+              error: `Duplicate custom technology key has conflicting definitions: ${finalNode.technologyKey}`,
+            };
+          }
+          newTechnologyDefinitionByKey.set(finalNode.technologyKey, definition);
         }
       }
 
       const finalNodes = remappedNodes.map(({ finalNode }) => finalNode);
+      const normalizeUiTabMappings = (mappings: Record<string, string[]>) =>
+        JSON.stringify(
+          Object.fromEntries(
+            Object.entries(mappings)
+              .map(([tabKey, nodeKeys]) => [tabKey, [...new Set(nodeKeys)].sort()] as const)
+              .sort(([left], [right]) => left.localeCompare(right)),
+          ),
+        );
+      const uiTabMappingsChanged =
+        normalizeUiTabMappings(data.uiTabToNodes || {}) !== normalizeUiTabMappings(technologyData.uiTabToNodes);
       const shouldWriteNodeMappings =
         shouldCloneNodeSet ||
-        remappedNodes.some(({ sourceNode, finalNode }) => sourceNode.nodeKey !== finalNode.nodeKey);
+        remappedNodes.some(({ sourceNode, finalNode }) => sourceNode.nodeKey !== finalNode.nodeKey) ||
+        Object.values(data.uiTabToNodes || {}).some((nodeKeys) =>
+          nodeKeys.some((nodeKey) => !technologyData.nodesByKey[nodeKey]),
+        ) ||
+        uiTabMappingsChanged;
       const referencedUiGroupKeys = new Set(
         finalNodes
           .map((node) => node.optionalUiGroup)
@@ -9516,7 +9580,10 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
       [...referencedUiGroupKeys]
         .sort((left, right) => collator.compare(left, right))
         .forEach((groupKey, index) => {
-          uiGroupKeyRemap.set(groupKey, `${generationPrefix}_${targetSetKey}_${index + 1}`);
+          uiGroupKeyRemap.set(
+            groupKey,
+            shouldCloneNodeSet ? `${generationPrefix}_${targetSetKey}_${index + 1}` : groupKey,
+          );
         });
 
       if (shouldWriteNodeSet) {
@@ -9709,7 +9776,7 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
           });
         }
       }
-      const normalizeComparableString = (value: string | undefined) => (value || "").trim();
+      const normalizeComparableString = (value: string | null | undefined) => (value || "").trim();
       const normalizeComparableNumber = (value: string | undefined) => parseOptionalNumber(value, 0).toString();
       const normalizeComparableBool = (value: string | undefined) =>
         parseOptionalBool(value, false) ? "true" : "false";
@@ -9873,10 +9940,10 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
         if (!shouldWriteLoc) continue;
         locRowsByKey[`technologies_onscreen_name_${technologyKey}`] = finalNode.displayName || technologyKey;
         if (finalNode.shortDescription !== undefined) {
-          locRowsByKey[`technologies_short_description_${technologyKey}`] = finalNode.shortDescription;
+          locRowsByKey[`technologies_short_description_${technologyKey}`] = finalNode.shortDescription || "";
         }
         if (finalNode.longDescription !== undefined) {
-          locRowsByKey[`technologies_long_description_${technologyKey}`] = finalNode.longDescription;
+          locRowsByKey[`technologies_long_description_${technologyKey}`] = finalNode.longDescription || "";
         }
       }
       for (const remappedGroupKey of uiGroupKeyRemap.values()) {
@@ -9979,6 +10046,44 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
         return versions.find((version) => version.version === defaultVersion) || versions[0];
       };
       const packFiles: NewPackedFile[] = [];
+      const newNodeKeys = new Set<string>();
+      for (const newNode of data.newNodes || []) {
+        if (newNodeKeys.has(newNode.nodeKey)) {
+          return { success: false, error: `Duplicate technology node key: ${newNode.nodeKey}` };
+        }
+        if (technologyData.nodesByKey[newNode.nodeKey]) {
+          return { success: false, error: `Technology node key already exists: ${newNode.nodeKey}` };
+        }
+        newNodeKeys.add(newNode.nodeKey);
+      }
+      const newTechnologyDefinitions = new Map<string, string>();
+      for (const newNode of data.newNodes || []) {
+        if (technologyData.technologyRowsByKey[newNode.technologyKey]) continue;
+        const definition = JSON.stringify({
+          displayName: newNode.displayName,
+          shortDescription: newNode.shortDescription ?? "",
+          longDescription: newNode.longDescription ?? "",
+          researchPointsRequired: newNode.researchPointsRequired,
+          iconPath: newNode.iconPath ?? "",
+          isHidden: !!newNode.isHidden,
+          buildingLevel: newNode.buildingLevel ?? "",
+          effects: (newNode.effects || [])
+            .map((effect) => ({ effectKey: effect.effectKey, value: effect.value || "" }))
+            .sort((left, right) =>
+              left.effectKey === right.effectKey
+                ? left.value.localeCompare(right.value)
+                : left.effectKey.localeCompare(right.effectKey),
+            ),
+        });
+        const previousDefinition = newTechnologyDefinitions.get(newNode.technologyKey);
+        if (previousDefinition && previousDefinition !== definition) {
+          return {
+            success: false,
+            error: `Duplicate custom technology key has conflicting definitions: ${newNode.technologyKey}`,
+          };
+        }
+        newTechnologyDefinitions.set(newNode.technologyKey, definition);
+      }
       const hasNodeDeletions = data.deletedNodeKeys && data.deletedNodeKeys.length > 0;
       const hasNodeEdits = data.editedNodes && data.editedNodes.length > 0;
       if (data.changedNodes.length > 0 || hasNodeDeletions || hasNodeEdits) {
@@ -10021,10 +10126,10 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
               updatedRow.required_parents = editedNode.requiredParents.toString();
             }
             if (editedNode.campaignKey !== undefined) {
-              updatedRow.campaign_key = editedNode.campaignKey;
+              updatedRow.campaign_key = editedNode.campaignKey ?? "";
             }
             if (editedNode.factionKey !== undefined) {
-              updatedRow.faction_key = editedNode.factionKey;
+              updatedRow.faction_key = editedNode.factionKey ?? "";
             }
             if (editedNode.pixelOffsetX !== undefined) {
               updatedRow.pixel_offset_x = editedNode.pixelOffsetX.toString();
@@ -10045,18 +10150,32 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
           });
         }
       }
-      // Handle edited nodes in technologies_tables (for display name, building level, etc.)
-      if (hasNodeEdits && data.editedNodes) {
+      // Handle edited nodes and hidden overrides in one technologies_tables file. Keeping both
+      // sources in the same row map prevents duplicate packed file paths and preserves edits when
+      // a node's hidden state is changed at the same time.
+      if ((hasNodeEdits && data.editedNodes) || data.hiddenTechnologies.length > 0) {
         const techSchema = getPreferredSchema("technologies_tables");
         const dedupedRows: Record<string, Record<string, string | boolean>> = {};
-        for (const editedNode of data.editedNodes) {
+        const hiddenStateByTechnologyKey = new Map<string, boolean>();
+        for (const hiddenTechnology of data.hiddenTechnologies) {
+          const originalRow = technologyData.technologyRowsByKey[hiddenTechnology.technologyKey];
+          if (!originalRow) continue;
+          hiddenStateByTechnologyKey.set(hiddenTechnology.technologyKey, hiddenTechnology.isHidden);
+          dedupedRows[hiddenTechnology.technologyKey] = {
+            ...originalRow,
+            key: hiddenTechnology.technologyKey,
+            is_hidden: hiddenTechnology.isHidden ? "true" : "false",
+            building_level: hiddenTechnology.isHidden ? "wh_main_chs_port_ruin" : originalRow.building_level || "",
+          };
+        }
+        for (const editedNode of data.editedNodes || []) {
           const nodeRow = technologyData.nodeRowsByKey[editedNode.nodeKey];
           const technologyKey = (editedNode.technologyKey || (nodeRow?.technology_key as string) || "").trim();
           if (!technologyKey) continue;
           const originalTechRow = technologyData.technologyRowsByKey[technologyKey];
           const sourceTechnologyKey = (nodeRow?.technology_key as string) || "";
           const sourceTechRowForClone = technologyData.technologyRowsByKey[sourceTechnologyKey];
-          const baseTechRow = originalTechRow || sourceTechRowForClone || {};
+          const baseTechRow = dedupedRows[technologyKey] || originalTechRow || sourceTechRowForClone || {};
           const isBrandNewTechnology = !originalTechRow;
           const updatedRow: Record<string, string | boolean> = {
             ...baseTechRow,
@@ -10069,7 +10188,7 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
             updatedRow.is_hidden = editedNode.isHidden ? "true" : "false";
           }
           if (editedNode.iconPath !== undefined) {
-            updatedRow.icon_name = getTechnologyIconNameFromPath(editedNode.iconPath);
+            updatedRow.icon_name = getTechnologyIconNameFromPath(editedNode.iconPath || undefined);
           }
           if (editedNode.buildingLevel !== undefined) {
             updatedRow.building_level = getTechnologyBuildingLevelForWrite(
@@ -10078,30 +10197,21 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
             );
           }
           if (isBrandNewTechnology) {
-            updatedRow.unique_index = allocateTechnologyUniqueIndex(usedTechnologyUniqueIndexes);
+            updatedRow.unique_index =
+              updatedRow.unique_index || allocateTechnologyUniqueIndex(usedTechnologyUniqueIndexes);
             updatedRow.is_military = updatedRow.is_military ?? "true";
+          }
+          const hiddenState = editedNode.isHidden ?? hiddenStateByTechnologyKey.get(technologyKey);
+          if (hiddenState !== undefined) {
+            updatedRow.is_hidden = hiddenState ? "true" : "false";
+            if (hiddenState) updatedRow.building_level = "wh_main_chs_port_ruin";
           }
           dedupedRows[technologyKey] = updatedRow;
         }
         const rows = Object.values(dedupedRows).map((row) => buildRowFromSchema(techSchema.fields, row));
         if (rows.length > 0) {
-          const existingTechFile = packFiles.find((f) => f.name.startsWith("db\\technologies_tables\\"));
-          if (existingTechFile) {
-            // Merge: rebuild with combined rows
-            const buffer = await buildDBFileBuffer(techSchema.version, rows, techSchema.fields);
-            packFiles.push({
-              name: `db\\technologies_tables\\${tableName}_edits`,
-              file_size: buffer.length,
-              buffer,
-            });
-          } else {
-            const buffer = await buildDBFileBuffer(techSchema.version, rows, techSchema.fields);
-            packFiles.push({
-              name: `db\\technologies_tables\\${tableName}`,
-              file_size: buffer.length,
-              buffer,
-            });
-          }
+          const buffer = await buildDBFileBuffer(techSchema.version, rows, techSchema.fields);
+          packFiles.push({ name: `db\\technologies_tables\\${tableName}`, file_size: buffer.length, buffer });
         }
       }
       const hasLinkDeletions = data.deletedLinkKeys && data.deletedLinkKeys.length > 0;
@@ -10142,25 +10252,6 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
           });
         }
       }
-      if (data.hiddenTechnologies.length > 0) {
-        const schema = getPreferredSchema("technologies_tables");
-        const dedupedRowsByTechnologyKey: Record<string, Record<string, string | boolean>> = {};
-        for (const hiddenTechnology of data.hiddenTechnologies) {
-          const originalRow = technologyData.technologyRowsByKey[hiddenTechnology.technologyKey];
-          if (!originalRow) continue;
-          dedupedRowsByTechnologyKey[hiddenTechnology.technologyKey] = {
-            ...originalRow,
-            key: hiddenTechnology.technologyKey,
-            is_hidden: hiddenTechnology.isHidden ? "true" : "false",
-            building_level: hiddenTechnology.isHidden ? "wh_main_chs_port_ruin" : originalRow.building_level || "",
-          };
-        }
-        const rows = Object.values(dedupedRowsByTechnologyKey).map((row) => buildRowFromSchema(schema.fields, row));
-        if (rows.length > 0) {
-          const buffer = await buildDBFileBuffer(schema.version, rows, schema.fields);
-          packFiles.push({ name: `db\\technologies_tables\\${tableName}`, file_size: buffer.length, buffer });
-        }
-      }
       if (data.newNodes && data.newNodes.length > 0) {
         // Write new entries to technology_nodes_tables
         const nodeSchema = getPreferredSchema("technology_nodes_tables");
@@ -10174,6 +10265,7 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
             required_parents: newNode.requiredParents.toString(),
             campaign_key: newNode.campaignKey || "",
             faction_key: newNode.factionKey || "",
+            optional_ui_group: newNode.optionalUiGroup || "",
             pixel_offset_x: newNode.pixelOffsetX.toString(),
             pixel_offset_y: newNode.pixelOffsetY.toString(),
             research_points_required: newNode.researchPointsRequired.toString(),
@@ -10237,6 +10329,32 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
               buffer,
             });
           }
+        }
+      }
+      if (data.uiTabToNodes && data.newNodes && data.newNodes.length > 0) {
+        const uiTabsToNodesSchema = getPreferredSchema("technology_ui_tabs_to_technology_nodes_junctions_tables");
+        const newNodeKeys = new Set(data.newNodes.map((newNode) => newNode.nodeKey));
+        const uiTabsToNodesRows = Object.entries(data.uiTabToNodes).flatMap(([tab, nodeKeys]) =>
+          nodeKeys
+            .filter((nodeKey) => newNodeKeys.has(nodeKey))
+            .map((nodeKey) =>
+              buildRowFromSchema(uiTabsToNodesSchema.fields, {
+                tab,
+                node: nodeKey,
+              }),
+            ),
+        );
+        if (uiTabsToNodesRows.length > 0) {
+          const buffer = await buildDBFileBuffer(
+            uiTabsToNodesSchema.version,
+            uiTabsToNodesRows,
+            uiTabsToNodesSchema.fields,
+          );
+          packFiles.push({
+            name: `db\\technology_ui_tabs_to_technology_nodes_junctions_tables\\${tableName}`,
+            file_size: buffer.length,
+            buffer,
+          });
         }
       }
       const techEffectsSchema = getPreferredSchema("technology_effects_junction_tables");
@@ -10325,10 +10443,10 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
             locRows.push([`technologies_onscreen_name_${technologyKey}`, editedNode.displayName, false]);
           }
           if (editedNode.shortDescription !== undefined) {
-            locRows.push([`technologies_short_description_${technologyKey}`, editedNode.shortDescription, false]);
+            locRows.push([`technologies_short_description_${technologyKey}`, editedNode.shortDescription || "", false]);
           }
           if (editedNode.longDescription !== undefined) {
-            locRows.push([`technologies_long_description_${technologyKey}`, editedNode.longDescription, false]);
+            locRows.push([`technologies_long_description_${technologyKey}`, editedNode.longDescription || "", false]);
           }
         }
       }
@@ -10630,6 +10748,8 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
     console.log("requestLanguageChange:", language);
     await i18n.changeLanguage(language);
     appData.currentLanguage = language as SupportedLanguage;
+    cachedTechnologyData = undefined;
+    cachedTechnologyDataKey = undefined;
     windows.mainWindow?.webContents.send("setCurrentLanguage", language);
     windows.skillsWindow?.webContents.send("setCurrentLanguage", language);
     windows.viewerWindow?.webContents.send("setCurrentLanguage", language);

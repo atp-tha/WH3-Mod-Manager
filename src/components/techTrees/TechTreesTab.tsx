@@ -18,6 +18,8 @@ type TechTab = {
 
 const TechTreesTab = memo(() => {
   const isFeaturesForModdersEnabled = useAppSelector((state) => state.app.isFeaturesForModdersEnabled);
+  const currentLanguage = useAppSelector((state) => state.app.currentLanguage);
+  const isUsingEnglishLocalizations = useAppSelector((state) => state.app.isUsingEnglishLocalizations);
   const pendingSingleClickTimeoutRef = useRef<number | null>(null);
   const [isLoadingSets, setIsLoadingSets] = useState(false);
   const [nodeSets, setNodeSets] = useState<TechnologyNodeSetSummary[]>([]);
@@ -34,18 +36,34 @@ const TechTreesTab = memo(() => {
         const fetchedSets = await window.api?.getTechnologyNodeSets();
         if (!fetchedSets) return;
         setNodeSets(fetchedSets);
-        if (fetchedSets.length > 0) {
+        const fetchedSetsByKey = new Map(fetchedSets.map((nodeSet) => [nodeSet.key, nodeSet]));
+        setTabs((previousTabs) => {
+          const refreshedTabs = previousTabs
+            .filter((tab) => tab.isBlank || fetchedSetsByKey.has(tab.setKey))
+            .map((tab) => {
+              if (tab.isBlank) return tab;
+              const nodeSet = fetchedSetsByKey.get(tab.setKey);
+              return nodeSet ? { ...tab, label: nodeSet.localizedName || nodeSet.key } : tab;
+            });
+          if (refreshedTabs.length > 0 || fetchedSets.length < 1) {
+            setActiveTabId((currentTabId) =>
+              currentTabId && refreshedTabs.some((tab) => tab.id === currentTabId)
+                ? currentTabId
+                : refreshedTabs[0]?.id || null,
+            );
+            return refreshedTabs;
+          }
           const id = `tab_${nextTabId++}`;
           const firstSet = fetchedSets[0];
-          setTabs([{ id, setKey: firstSet.key, label: firstSet.localizedName || firstSet.key }]);
           setActiveTabId(id);
-        }
+          return [{ id, setKey: firstSet.key, label: firstSet.localizedName || firstSet.key }];
+        });
       } finally {
         setIsLoadingSets(false);
       }
     };
     loadNodeSets();
-  }, []);
+  }, [currentLanguage, isUsingEnglishLocalizations]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {

@@ -30,6 +30,7 @@ type AddTechNodeModalProps = {
   onClose: () => void;
   defaultCustomTechnologyKey?: string;
   allTechnologies: TechnologyCatalogEntry[];
+  reservedTechnologyKeys?: string[];
   allTechnologyIcons: TechnologyIconEntry[];
   allEffects: TechEffect[];
   existingNode?: Omit<TechNodeFormData, "technologyMode"> & { nodeKey: string };
@@ -63,6 +64,7 @@ const AddTechNodeModal = ({
   onClose,
   defaultCustomTechnologyKey,
   allTechnologies,
+  reservedTechnologyKeys = [],
   allTechnologyIcons,
   allEffects,
   existingNode,
@@ -73,6 +75,13 @@ const AddTechNodeModal = ({
     () => new Set(allTechnologies.map((technology) => technology.key)),
     [allTechnologies],
   );
+  const unavailableCustomTechnologyKeys = useMemo(() => {
+    const keys = new Set(existingTechnologyKeys);
+    for (const key of reservedTechnologyKeys) {
+      if (key && key !== existingNode?.technologyKey) keys.add(key);
+    }
+    return keys;
+  }, [existingNode?.technologyKey, existingTechnologyKeys, reservedTechnologyKeys]);
   const inferredMode: "existing" | "custom" = useMemo(() => {
     if (!existingNode) return "custom";
     return existingTechnologyKeys.has(existingNode.technologyKey) ? "existing" : "custom";
@@ -161,7 +170,7 @@ const AddTechNodeModal = ({
   });
 
   const customTechnologyKeyTrimmed = customTechnologyKey.trim();
-  const customKeyExists = existingTechnologyKeys.has(customTechnologyKeyTrimmed);
+  const customKeyExists = unavailableCustomTechnologyKeys.has(customTechnologyKeyTrimmed);
   const filteredIcons = useMemo(() => {
     if (!iconSearch.trim()) return technologyIconOptions;
     const normalizedSearch = iconSearch.toLowerCase();
