@@ -273,6 +273,7 @@ import {
   getSkills,
   NodeLinks,
   NodeSkill,
+  normalizeSkillIconPath,
   resolveTextReplacements,
   SkillAndIcons,
 } from "./skills";
@@ -1753,12 +1754,12 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
       const set = schemaFieldRow.find((sF) => sF.name == "set")?.resolvedKeyValue;
       const node = schemaFieldRow.find((sF) => sF.name == "item")?.resolvedKeyValue;
       const modDisabled = schemaFieldRow.find((sF) => sF.name == "mod_disabled")?.resolvedKeyValue;
-      if (set && node && modDisabled != undefined)
-        setAndNodes.push({
-          set,
-          node,
-          modDisabled,
-        });
+      if (set && node && modDisabled != undefined) {
+        const updated = { set, node, modDisabled };
+        const existingIndex = setAndNodes.findIndex((entry) => entry.set == set && entry.node == node);
+        if (existingIndex >= 0) setAndNodes.splice(existingIndex, 1, updated);
+        else setAndNodes.push(updated);
+      }
     });
     const setToNodes: Record<string, string[]> = {};
     for (const setAndNode of setAndNodes) {
@@ -1766,15 +1767,6 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
       if (!setToNodes[set]) setToNodes[set] = [];
       if (!setToNodes[set].includes(setAndNode.node)) setToNodes[set].push(setAndNode.node);
     }
-    // set to node table can also be used to disable nodes for a set
-    const setToNodesDisables: Record<string, string[]> = {};
-    for (const setAndNode of setAndNodes) {
-      const set = setAndNode.set;
-      if (setAndNode.modDisabled == "0") continue;
-      if (!setToNodesDisables[set]) setToNodesDisables[set] = [];
-      if (!setToNodesDisables[set].includes(setAndNode.node)) setToNodesDisables[set].push(setAndNode.node);
-    }
-    // console.log("setToNodesDisables:", setToNodesDisables);
     // console.log("setToNodes KF:", setToNodes["wh_main_skill_node_set_emp_karl_franz"]);
     const nodeLinks: NodeLinks = {};
     getTableRowData(packsTableData, "character_skill_node_links_tables", (schemaFieldRow) => {
@@ -1783,6 +1775,12 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
       const link_type = schemaFieldRow.find((sF) => sF.name == "link_type")?.resolvedKeyValue;
       const parent_link_position = schemaFieldRow.find((sF) => sF.name == "parent_link_position")?.resolvedKeyValue;
       const child_link_position = schemaFieldRow.find((sF) => sF.name == "child_link_position")?.resolvedKeyValue;
+      const parent_link_position_offset = schemaFieldRow.find(
+        (sF) => sF.name == "parent_link_position_offset",
+      )?.resolvedKeyValue;
+      const child_link_position_offset = schemaFieldRow.find(
+        (sF) => sF.name == "child_link_position_offset",
+      )?.resolvedKeyValue;
       if (
         child_key != undefined &&
         parent_key != undefined &&
@@ -1792,12 +1790,18 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
         child_link_position != undefined
       ) {
         nodeLinks[parent_key] = nodeLinks[parent_key] || [];
-        nodeLinks[parent_key].push({
+        const link = {
           child: child_key,
           childLinkPosition: child_link_position,
           parentLinkPosition: parent_link_position,
+          childLinkPositionOffset: child_link_position_offset,
+          parentLinkPositionOffset: parent_link_position_offset,
           linkType: link_type,
-        });
+        } as NodeLinks[string][number];
+        // parent_key + child_key are the table's composite key. A later mod row replaces the
+        // earlier row, including its type and geometry, instead of leaving two competing links.
+        nodeLinks[parent_key] = nodeLinks[parent_key].filter((iterLink) => iterLink.child !== child_key);
+        nodeLinks[parent_key].push(link);
       }
     });
     const nodeAndSkills: NodeSkill[] = [];
@@ -1849,7 +1853,7 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
       if (key != undefined && iconPath != undefined && unlockRank != undefined) {
         const newSkill = {
           key,
-          iconPath,
+          iconPath: normalizeSkillIconPath(iconPath),
           maxLevel: 1,
           unlockRank: Number(unlockRank),
         };
@@ -1893,7 +1897,7 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
         if (!effectsToEffectData[effectKey]) {
           console.error("MISSING ICON FOR EFFECT", effectKey);
         }
-        skillsAndEffects.push({
+        const effect = {
           key,
           effectScope,
           level: Number(level),
@@ -1902,7 +1906,14 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
           iconData: "",
           icon: effectsToEffectData[effectKey]?.icon,
           priority: effectsToEffectData[effectKey]?.priority,
-        });
+        };
+        // character_skill_key + effect_key + level are the table's key. Mod rows replace the
+        // complete effect record (scope/value included) at that identity.
+        const existingIndex = skillsAndEffects.findIndex(
+          (iter) => iter.key === key && iter.effectKey === effectKey && iter.level === Number(level),
+        );
+        if (existingIndex >= 0) skillsAndEffects.splice(existingIndex, 1, effect);
+        else skillsAndEffects.push(effect);
       }
     });
     const skillsToEffects: Record<string, (typeof skillsAndEffects)[0][]> = {};
@@ -2288,14 +2299,9 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
     //   "dumps/effectToEffectBonusValueIdsUnitSetsData.json",
     //   JSON.stringify(effectToEffectBonusValueIdsUnitSetsData)
     // );
-    for (const [set, setToNodesToDisable] of Object.entries(setToNodesDisables)) {
-      const nodes = setToNodes[set];
-      const lenBefore = nodes.length;
-      setToNodes[set] = setToNodes[set].filter((node) => !setToNodesToDisable.includes(node));
-      const lenAfter = setToNodes[set].length;
-      if (lenBefore != lenAfter) {
-        console.log("from set", set, "removed", lenBefore - lenAfter, "elements");
-      }
+    for (const { set, node, modDisabled } of setAndNodes) {
+      if (modDisabled == "0" || modDisabled == "false") continue;
+      setToNodes[set] = (setToNodes[set] || []).filter((currentNode) => currentNode !== node);
     }
     const setKF = subtypesToSet["wh_main_emp_karl_franz"][0];
     const skillsDataPackPaths = vanillaIconPacks.concat(enabledModPacks).map((pack) => pack.path);
@@ -2469,11 +2475,16 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
       }
     }
   };
-  const getSkillsForSubtype = async (subtype: string, subtypeIndex: number) => {
+  const getSkillsForSubtype = async (subtype: string, subtypeIndex: number, requestId?: string) => {
     console.log("getSkillsForSubtype:", subtype);
     const cachedSkillsData = appData.skillsData;
     if (!cachedSkillsData) {
-      getSkillsData(appData.enabledMods);
+      appData.lastSkillsSelection = {
+        currentSubtype: subtype,
+        currentSubtypeIndex: subtypeIndex,
+      };
+      await getSkillsData(appData.enabledMods);
+      if (appData.skillsData) await getSkillsForSubtype(subtype, subtypeIndex, requestId);
       return;
     }
     appData.lastSkillsSelection = {
@@ -2482,6 +2493,7 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
     };
     const setKF = cachedSkillsData.subtypesToSet[subtype];
     console.log("sets for subtype:", setKF);
+    if (!setKF?.[subtypeIndex]) return;
     const nodesKF = cachedSkillsData.setToNodes[setKF[subtypeIndex]];
     const { nodeLinks, nodeToSkill, skillsToEffects, skills, locs, icons, subtypesToSet, nodeToSkillLocks } =
       cachedSkillsData;
@@ -2551,6 +2563,7 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
     const nodeRequirements = getNodeRequirements(nodeLinks, nodeToSkill);
     appData.queuedSkillsData = {
       // subtypeToSkills: { [subtype]: kfSkills },
+      requestId,
       currentSubtype: subtype,
       currentSubtypeIndex: subtypeIndex,
       currentSkills: kfSkills,
@@ -8489,8 +8502,8 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
     );
     writeAppConfig(payload);
   });
-  ipcMain.on("getSkillsForSubtype", async (event, subtype: string, subtypeIndex: number) => {
-    getSkillsForSubtype(subtype, subtypeIndex);
+  ipcMain.on("getSkillsForSubtype", async (event, subtype: string, subtypeIndex: number, requestId?: string) => {
+    getSkillsForSubtype(subtype, subtypeIndex, requestId);
   });
   ipcMain.on("createNewSkillTree", async (event, subtype: string) => {
     const cachedSkillsData = appData.skillsData;
@@ -8549,24 +8562,24 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
       // Build key mappings: old nodeId → new node key, index-based new skill key
       const nodeIdToNewNodeKey: Record<string, string> = {};
       const nodeIdToNewSkillKey: Record<string, string> = {};
+      const usedNodeKeys = new Set<string>(Object.keys(appData.skillsData?.nodeToSkill || {}));
+      // Existing skills that are reused must also reserve their keys so a custom template
+      // cannot accidentally generate the same character skill key.
+      const usedSkillKeys = new Set<string>([
+        ...(appData.skillsData?.skills || []).map((skill) => skill.key),
+        ...nodes.flatMap((node) => (node.existingSkillKey ? [node.existingSkillKey] : [])),
+      ]);
+      const makeUniqueKey = (baseKey: string, usedKeys: Set<string>) => {
+        let key = baseKey;
+        let suffix = 2;
+        while (usedKeys.has(key)) key = `${baseKey}_${suffix++}`;
+        usedKeys.add(key);
+        return key;
+      };
       for (let i = 0; i < nodes.length; i++) {
-        nodeIdToNewNodeKey[nodes[i].nodeId] = appendScopedSkillNodeHash(
-          resolveSkillGenerationTemplate(nodeKeyTemplate?.trim() || "${prefix}_skill_node_${row}_${column}", {
-            prefix: kp,
-            setSuffix,
-            timestamp: ts,
-            row: nodes[i].row.toString(),
-            column: nodes[i].column.toString(),
-          }),
-          currentSetCampaignKey,
-          nodes[i].faction,
-          nodes[i].subculture,
-        );
-        if (!cloneAllSkills && nodes[i].existingSkillKey) {
-          nodeIdToNewSkillKey[nodes[i].nodeId] = nodes[i].existingSkillKey!;
-        } else {
-          nodeIdToNewSkillKey[nodes[i].nodeId] = appendScopedSkillNodeHash(
-            resolveSkillGenerationTemplate(skillKeyTemplate?.trim() || "${prefix}_skill_${row}_${column}", {
+        nodeIdToNewNodeKey[nodes[i].nodeId] = makeUniqueKey(
+          appendScopedSkillNodeHash(
+            resolveSkillGenerationTemplate(nodeKeyTemplate?.trim() || "${prefix}_skill_node_${row}_${column}", {
               prefix: kp,
               setSuffix,
               timestamp: ts,
@@ -8576,10 +8589,30 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
             currentSetCampaignKey,
             nodes[i].faction,
             nodes[i].subculture,
+          ),
+          usedNodeKeys,
+        );
+        if (!cloneAllSkills && nodes[i].existingSkillKey && !nodes[i].cloneSkill) {
+          nodeIdToNewSkillKey[nodes[i].nodeId] = nodes[i].existingSkillKey!;
+        } else {
+          nodeIdToNewSkillKey[nodes[i].nodeId] = makeUniqueKey(
+            appendScopedSkillNodeHash(
+              resolveSkillGenerationTemplate(skillKeyTemplate?.trim() || "${prefix}_skill_${row}_${column}", {
+                prefix: kp,
+                setSuffix,
+                timestamp: ts,
+                row: nodes[i].row.toString(),
+                column: nodes[i].column.toString(),
+              }),
+              currentSetCampaignKey,
+              nodes[i].faction,
+              nodes[i].subculture,
+            ),
+            usedSkillKeys,
           );
         }
       }
-      const customNodes = cloneAllSkills ? nodes : nodes.filter((n) => !n.existingSkillKey);
+      const customNodes = cloneAllSkills ? nodes : nodes.filter((n) => !n.existingSkillKey || n.cloneSkill);
       const newSetKey = `${kp}_${setSuffix}`;
       const buildRowFromSchema = (
         dbFields: DBField[],
@@ -8668,8 +8701,8 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
         const rows = customNodes.map((node, i) =>
           buildRowFromSchema(schema.fields, {
             key: nodeIdToNewSkillKey[node.nodeId],
-            image_path: node.imgPath || "",
-            unlocked_at_rank: node.unlockRank.toString(),
+            image_path: normalizeSkillIconPath(node.imgPath || ""),
+            unlocked_at_rank: (node.unlockRank ?? 0).toString(),
           }),
         );
         if (rows.length > 0) {
@@ -8687,7 +8720,7 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
             character_skill_key: nodeIdToNewSkillKey[node.nodeId],
             tier: node.column.toString(),
             indent: node.row.toString(),
-            visible_in_ui: "1",
+            visible_in_ui: node.visibleInUI === false ? "0" : "1",
             faction_key: node.faction || "",
             subculture: node.subculture || "",
             required_num_parents: (node.requiredNumParents || 0).toString(),
@@ -8721,8 +8754,10 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
               parent_key: nodeIdToNewNodeKey[edge.source],
               child_key: nodeIdToNewNodeKey[edge.target],
               link_type: edge.linkType || "REQUIRED",
-              parent_link_position: "1",
-              child_link_position: "1",
+              parent_link_position: edge.parentLinkPosition || "1",
+              child_link_position: edge.childLinkPosition || "1",
+              parent_link_position_offset: edge.parentLinkPositionOffset || "0",
+              child_link_position_offset: edge.childLinkPositionOffset || "0",
             }),
           );
         if (rows.length > 0) {
@@ -8737,7 +8772,7 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
         const rows: (string | boolean)[][] = [];
         for (const node of customNodes) {
           const skillKey = nodeIdToNewSkillKey[node.nodeId];
-          for (const effect of node.effects) {
+          for (const effect of node.effects || []) {
             rows.push(
               buildRowFromSchema(schema.fields, {
                 character_skill_key: skillKey,
@@ -8761,7 +8796,12 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
         const rows = data.skillLocks
           .filter((lock) => nodes.some((n) => n.nodeId === lock.lockedNodeId))
           .map((lock) => {
-            const lockingNode = nodes.find((n) => n.skillId === lock.lockingSkillKey);
+            const lockingNode = nodes.find(
+              (n) =>
+                n.skillId === lock.lockingSkillKey ||
+                n.existingSkillKey === lock.lockingSkillKey ||
+                n.nodeId === lock.lockingSkillKey,
+            );
             return buildRowFromSchema(schema.fields, {
               character_skill: lockingNode
                 ? nodeIdToNewSkillKey[lockingNode.nodeId] || lock.lockingSkillKey
@@ -8904,7 +8944,7 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
               character_skill_key: node.characterSkillKey,
               tier: node.tier.toString(),
               indent: node.indent.toString(),
-              visible_in_ui: "1",
+              visible_in_ui: node.visibleInUI === false ? "0" : "1",
               faction_key: node.faction || "",
               subculture: node.subculture || "",
               required_num_parents: (node.requiredNumParents || 0).toString(),
@@ -8915,10 +8955,10 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
           rows.push(
             buildRowFromSchema(schema.fields, {
               key: node.newNodeKey,
-              character_skill_key: node.characterSkillKey,
+              character_skill_key: node.newSkillKey || node.characterSkillKey,
               tier: node.tier.toString(),
               indent: node.indent.toString(),
-              visible_in_ui: "1",
+              visible_in_ui: node.visibleInUI === false ? "0" : "1",
               faction_key: node.faction || "",
               subculture: node.subculture || "",
               required_num_parents: (node.requiredNumParents || 0).toString(),
@@ -8932,7 +8972,7 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
               character_skill_key: node.newSkillKey,
               tier: node.tier.toString(),
               indent: node.indent.toString(),
-              visible_in_ui: "1",
+              visible_in_ui: node.visibleInUI === false ? "0" : "1",
               faction_key: node.faction || "",
               subculture: node.subculture || "",
               required_num_parents: (node.requiredNumParents || 0).toString(),
@@ -9003,8 +9043,10 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
             parent_key: edge.parentKey,
             child_key: edge.childKey,
             link_type: edge.linkType || "REQUIRED",
-            parent_link_position: "1",
-            child_link_position: "1",
+            parent_link_position: edge.parentLinkPosition || "1",
+            child_link_position: edge.childLinkPosition || "1",
+            parent_link_position_offset: edge.parentLinkPositionOffset || "0",
+            child_link_position_offset: edge.childLinkPositionOffset || "0",
           }),
         );
         if (rows.length > 0) {
@@ -9012,16 +9054,31 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
           packFiles.push({ name: `db\\${tableName}\\${tn}`, file_size: buffer.length, buffer });
         }
       }
-      // 4. character_skills_tables — only for new nodes with custom skills (not reusing existing skills)
-      const customSkillNodes = newNodes.filter((n) => n.shouldCreateCharacterSkill);
+      // 4. character_skills_tables — new custom skills plus cloned/edited skills on replaced nodes.
+      // A replacement gets a new node key because the node-set item table has no delete/update
+      // operation for the old composite-key rows; metadata changes likewise need a new skill key
+      // so the original character skill remains untouched.
+      const customSkillNodes = [
+        ...newNodes.filter((n) => n.shouldCreateCharacterSkill),
+        ...replacedNodes.filter(
+          (n) =>
+            !!n.newSkillKey &&
+            n.label !== undefined &&
+            n.description !== undefined &&
+            n.imgPath !== undefined &&
+            n.unlockRank !== undefined &&
+            n.effects !== undefined &&
+            n.maxLevel !== undefined,
+        ),
+      ];
       if (customSkillNodes.length > 0) {
         const tableName = "character_skills_tables";
         const schema = getPreferredSchema(tableName);
         const rows = customSkillNodes.map((node) =>
           buildRowFromSchema(schema.fields, {
-            key: node.newSkillKey,
-            image_path: node.imgPath || "",
-            unlocked_at_rank: node.unlockRank.toString(),
+            key: node.newSkillKey!,
+            image_path: normalizeSkillIconPath(node.imgPath || ""),
+            unlocked_at_rank: (node.unlockRank ?? 0).toString(),
           }),
         );
         if (rows.length > 0) {
@@ -9035,10 +9092,10 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
         const schema = getPreferredSchema(tableName);
         const rows: (string | boolean)[][] = [];
         for (const node of customSkillNodes) {
-          for (const effect of node.effects) {
+          for (const effect of node.effects || []) {
             rows.push(
               buildRowFromSchema(schema.fields, {
-                character_skill_key: node.newSkillKey,
+                character_skill_key: node.newSkillKey!,
                 effect_key: effect.effectKey,
                 effect_scope: effect.effectScope || "character_to_character_own",
                 level: (effect.level || 1).toString(),
@@ -9072,8 +9129,8 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
       {
         const rows: (string | boolean)[][] = [];
         for (const node of customSkillNodes) {
-          rows.push([`character_skills_localised_name_${node.newSkillKey}`, node.label, false]);
-          rows.push([`character_skills_localised_description_${node.newSkillKey}`, node.description, false]);
+          rows.push([`character_skills_localised_name_${node.newSkillKey!}`, node.label || "", false]);
+          rows.push([`character_skills_localised_description_${node.newSkillKey!}`, node.description || "", false]);
         }
         if (rows.length > 0) {
           const buffer = await buildLocFileBuffer(rows);

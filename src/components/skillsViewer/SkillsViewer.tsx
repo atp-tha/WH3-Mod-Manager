@@ -17,13 +17,21 @@ type SkillTab = {
 };
 
 let nextTabId = 1;
+let nextSkillsRequestId = 1;
 const SKILL_NODE_SET_MARKER = "_skill_node_set_";
-type SkillSubtypeSelection = { subtype: string; subtypeIndex: number };
+type SkillSubtypeSelection = { subtype: string; subtypeIndex: number; requestId: string };
+
+const makeSkillsRequestId = () => `skills_request_${Date.now()}_${nextSkillsRequestId++}`;
+const selectionKey = (selection: Pick<SkillSubtypeSelection, "subtype" | "subtypeIndex">) =>
+  `${selection.subtype}:${selection.subtypeIndex}`;
 
 const isMatchingSelection = (selection: SkillSubtypeSelection | null, skillsData: SkillsData) =>
   selection != null &&
   selection.subtype === skillsData.currentSubtype &&
-  selection.subtypeIndex === skillsData.currentSubtypeIndex;
+  selection.subtypeIndex === skillsData.currentSubtypeIndex &&
+  // Older main-process builds did not include a request token. Keep the subtype/index
+  // fallback for those responses; current responses are matched to the exact request.
+  (!skillsData.requestId || selection.requestId === skillsData.requestId);
 
 const SkillsViewer = memo(() => {
   const [filterInputValue, setFilterInputValue] = useState("");
@@ -32,6 +40,10 @@ const SkillsViewer = memo(() => {
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
   const pendingNewTab = useRef<SkillSubtypeSelection | null>(null);
   const pendingActiveTab = useRef<SkillSubtypeSelection | null>(null);
+  const staleRequestIds = useRef(new Set<string>());
+  const staleSelectionKeys = useRef(new Set<string>());
+  const acceptedRequestId = useRef<string | null>(null);
+  const acceptedSelectionKey = useRef<string | null>(null);
   const skillsViewRef = useRef<SkillsViewHandle>(null);
   const dispatch = useAppDispatch();
   const debouncedFilterChange = useRef(debounce((val: string) => setDBTableFilter(val), 150));
@@ -116,6 +128,25 @@ const SkillsViewer = memo(() => {
     [activeTabId, snapshotCurrentTab],
   );
 
+  const markSelectionAccepted = useCallback((selection: SkillSubtypeSelection) => {
+    const previousAcceptedRequestId = acceptedRequestId.current;
+    if (previousAcceptedRequestId && previousAcceptedRequestId !== selection.requestId) {
+      staleRequestIds.current.add(previousAcceptedRequestId);
+    }
+    const previousAcceptedSelectionKey = acceptedSelectionKey.current;
+    if (previousAcceptedSelectionKey && previousAcceptedSelectionKey !== selectionKey(selection)) {
+      staleSelectionKeys.current.add(previousAcceptedSelectionKey);
+    }
+    const pendingActive = pendingActiveTab.current;
+    if (pendingActive && pendingActive.requestId !== selection.requestId) {
+      staleRequestIds.current.add(pendingActive.requestId);
+      staleSelectionKeys.current.add(selectionKey(pendingActive));
+    }
+    acceptedRequestId.current = selection.requestId;
+    acceptedSelectionKey.current = selectionKey(selection);
+    staleSelectionKeys.current.delete(selectionKey(selection));
+  }, []);
+
   // When Redux skillsData updates, route it to the correct tab
   useEffect(() => {
     if (!skillsData || !skillsData.currentSkills) return;
@@ -123,6 +154,7 @@ const SkillsViewer = memo(() => {
     const pending = pendingNewTab.current;
     if (pending && isMatchingSelection(pending, skillsData)) {
       // Double-click: snapshot current tab, then create a new tab
+      markSelectionAccepted(pending);
       pendingNewTab.current = null;
       pendingActiveTab.current = null;
       snapshotCurrentTab();
@@ -140,6 +172,7 @@ const SkillsViewer = memo(() => {
 
     const pendingActive = pendingActiveTab.current;
     if (pendingActive && isMatchingSelection(pendingActive, skillsData) && activeTabId) {
+      markSelectionAccepted(pendingActive);
       pendingActiveTab.current = null;
       setTabs((prev) =>
         prev.map((tab) => {
@@ -172,6 +205,16 @@ const SkillsViewer = memo(() => {
       return;
     }
 
+    if (
+      (skillsData.requestId && staleRequestIds.current.has(skillsData.requestId)) ||
+      (!skillsData.requestId &&
+        staleSelectionKeys.current.has(
+          selectionKey({ subtype: skillsData.currentSubtype, subtypeIndex: skillsData.currentSubtypeIndex }),
+        ))
+    ) {
+      return;
+    }
+
     if (activeTabId) {
       // Single-click: update the active tab's data (clear snapshot since data changed)
       setTabs((prev) =>
@@ -187,17 +230,19 @@ const SkillsViewer = memo(() => {
         }),
       );
     }
-  }, [activeTabId, skillsData, snapshotCurrentTab, tabs.length]);
+  }, [activeTabId, markSelectionAccepted, skillsData, snapshotCurrentTab, tabs.length]);
 
   const onTreeSelect = useCallback((subtype: string, subtypeIndex: number) => {
-    pendingActiveTab.current = { subtype, subtypeIndex };
-    window.api?.getSkillsForSubtype(subtype, subtypeIndex);
+    const requestId = makeSkillsRequestId();
+    pendingActiveTab.current = { subtype, subtypeIndex, requestId };
+    window.api?.getSkillsForSubtype(subtype, subtypeIndex, requestId);
   }, []);
 
   const onTreeDoubleClick = useCallback((subtype: string, subtypeIndex: number) => {
     console.log("Double clicked", subtype);
-    pendingNewTab.current = { subtype, subtypeIndex };
-    window.api?.getSkillsForSubtype(subtype, subtypeIndex);
+    const requestId = makeSkillsRequestId();
+    pendingNewTab.current = { subtype, subtypeIndex, requestId };
+    window.api?.getSkillsForSubtype(subtype, subtypeIndex, requestId);
   }, []);
 
   const closeTab = useCallback(

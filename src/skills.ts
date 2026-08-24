@@ -19,6 +19,8 @@ export type NodeLinks = Record<
     child: string;
     childLinkPosition?: string;
     parentLinkPosition?: string;
+    childLinkPositionOffset?: string;
+    parentLinkPositionOffset?: string;
     linkType: "REQUIRED" | "SUBSET_REQUIRED";
   }[]
 >;
@@ -27,6 +29,26 @@ export type SkillAndIcons = { key: string; iconPath: string; maxLevel: number; u
 export type SkillsToEffects = Record<string, Effect[]>;
 export type NodesToParents = Record<string, Skill[]>;
 export type EffectsToEffectData = Record<string, EffectData>;
+
+/**
+ * The DB stores skill icons relative to `ui/campaign ui/skills`, while editor pickers expose the
+ * full asset path. Keep the in-memory/editor representation relative so a save can be loaded again
+ * without accumulating the folder prefix.
+ */
+export const normalizeSkillIconPath = (iconPath?: string) => {
+  if (!iconPath) return "";
+  return iconPath
+    .replaceAll("/", "\\")
+    .replace(/^ui\\campaign ui\\skills\\/i, "")
+    .replace(/^ui\\battle ui\\ability_icons\\/i, "");
+};
+
+export const skillIconAssetPath = (iconPath?: string) => {
+  if (!iconPath) return "";
+  const normalized = iconPath.replaceAll("/", "\\");
+  if (/^ui\\(?:campaign ui\\skills|battle ui\\ability_icons)\\/i.test(normalized)) return normalized;
+  return `ui\\campaign ui\\skills\\${normalizeSkillIconPath(normalized)}`;
+};
 
 export function getNodesToParents(
   nodes: string[],

@@ -5,6 +5,7 @@ import { useLocalizations } from "@/src/localizationContext";
 import Select, { createFilter } from "react-select";
 import WindowedSelect from "react-windowed-select";
 import selectStyle from "@/src/styles/selectStyle";
+import { normalizeSkillIconPath, skillIconAssetPath } from "@/src/skills";
 
 /**
  * The modal body scrolls, so a menu opened low in the panel is clipped by it. Portalling to the body
@@ -91,7 +92,8 @@ const AddNodeModal = memo((props: AddNodeModalProps) => {
   const [row, setRow] = useState(initialRow ?? 0);
   const [column, setColumn] = useState(initialColumn ?? 0);
   const [maxLevel, setMaxLevel] = useState(editingData?.maxLevel ?? 3);
-  const [unlockRank, setUnlockRank] = useState(editingData?.unlockRank ?? 0);
+  // The editor displays the game value (+1), while save/import boundaries use the raw DB value.
+  const [unlockRank, setUnlockRank] = useState(editingData?.unlockRank ?? 1);
   const [faction, setFaction] = useState(editingData?.faction ?? "");
   const [subculture, setSubculture] = useState(editingData?.subculture ?? "");
   const [levelEffects, setLevelEffects] = useState<Record<number, EffectOption[]>>(() => {
@@ -130,9 +132,10 @@ const AddNodeModal = memo((props: AddNodeModalProps) => {
   }, [editingData?.existingSkillKey, editorData]);
   const [selectedIcon, setSelectedIcon] = useState<IconOption | null>(() => {
     if (editingData?.imgPath) {
+      const assetPath = skillIconAssetPath(editingData.imgPath);
       return {
-        value: editingData.imgPath,
-        label: editingData.imgPath.replace("ui\\campaign ui\\skills\\", "").replace(/\.(png|jpg|jpeg)$/i, ""),
+        value: assetPath,
+        label: normalizeSkillIconPath(assetPath).replace(/\.(png|jpg|jpeg)$/i, ""),
       };
     }
     return null;
@@ -198,9 +201,9 @@ const AddNodeModal = memo((props: AddNodeModalProps) => {
         setName(skill.localizedName);
         setDescription(skill.localizedDescription);
         setMaxLevel(skill.maxLevel);
-        setUnlockRank(skill.unlockRank);
-        const iconPath = `ui\\campaign ui\\skills\\${skill.iconPath}`;
-        setSelectedIcon({ value: iconPath, label: skill.iconPath });
+        setUnlockRank(skill.unlockRank + 1);
+        const iconPath = skillIconAssetPath(skill.iconPath);
+        setSelectedIcon({ value: iconPath, label: normalizeSkillIconPath(skill.iconPath) });
       }
     }
   };
@@ -229,8 +232,8 @@ const AddNodeModal = memo((props: AddNodeModalProps) => {
         maxLevel,
         unlockRank,
         existingSkillKey: selectedSkill.value,
-        imgPath: selectedIcon?.value,
-        iconData: selectedIcon ? icons[selectedIcon.value] : undefined,
+        imgPath: selectedIcon ? normalizeSkillIconPath(selectedIcon.value) : undefined,
+        iconData: selectedIcon ? icons[skillIconAssetPath(selectedIcon.value)] : undefined,
         faction,
         subculture,
       });
@@ -250,8 +253,8 @@ const AddNodeModal = memo((props: AddNodeModalProps) => {
         ),
         maxLevel,
         unlockRank,
-        imgPath: selectedIcon?.value,
-        iconData: selectedIcon ? icons[selectedIcon.value] : undefined,
+        imgPath: selectedIcon ? normalizeSkillIconPath(selectedIcon.value) : undefined,
+        iconData: selectedIcon ? icons[skillIconAssetPath(selectedIcon.value)] : undefined,
         faction,
         subculture,
       });

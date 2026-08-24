@@ -1,4 +1,4 @@
-import React, { memo, useCallback, useState } from "react";
+import React, { memo, useCallback, useEffect, useState } from "react";
 import { Handle, NodeToolbar, Position } from "@xyflow/react";
 import { useAppDispatch, useAppSelector } from "../../hooks";
 import { setSkillNodeLevel } from "@/src/appSlice";
@@ -32,6 +32,7 @@ export type SkillData = {
   isEditMode?: boolean;
   editGroupColor?: string;
   existingSkillKey?: string;
+  requiredNumParents?: number;
 };
 const Skill = memo(({ data, selected }: { data: SkillData; selected?: boolean }) => {
   const dispatch = useAppDispatch();
@@ -42,7 +43,15 @@ const Skill = memo(({ data, selected }: { data: SkillData; selected?: boolean })
 
   const [isTooltipOpen, setIsTooltipOpen] = useState(false);
   const resolvedSkillIcon = skillIcon; //require(`../../../dumps/img/${skillIcon}`);
-  const [currentLevel, setCurrentLevel] = useState(0);
+  const reduxLevel = Math.min(skillNodesToLevel[data.nodeId] || 0, data.numLevels);
+  const [currentLevel, setCurrentLevel] = useState(reduxLevel);
+
+  // Skill nodes stay mounted while tab data and global state change. Keep the local click state in
+  // sync so switching tabs, resetting a tree, or changing a level elsewhere cannot leave the icon
+  // and tooltip one or more levels behind Redux.
+  useEffect(() => {
+    setCurrentLevel(reduxLevel);
+  }, [reduxLevel, data.nodeId]);
 
   const localized = useLocalizations();
 
@@ -67,7 +76,7 @@ const Skill = memo(({ data, selected }: { data: SkillData; selected?: boolean })
         console.log(effect);
       }
     },
-    [setCurrentLevel],
+    [data, dispatch],
   );
 
   const onRightClick = useCallback(
@@ -77,7 +86,7 @@ const Skill = memo(({ data, selected }: { data: SkillData; selected?: boolean })
         dispatch(setSkillNodeLevel({ skillNodeId: data.nodeId, level: currentLevel - 1 }));
       }
     },
-    [setCurrentLevel],
+    [data.nodeId, dispatch],
   );
 
   if (!skillsData) return <></>;

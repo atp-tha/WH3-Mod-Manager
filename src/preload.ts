@@ -244,8 +244,8 @@ const api = {
   setCurrentGameNaive: (callback: (event: Electron.IpcRendererEvent, game: SupportedGames) => void) =>
     ipcRenderer.on("setCurrentGameNaive", callback),
 
-  getSkillsForSubtype: (subtype: string, subtypeIndex: number) =>
-    ipcRenderer.send("getSkillsForSubtype", subtype, subtypeIndex),
+  getSkillsForSubtype: (subtype: string, subtypeIndex: number, requestId?: string) =>
+    ipcRenderer.send("getSkillsForSubtype", subtype, subtypeIndex, requestId),
   createNewSkillTree: (subtype: string) => ipcRenderer.send("createNewSkillTree", subtype),
   getSkillsEditorData: (): Promise<SkillsEditorData | undefined> => ipcRenderer.invoke("getSkillsEditorData"),
   saveSkillsPack: (data: any) => ipcRenderer.invoke("saveSkillsPack", data),

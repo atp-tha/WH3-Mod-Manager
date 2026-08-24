@@ -172,8 +172,8 @@ describe("SkillsViewer", () => {
     fireEvent.click(screen.getByRole("button", { name: "select-beta" }));
     fireEvent.click(screen.getByRole("button", { name: "open-gamma" }));
 
-    expect(getSkillsForSubtypeMock).toHaveBeenNthCalledWith(1, "beta", 0);
-    expect(getSkillsForSubtypeMock).toHaveBeenNthCalledWith(2, "gamma", 0);
+    expect(getSkillsForSubtypeMock).toHaveBeenNthCalledWith(1, "beta", 0, expect.any(String));
+    expect(getSkillsForSubtypeMock).toHaveBeenNthCalledWith(2, "gamma", 0, expect.any(String));
 
     act(() => {
       store.dispatch(setSkillsData(createSkillsData("beta")));
@@ -189,5 +189,13 @@ describe("SkillsViewer", () => {
     expect(screen.getByTestId("skills-view")).toHaveTextContent("view-gamma-0");
     expect(screen.getByText("beta")).toBeInTheDocument();
     expect(screen.getByText("gamma")).toBeInTheDocument();
+
+    // The beta response can still arrive after gamma has been accepted. It must not
+    // overwrite the newly opened tab with the older selection.
+    act(() => {
+      store.dispatch(setSkillsData(createSkillsData("beta")));
+    });
+
+    expect(screen.getByTestId("skills-view")).toHaveTextContent("view-gamma-0");
   });
 });

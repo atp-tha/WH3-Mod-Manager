@@ -755,6 +755,8 @@ declare global {
   }
 
   interface SkillsData {
+    /** Renderer request token used to discard out-of-order subtype responses. */
+    requestId?: string;
     // subtypeToSkills: Record<string, Skill[]>;
     currentSubtype: string;
     currentSubtypeIndex: number;
@@ -777,6 +779,8 @@ declare global {
         child: string;
         childLinkPosition?: string;
         parentLinkPosition?: string;
+        childLinkPositionOffset?: string;
+        parentLinkPositionOffset?: string;
         linkType?: "REQUIRED" | "SUBSET_REQUIRED";
       }[]
     >;
@@ -841,11 +845,19 @@ declare global {
       group?: string;
       requiredNumParents: number;
       existingSkillKey?: string;
+      /** Preserve the source node's visibility when exporting an edited/full tree. */
+      visibleInUI?: boolean;
+      /** Clone an existing skill row when the editor changed its metadata. */
+      cloneSkill?: boolean;
     }[];
     edges: {
       source: string;
       target: string;
       linkType: "REQUIRED" | "SUBSET_REQUIRED";
+      parentLinkPosition?: string;
+      childLinkPosition?: string;
+      parentLinkPositionOffset?: string;
+      childLinkPositionOffset?: string;
     }[];
     skillLocks: {
       lockedNodeId: string;
@@ -872,16 +884,26 @@ declare global {
       faction: string;
       subculture: string;
       requiredNumParents: number;
+      visibleInUI?: boolean;
     }[];
     replacedNodes: {
       originalNodeKey: string;
       newNodeKey: string;
       characterSkillKey: string;
+      /** Set when this replacement carries a cloned/edited character skill row. */
+      newSkillKey?: string;
+      label?: string;
+      description?: string;
+      imgPath?: string;
+      unlockRank?: number;
+      effects?: Effect[];
+      maxLevel?: number;
       tier: number;
       indent: number;
       faction: string;
       subculture: string;
       requiredNumParents: number;
+      visibleInUI?: boolean;
     }[];
     newNodes: {
       newNodeKey: string;
@@ -898,12 +920,17 @@ declare global {
       unlockRank: number;
       effects: Effect[];
       maxLevel: number;
+      visibleInUI?: boolean;
     }[];
     deletedNodeKeys: string[];
     edges: {
       parentKey: string;
       childKey: string;
       linkType: "REQUIRED" | "SUBSET_REQUIRED";
+      parentLinkPosition?: string;
+      childLinkPosition?: string;
+      parentLinkPositionOffset?: string;
+      childLinkPositionOffset?: string;
     }[];
     skillLocks: {
       lockedNodeKey: string;

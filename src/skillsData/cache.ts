@@ -5,7 +5,7 @@ import * as nodePath from "path";
 import appData from "../appData";
 import { readFromExistingPack } from "../packFileSerializer";
 import { Pack, PackedFile } from "../packFileTypes";
-import { SkillAndIcons } from "../skills";
+import { normalizeSkillIconPath, SkillAndIcons } from "../skills";
 import { gameToPackWithDBTablesName, SupportedGames } from "../supportedGames";
 import { collator } from "../utility/packFileSorting";
 import { getPackedFileMimeType } from "../utility/packFileViewing";
@@ -38,8 +38,13 @@ export const getSkillAndEffectIconPaths = (
 ) => {
   const skillIconPathsSet = new Set(
     skills
-      .map((skill) => `ui\\campaign ui\\skills\\${skill.iconPath}`)
-      .concat(skills.map((skill) => `ui\\battle ui\\ability_icons\\${skill.iconPath}`)),
+      .map((skill) => normalizeSkillIconPath(skill.iconPath))
+      .map((iconPath) => `ui\\campaign ui\\skills\\${iconPath}`)
+      .concat(
+        skills
+          .map((skill) => normalizeSkillIconPath(skill.iconPath))
+          .map((iconPath) => `ui\\battle ui\\ability_icons\\${iconPath}`),
+      ),
   );
 
   const effectIcons = new Set<string>();
@@ -81,8 +86,9 @@ export const pickIconsForSkills = (
   };
   for (const skill of skills) {
     if (skill.img) {
-      take(`ui\\campaign ui\\skills\\${skill.img}`);
-      take(`ui\\battle ui\\ability_icons\\${skill.img}`);
+      const iconPath = normalizeSkillIconPath(skill.img);
+      take(`ui\\campaign ui\\skills\\${iconPath}`);
+      take(`ui\\battle ui\\ability_icons\\${iconPath}`);
     }
     for (const effect of skill.effects) {
       if (effect.icon) take(`ui\\campaign ui\\effect_bundles\\${effect.icon}`);
