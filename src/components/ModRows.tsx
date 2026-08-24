@@ -360,13 +360,17 @@ const ModRows = memo((props: ModRowsProps) => {
 
   const onEnabledRightClick = useCallback(() => {
     // The header action applies to the whole preset, so its direction must not depend on a search
-    // filter that may only show one side of the preset.
-    if (currentPresetMods.some((mod) => mod.isEnabled)) {
+    // filter that may only show one side of the preset. Always-enabled mods are not a useful signal:
+    // disableAllMods deliberately leaves them on, so direction is based on ordinary enabled mods only.
+    const hasEnabledOrdinaryMod = currentPresetMods.some(
+      (mod) => mod.isEnabled && !alwaysEnabledModNames.has(mod.name),
+    );
+    if (hasEnabledOrdinaryMod) {
       dispatch(disableAllMods());
     } else {
       dispatch(enableAll());
     }
-  }, [currentPresetMods, dispatch]);
+  }, [alwaysEnabledModNames, currentPresetMods, dispatch]);
 
   const onOrderRightClick = useCallback(() => {
     dispatch(resetModLoadOrderAll());
@@ -902,7 +906,10 @@ const ModRows = memo((props: ModRowsProps) => {
             <div className="flex flex-col min-w-0">
               <div
                 className="flex items-center justify-between px-2 pb-1 text-sm text-slate-300 cursor-default select-none"
-                onContextMenu={onEnabledRightClick}
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  onEnabledRightClick();
+                }}
                 title={localized.enableOrDisableAll}
                 id="disabledModsPaneCaption"
               >
@@ -961,6 +968,7 @@ const ModRows = memo((props: ModRowsProps) => {
                   ghostClass={getModListGhostClass("compact", { ...compactGridOptions, showConfigColumn: false })}
                   loadOrderIndexByModName={disabledModsView?.loadOrderIndexByModName ?? loadOrderIndexByModName}
                   isLoadOrderPlacementMode={false}
+                  uniqueModIds={isGroupedByCategory}
                 />
               </div>
             </div>

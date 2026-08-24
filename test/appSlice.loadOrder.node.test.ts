@@ -127,6 +127,19 @@ describe("load-order reducer behavior", () => {
     expect(state.currentPreset.mods.find((mod) => mod.name === "automatic.pack")?.loadOrder).toBeUndefined();
   });
 
+  it("toggles the requested mod when workshop IDs are duplicated", () => {
+    const firstLocal = { ...createMod("first-local.pack", false), workshopId: "" };
+    const secondLocal = { ...createMod("second-local.pack", false), workshopId: "" };
+
+    const state = appReducer(
+      { ...initialState, currentPreset: { name: "", mods: [firstLocal, secondLocal] } },
+      toggleMod(secondLocal),
+    );
+
+    expect(state.currentPreset.mods.find((mod) => mod.name === firstLocal.name)?.isEnabled).toBe(false);
+    expect(state.currentPreset.mods.find((mod) => mod.name === secondLocal.name)?.isEnabled).toBe(true);
+  });
+
   it("does not partially apply an interrupted shared-mod import", () => {
     const alpha = createMod("alpha.pack", true, 0);
     const beta = createMod("beta.pack", false);

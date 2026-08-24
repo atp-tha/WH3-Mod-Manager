@@ -2,7 +2,7 @@ import { GameFolderPaths } from "./appData";
 import { PackCollisions } from "./packFileTypes";
 import { createSlice, PayloadAction } from "@reduxjs/toolkit";
 import hash from "object-hash";
-import { adjustDuplicates, findAlwaysEnabledMods, findMod } from "./modsHelpers";
+import { adjustDuplicates, findAlwaysEnabledMods, findMod, isModAlwaysEnabled } from "./modsHelpers";
 import { SortingType } from "./utility/modRowSorting";
 import {
   compareModNames,
@@ -27,6 +27,7 @@ import { isWorkshopMod, resolveModsBySourcePriority } from "./modSources";
 import { sharedModMatchesInstalledMod } from "./sharedModList";
 import { isHideableMainWindowTab } from "./utility/frontend/mainWindowTabs";
 import { DEFAULT_DB_TABLE_ROOT } from "./utility/packFileHelpers";
+import { uncategorizedCategoryName } from "./utility/categoryNames";
 
 const packFilePathKey = (path: string) => path.replaceAll("/", "\\").toLowerCase();
 
@@ -70,6 +71,7 @@ const ensureValidCurrentTab = (state: AppState) => {
 
 const addCategoryByPayload = (state: AppState, payload: AddCategoryPayload) => {
   const { mods, category } = payload;
+  if (category === uncategorizedCategoryName) return;
 
   for (const mod of mods) {
     const modInPreset = state.currentPreset.mods.find((iterMod) => iterMod.path === mod.path);
@@ -97,10 +99,25 @@ const removeCategoryByPayload = (state: AppState, payload: RemoveCategoryPayload
 
   if (state.currentPreset.mods.every((mod) => !mod.categories || !mod.categories.includes(category)))
     state.categories = state.categories.filter((iterCategory) => iterCategory != category);
+
+  const cachedModUserData = state.dataFromConfig?.modUserData;
+  if (cachedModUserData) {
+    Object.values(cachedModUserData).forEach((userData) => {
+      if (userData.categories)
+        userData.categories = userData.categories.filter((currentCategory) => currentCategory !== category);
+    });
+  }
 };
 
 const renameCategoryByPayload = (state: AppState, payload: RenameCategoryPayload) => {
   const { oldCategory, newCategory } = payload;
+  if (
+    oldCategory === newCategory ||
+    newCategory === uncategorizedCategoryName ||
+    state.categories.includes(newCategory)
+  ) {
+    return;
+  }
 
   // Update category name in all mods
   for (const mod of state.currentPreset.mods) {
@@ -113,6 +130,22 @@ const renameCategoryByPayload = (state: AppState, payload: RenameCategoryPayload
   const categoryIndex = state.categories.indexOf(oldCategory);
   if (categoryIndex !== -1) {
     state.categories[categoryIndex] = newCategory;
+  }
+
+  if (state.categoryColors?.[oldCategory] !== undefined) {
+    state.categoryColors[newCategory] = state.categoryColors[oldCategory];
+    delete state.categoryColors[oldCategory];
+  }
+
+  const cachedModUserData = state.dataFromConfig?.modUserData;
+  if (cachedModUserData) {
+    Object.values(cachedModUserData).forEach((userData) => {
+      if (userData.categories?.includes(oldCategory)) {
+        userData.categories = userData.categories.map((category) =>
+          category === oldCategory ? newCategory : category,
+        );
+      }
+    });
   }
 };
 
@@ -636,8 +669,12 @@ const appSlice = createSlice({
     },
     toggleMod: (state: AppState, action: PayloadAction<Mod>) => {
       const inputMod = action.payload;
-      const mod = state.currentPreset.mods.find((mod) => mod.workshopId == inputMod.workshopId);
+      const mod = state.currentPreset.mods.find((iterMod) => iterMod.path == inputMod.path);
       if (mod) {
+        if (isModAlwaysEnabled(mod, state.alwaysEnabledModNames)) {
+          mod.isEnabled = true;
+          return;
+        }
         mod.isEnabled = !mod.isEnabled;
         if (mod.isEnabled) sanitizeEnabledModLoadOrders(state.currentPreset.mods);
       }
@@ -646,6 +683,10 @@ const appSlice = createSlice({
       const { mod, isEnabled } = action.payload;
       const presetMod = state.currentPreset.mods.find((iterMod) => iterMod.path == mod.path);
       if (presetMod) {
+        if (isModAlwaysEnabled(presetMod, state.alwaysEnabledModNames)) {
+          presetMod.isEnabled = true;
+          return;
+        }
         presetMod.isEnabled = isEnabled;
         if (isEnabled) sanitizeEnabledModLoadOrders(state.currentPreset.mods);
       }
@@ -654,7 +695,8 @@ const appSlice = createSlice({
       const enablePayloads = action.payload;
       for (const { mod, isEnabled } of enablePayloads) {
         const presetMod = state.currentPreset.mods.find((iterMod) => iterMod.path == mod.path);
-        if (presetMod) presetMod.isEnabled = isEnabled;
+        if (!presetMod) continue;
+        presetMod.isEnabled = isModAlwaysEnabled(presetMod, state.alwaysEnabledModNames) ? true : isEnabled;
       }
       if (enablePayloads.some(({ isEnabled }) => isEnabled)) {
         sanitizeEnabledModLoadOrders(state.currentPreset.mods);
@@ -1696,6 +1738,8 @@ const appSlice = createSlice({
     },
     selectCategory: (state: AppState, action: PayloadAction<CategorySelectionPayload>) => {
       const { mods, category, selectOperation } = action.payload;
+
+      if (category === uncategorizedCategoryName) return;
 
       console.log("selectOperation is", selectOperation);
       if (selectOperation == "addition") {

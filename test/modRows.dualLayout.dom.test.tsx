@@ -151,6 +151,21 @@ describe("dual mod list layout", () => {
     expect(testStore.getState().app.currentPreset.mods.every((mod) => !mod.isEnabled)).toBe(true);
   });
 
+  it("switches bulk-toggle back to enabling after leaving only always-enabled mods on", async () => {
+    const { testStore } = renderDualLayout(
+      [createMod("always", true, 0), createMod("ordinary", true, 1)],
+      { isDualModListLayoutEnabled: false, alwaysEnabledModNames: ["always.pack"] },
+    );
+
+    await waitFor(() => expect(document.getElementById("enabledHeader")).toBeInTheDocument());
+    const enabledHeader = document.getElementById("enabledHeader") as HTMLElement;
+    fireEvent.contextMenu(enabledHeader);
+    expect(testStore.getState().app.currentPreset.mods.map((mod) => mod.isEnabled)).toEqual([true, false]);
+
+    fireEvent.contextMenu(enabledHeader);
+    expect(testStore.getState().app.currentPreset.mods.map((mod) => mod.isEnabled)).toEqual([true, true]);
+  });
+
   it("stacks the human name, author and pack name in one cell", async () => {
     renderDualLayout([createMod("alpha", false)]);
 
@@ -465,12 +480,19 @@ describe("categories view in the dual layout", () => {
     });
     expect(getLeftPaneLabels(left)).toEqual([
       "Uncategorized1/1",
-      "gamma.pack",
+      "gamma.pack-1",
       "Graphics1/1",
-      "alpha.pack",
+      "alpha.pack-3",
       "Units1/1",
-      "alpha.pack",
+      "alpha.pack-5",
     ]);
+
+    const alphaRows = Array.from(left.querySelectorAll<HTMLElement>("[id^='alpha.pack-']"));
+    expect(alphaRows).toHaveLength(2);
+    expect(new Set(alphaRows.map((row) => row.id)).size).toBe(2);
+    const alphaCheckboxes = alphaRows.map((row) => row.querySelector<HTMLInputElement>('input[type="checkbox"]'));
+    expect(alphaCheckboxes.every((input) => input)).toBe(true);
+    expect(new Set(alphaCheckboxes.map((input) => input?.id)).size).toBe(2);
   });
 
   it("keeps the heading of a category whose mods are all enabled, with nothing left to list", async () => {
@@ -501,7 +523,7 @@ describe("categories view in the dual layout", () => {
     await act(async () => fireEvent.click(heading));
 
     await waitFor(() => expect(within(left).queryByText("alpha human name")).toBeInTheDocument());
-    expect(getLeftPaneLabels(left)).toEqual(["Units2/2", "alpha.pack", "beta.pack"]);
+    expect(getLeftPaneLabels(left)).toEqual(["Units2/2", "alpha.pack-1", "beta.pack-2"]);
     expect(heading).toHaveAttribute("aria-expanded", "true");
 
     await act(async () => fireEvent.click(heading));
@@ -529,7 +551,7 @@ describe("categories view in the dual layout", () => {
 
     await act(async () => fireEvent.click(toggle));
     await waitFor(() => expect(toggle).toHaveAttribute("aria-pressed", "true"));
-    expect(getLeftPaneLabels(left)).toEqual(["Graphics1/1", "Units1/1", "alpha.pack"]);
+    expect(getLeftPaneLabels(left)).toEqual(["Graphics1/1", "Units1/1", "alpha.pack-2"]);
     expect(getHeading(left, "Units")).toHaveAttribute("aria-expanded", "true");
   });
 
@@ -594,7 +616,7 @@ describe("categories view in the dual layout", () => {
     // Category mode starts collapsed; the first context-menu action expands every category.
     await act(async () => fireEvent.contextMenu(toggle));
     await waitFor(() =>
-      expect(getLeftPaneLabels(left)).toEqual(["Graphics1/1", "gamma.pack", "Units1/1", "alpha.pack"]),
+      expect(getLeftPaneLabels(left)).toEqual(["Graphics1/1", "gamma.pack-1", "Units1/1", "alpha.pack-3"]),
     );
 
     await act(async () => fireEvent.contextMenu(toggle));
@@ -614,7 +636,7 @@ describe("categories view in the dual layout", () => {
     expect(getLeftPaneLabels(left)).toEqual(["Units1/1"]);
 
     await act(async () => fireEvent.click(getHeading(left, "Units")));
-    expect(getLeftPaneLabels(left)).toEqual(["Units1/1", "alpha.pack"]);
+    expect(getLeftPaneLabels(left)).toEqual(["Units1/1", "alpha.pack-1"]);
   });
 });
 
@@ -722,6 +744,18 @@ describe("sorting the dual layout's panes", () => {
 
     // And round again.
     expect(await nameSortAfterRightClick()).toBe(SortingType.HumanName);
+  });
+
+  it("prevents the native context menu for header and row reset actions", async () => {
+    renderDualLayout([createMod("alpha", false), createMod("beta", true, 0)]);
+
+    const { right } = getPanes();
+    await waitFor(() => expect(within(right).queryByText("beta human name")).toBeInTheDocument());
+
+    expect(fireEvent.contextMenu(getNameHeader(right))).toBe(false);
+    const orderAnchor = right.querySelector<HTMLElement>("[id^='load-order-row-anchor-']");
+    expect(orderAnchor).toBeInTheDocument();
+    expect(fireEvent.contextMenu(orderAnchor as HTMLElement)).toBe(false);
   });
 
   it("skips the data mods sort in a list that has no data mods", async () => {

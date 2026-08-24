@@ -49,6 +49,8 @@ type ModRowProps = {
   showConfigColumn: boolean;
   isLast: boolean;
   rowIndex: number;
+  /** Suffix for DOM ids when a category view renders the same mod more than once. */
+  domIdSuffix?: string;
   activeLoadOrderPosition: number;
   isLoadOrderPlacementMode: boolean;
   isLoadOrderPlacementSource: boolean;
@@ -220,6 +222,7 @@ const ModRow = memo(
     hasPackDataOverwrite,
     isLast,
     rowIndex,
+    domIdSuffix,
     activeLoadOrderPosition,
     isLoadOrderPlacementMode,
     isLoadOrderPlacementSource,
@@ -250,10 +253,12 @@ const ModRow = memo(
     );
 
     const isCompact = layout === "compact";
-    // Local/data packs do not have Workshop IDs. Using that empty value made every such row share
-    // one label target, so clicking any row toggled whichever checkbox happened to be first in the DOM.
+    const rowId = domIdSuffix ? `${mod.name}-${domIdSuffix}` : mod.name;
+    const checkboxIdSuffix = domIdSuffix ? `-${domIdSuffix}` : "";
+    // The checkbox ID is based on a stable fallback rather than assuming every row has a Workshop ID;
+    // grouped category views add a suffix because they can render the same mod more than once.
     const checkboxIdentity = mod.workshopId || mod.path || mod.name;
-    const checkboxId = `mod-enabled-${encodeURIComponent(checkboxIdentity)}`;
+    const checkboxId = `mod-enabled-${encodeURIComponent(checkboxIdentity)}${checkboxIdSuffix}`;
 
     /*
      * A data mod with no workshop counterpart has neither a title nor an author, so the pack name is the
@@ -276,7 +281,7 @@ const ModRow = memo(
       <button
         type="button"
         className={`${isLoadOrderPlacementSource ? "" : "hidden"} absolute left-0 self-center cursor-pointer first:p-0 z-10`}
-        id={`load-order-icon-${mod.name}`}
+        id={`load-order-icon-${rowId}`}
         title={localization.setLoadOrderMode || "Set load order"}
         onClick={(event) => {
           event.preventDefault();
@@ -311,7 +316,7 @@ const ModRow = memo(
         key={mod.name}
         onMouseEnter={(e) => onRowHoverStart(e)}
         onMouseLeave={(e) => onRowHoverEnd(e)}
-        id={mod.name}
+        id={rowId}
         data-load-order={mod.loadOrder}
         style={style}
         ref={registerChild}
@@ -326,9 +331,12 @@ const ModRow = memo(
              * mod between the two lists.
              */}
             <div
-              id={`load-order-row-anchor-${mod.name}`}
+              id={`load-order-row-anchor-${rowId}`}
               className="relative flex justify-center items-center"
-              onContextMenu={() => onRemoveModOrder(mod)}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                onRemoveModOrder(mod);
+              }}
             >
               {loadOrderNumber}
               {canReorder && reorderButton}
@@ -416,9 +424,12 @@ const ModRow = memo(
         )) || (
           <>
             <div
-              id={`load-order-row-anchor-${mod.name}`}
+              id={`load-order-row-anchor-${rowId}`}
               className="flex justify-center items-center"
-              onContextMenu={() => onRemoveModOrder(mod)}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                onRemoveModOrder(mod);
+              }}
             >
               {loadOrderNumber}
             </div>

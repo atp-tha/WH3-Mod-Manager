@@ -85,6 +85,8 @@ type ModListPaneProps = {
   onCategoryRightClick?: (category: string) => void;
   /** The colours the categories were given in the categories tab, so the headings match them. */
   categoryColors?: Record<string, string>;
+  /** Category grouping can render one mod more than once, so each rendered copy needs distinct DOM ids. */
+  uniqueModIds?: boolean;
 };
 
 /**
@@ -125,6 +127,7 @@ const ModListPane = memo(
     onCategoryToggled,
     onCategoryRightClick,
     categoryColors,
+    uniqueModIds,
   }: ModListPaneProps) => {
     const isCompact = layout === "compact";
     const listWrapperRef = useRef<HTMLDivElement | null>(null);
@@ -250,6 +253,7 @@ const ModListPane = memo(
                 layout,
                 showConfigColumn,
                 isLast: rowData.length == index + 1,
+                domIdSuffix: uniqueModIds ? String(index) : undefined,
                 isAlwaysEnabled: row.isAlwaysEnabled,
                 isEnabledInMergedMod: row.isEnabledInMergedMod,
                 areThumbnailsEnabled,

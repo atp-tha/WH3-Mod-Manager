@@ -105,7 +105,10 @@ const ModListHeader = memo(
         id={isInsidePane ? undefined : "sortHeader"}
         className={`flex place-items-center w-full justify-center z-[11] rounded-tl-xl ${headerClass}`}
         onClick={(event) => setSortingType(SortingType.Ordered, event.shiftKey)}
-        onContextMenu={onOrderRightClick}
+        onContextMenu={(event) => {
+          event.preventDefault();
+          onOrderRightClick();
+        }}
         title={columnTitle(
           localized.order,
           localized.priorityTooltipOne,
@@ -134,7 +137,10 @@ const ModListHeader = memo(
         className={`flex place-items-center ${isCompact ? "justify-center " : "pl-1 grid-area-autohide "}${headerClass}`}
         // Right clicking swaps the date, left clicking reverses whichever one the column is on.
         onClick={(event) => setSortingType(timeSortingField ?? SortingType.LastUpdated, event.shiftKey)}
-        onContextMenu={(event) => setSortingType(modRowSorting.getNextTimeSortingType(sortingType), event.shiftKey)}
+        onContextMenu={(event) => {
+          event.preventDefault();
+          setSortingType(modRowSorting.getNextTimeSortingType(sortingType), event.shiftKey);
+        }}
         title={columnTitle(timeColumnName, ...timeCycleLines)}
       >
         {timeSortingField !== undefined && modRowSorting.getSortingArrow(sortingType)}
@@ -186,9 +192,10 @@ const ModListHeader = memo(
           <div
             className={`flex place-items-center justify-center min-w-0 ${headerClass}`}
             onClick={(event) => setSortingType(nameSortingField ?? SortingType.HumanName, event.shiftKey)}
-            onContextMenu={(event) =>
-              setSortingType(modRowSorting.getNextNameSortingType(sortingType, hasDataMods), event.shiftKey)
-            }
+            onContextMenu={(event) => {
+              event.preventDefault();
+              setSortingType(modRowSorting.getNextNameSortingType(sortingType, hasDataMods), event.shiftKey);
+            }}
             title={columnTitle(
               nameSortingLabel ?? localized.name,
               ...sortCycleLines(
@@ -220,7 +227,10 @@ const ModListHeader = memo(
         <div
           className={`flex place-items-center w-full justify-center z-10 ${headerClass}`}
           onClick={(event) => setSortingType(SortingType.IsEnabled, event.shiftKey)}
-          onContextMenu={onEnabledRightClick}
+          onContextMenu={(event) => {
+            event.preventDefault();
+            onEnabledRightClick();
+          }}
           id="enabledHeader"
           title={columnTitle(localized.enabled, localized.enableOrDisableAll)}
         >
@@ -242,7 +252,10 @@ const ModListHeader = memo(
         <div
           className={`flex grid-area-packName place-items-center pl-1 ${headerClass}`}
           onClick={(event) => setSortingType(SortingType.PackName, event.shiftKey)}
-          onContextMenu={(event) => setSortingType(SortingType.IsDataPack, event.shiftKey)}
+          onContextMenu={(event) => {
+            event.preventDefault();
+            setSortingType(SortingType.IsDataPack, event.shiftKey);
+          }}
           title={columnTitle(localized.pack, localized.sortByDataPacks)}
         >
           {(modRowSorting.isPackNameSort(sortingType) || modRowSorting.isDataPackSort(sortingType)) &&
