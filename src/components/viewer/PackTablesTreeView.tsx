@@ -24,6 +24,7 @@ import { makeSelectCurrentPackData, makeSelectCurrentPackUnsavedFiles } from "./
 import type { AmendedSchemaField, DBVersion, PackedFile } from "../../packFileTypes";
 import { isOpenablePackedFilePath } from "../../utility/packFileViewing";
 import CopyIntoSubmenu from "./CopyIntoSubmenu";
+import ContextMenuSubmenu from "./ContextMenuSubmenu";
 import PackFileRenameModal from "./PackFileRenameModal";
 import type { ExistingPackFilePaths } from "../../utility/packImportPlan";
 import type { PackFileRenameEntry } from "../../utility/packFileRenamePlan";
@@ -1481,6 +1482,7 @@ const PackTablesTreeView = React.memo(
     const showCopyIntoInContext = Boolean(
       contextMenu?.target && contextMenu.target.kind !== "folder" && props.onCopyInto,
     );
+    const showAddInContext = showAddNewFlowInContext || showAddNewTableInContext;
 
     return (
       <div
@@ -1546,8 +1548,9 @@ const PackTablesTreeView = React.memo(
         {contextMenu && (
           <div
             ref={contextMenuRef}
-            className="fixed bg-gray-800 border border-gray-600 rounded shadow-lg z-50 min-w-[150px]"
+            className="fixed w-max min-w-[150px] overflow-visible bg-gray-800 border border-gray-600 rounded shadow-lg z-50"
             style={{ top: contextMenu.y, left: contextMenu.x }}
+            data-testid="pack-tables-context-menu"
           >
             {showCopyIntoInContext && contextMenu.target && (
               <CopyIntoSubmenu
@@ -1557,85 +1560,106 @@ const PackTablesTreeView = React.memo(
                 onSelectTarget={handleCopyIntoPack}
               />
             )}
-            {showAddNewFlowInContext && (
-              <button
-                onClick={handleAddNewFlow}
-                className="w-full text-left px-4 py-2 hover:bg-gray-700 text-white text-sm"
-              >
-                {localized.viewerAddNewFlow || "Add New Flow"}
-              </button>
+            {showAddInContext && (
+              <ContextMenuSubmenu label={localized.add || "Add"}>
+                {showAddNewTableInContext && (
+                  <button
+                    type="button"
+                    onClick={handleAddNewTable}
+                    disabled={isLoadingNewTableOptions}
+                    className="w-full text-left px-3 py-2 hover:bg-gray-700 text-white text-sm disabled:opacity-50"
+                  >
+                    {isLoadingNewTableOptions
+                      ? localized.viewerLoadingTables || "Loading Tables..."
+                      : localized.viewerAddNewTable || "Add New Table"}
+                  </button>
+                )}
+                {showAddNewFlowInContext && (
+                  <button
+                    type="button"
+                    onClick={handleAddNewFlow}
+                    className="w-full text-left px-3 py-2 hover:bg-gray-700 text-white text-sm"
+                  >
+                    {localized.viewerAddNewFlow || "Add New Flow"}
+                  </button>
+                )}
+              </ContextMenuSubmenu>
             )}
-            {showAddNewTableInContext && (
-              <button
-                onClick={handleAddNewTable}
-                disabled={isLoadingNewTableOptions}
-                className="w-full text-left px-4 py-2 hover:bg-gray-700 text-white text-sm disabled:opacity-50"
-              >
-                {isLoadingNewTableOptions
-                  ? localized.viewerLoadingTables || "Loading Tables..."
-                  : localized.viewerAddNewTable || "Add New Table"}
-              </button>
-            )}
-            {showImportInContext && (
-              <>
-                <button
-                  onClick={() => void handleImport("file")}
-                  disabled={isImporting}
-                  className="w-full text-left px-4 py-2 hover:bg-gray-700 text-white text-sm disabled:opacity-50"
-                >
-                  {isImporting ? localized.viewerImporting || "Importing…" : importLabel("file")}
-                </button>
-                <button
-                  onClick={() => void handleImport("folder")}
-                  disabled={isImporting}
-                  className="w-full text-left px-4 py-2 hover:bg-gray-700 text-white text-sm disabled:opacity-50"
-                >
-                  {isImporting ? localized.viewerImporting || "Importing…" : importLabel("folder")}
-                </button>
-              </>
+            {showAddInContext && showPackFileActionsInContext && (
+              <div role="separator" className="my-1 border-t border-gray-700" />
             )}
             {showPackFileActionsInContext && (
               <>
                 <button
-                  onClick={handleDeleteRequest}
-                  className="w-full text-left px-4 py-2 hover:bg-gray-700 text-white text-sm"
-                >
-                  {deleteLabel}
-                </button>
-                <button
+                  type="button"
                   onClick={() => handleRenameRequest("rename")}
                   className="w-full text-left px-4 py-2 hover:bg-gray-700 text-white text-sm"
                 >
                   {renameLabel}
                 </button>
                 <button
+                  type="button"
                   onClick={() => handleRenameRequest("move")}
                   className="w-full text-left px-4 py-2 hover:bg-gray-700 text-white text-sm"
                 >
                   {moveLabel}
                 </button>
+                <button
+                  type="button"
+                  onClick={handleDeleteRequest}
+                  className="w-full text-left px-4 py-2 hover:bg-gray-700 text-white text-sm"
+                >
+                  {deleteLabel}
+                </button>
               </>
             )}
-            {selectedExportPaths.length > 0 && (
-              <button
-                onClick={() => void handleExportSelection()}
-                disabled={isExportingSelection || isExportingWholePack}
-                className="w-full text-left px-4 py-2 hover:bg-gray-700 text-white text-sm disabled:opacity-50"
-              >
-                {isExportingSelection
-                  ? localized.viewerExporting || "Exporting…"
-                  : localized.viewerExportSelection || "Export Selection…"}
-              </button>
+            {showPackFileActionsInContext && showImportInContext && (
+              <div role="separator" className="my-1 border-t border-gray-700" />
             )}
-            <button
-              onClick={() => void handleExportWholePack()}
-              disabled={isExportingSelection || isExportingWholePack}
-              className="w-full text-left px-4 py-2 hover:bg-gray-700 text-white text-sm disabled:opacity-50"
-            >
-              {isExportingWholePack
-                ? localized.viewerExporting || "Exporting…"
-                : localized.viewerExportWholePack || "Export Whole Pack…"}
-            </button>
+            {showImportInContext && (
+              <ContextMenuSubmenu label={localized.viewerImport || "Import"}>
+                <button
+                  type="button"
+                  onClick={() => void handleImport("file")}
+                  disabled={isImporting}
+                  className="w-full text-left px-3 py-2 hover:bg-gray-700 text-white text-sm disabled:opacity-50"
+                >
+                  {isImporting ? localized.viewerImporting || "Importing…" : importLabel("file")}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleImport("folder")}
+                  disabled={isImporting}
+                  className="w-full text-left px-3 py-2 hover:bg-gray-700 text-white text-sm disabled:opacity-50"
+                >
+                  {isImporting ? localized.viewerImporting || "Importing…" : importLabel("folder")}
+                </button>
+              </ContextMenuSubmenu>
+            )}
+            <ContextMenuSubmenu label={localized.export || "Export"}>
+              {selectedExportPaths.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => void handleExportSelection()}
+                  disabled={isExportingSelection || isExportingWholePack}
+                  className="w-full text-left px-3 py-2 hover:bg-gray-700 text-white text-sm disabled:opacity-50"
+                >
+                  {isExportingSelection
+                    ? localized.viewerExporting || "Exporting…"
+                    : localized.viewerExportSelection || "Export Selection…"}
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => void handleExportWholePack()}
+                disabled={isExportingSelection || isExportingWholePack}
+                className="w-full text-left px-3 py-2 hover:bg-gray-700 text-white text-sm disabled:opacity-50"
+              >
+                {isExportingWholePack
+                  ? localized.viewerExporting || "Exporting…"
+                  : localized.viewerExportWholePack || "Export Whole Pack…"}
+              </button>
+            </ContextMenuSubmenu>
           </div>
         )}
 

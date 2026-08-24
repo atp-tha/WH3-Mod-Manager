@@ -109,6 +109,9 @@ describe("pack table tree interactions", () => {
 
     fireEvent.contextMenu(tree);
 
+    expect(screen.getByRole("button", { name: "Add", exact: true })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Add New Table", exact: true })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Add", exact: true }));
     expect(screen.getByRole("button", { name: "Add New Table", exact: true })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Add New Flow", exact: true })).toBeInTheDocument();
   });
@@ -121,6 +124,7 @@ describe("pack table tree interactions", () => {
 
     fireEvent.contextMenu(tree);
 
+    fireEvent.click(screen.getByRole("button", { name: "Add", exact: true }));
     expect(screen.getByRole("button", { name: "Add New Table", exact: true })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Add New Flow", exact: true })).toBeInTheDocument();
   });
@@ -133,6 +137,7 @@ describe("pack table tree interactions", () => {
 
     fireEvent.contextMenu(tree);
 
+    fireEvent.click(screen.getByRole("button", { name: "Add", exact: true }));
     expect(screen.getByRole("button", { name: "Add New Table", exact: true })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Add New Flow", exact: true })).toBeInTheDocument();
   });
@@ -148,6 +153,7 @@ describe("pack table tree interactions", () => {
 
     const tree = renderPackTree([], "files", { onOpenFlowFile, showDialog });
     fireEvent.contextMenu(tree);
+    fireEvent.click(screen.getByRole("button", { name: "Add", exact: true }));
     fireEvent.click(screen.getByRole("button", { name: "Add New Flow", exact: true }));
     fireEvent.change(screen.getByPlaceholderText("Enter flow name..."), { target: { value: "new_flow.json" } });
     fireEvent.click(screen.getByRole("button", { name: "Create", exact: true }));
@@ -159,6 +165,7 @@ describe("pack table tree interactions", () => {
     });
 
     fireEvent.contextMenu(tree);
+    fireEvent.click(screen.getByRole("button", { name: "Add", exact: true }));
     fireEvent.click(screen.getByRole("button", { name: "Add New Flow", exact: true }));
     fireEvent.change(screen.getByPlaceholderText("Enter flow name..."), { target: { value: "broken.json" } });
     fireEvent.click(screen.getByRole("button", { name: "Create", exact: true }));
@@ -249,6 +256,56 @@ describe("pack table tree interactions", () => {
     fireEvent.change(reopenedAllModsPicker, { target: { value: "K:\\mods\\catalog.pack" } });
     expect(copyInto).toHaveBeenLastCalledWith(expect.anything(), "K:\\mods\\catalog.pack", true);
 
+    expect(tree).toBeInTheDocument();
+  });
+
+  it("keeps the tree context menu content-sized so Copy into can open beside it", () => {
+    const tree = renderPackTree(["db\\units_tables\\data__"], "db", {
+      otherOpenPacks: [{ packPath: "K:\\mods\\active.pack", label: "Active" }],
+      onCopyInto: vi.fn(),
+    });
+
+    fireEvent.contextMenu(screen.getByText("data__"));
+
+    expect(screen.getByTestId("pack-tables-context-menu")).toHaveClass("w-max");
+    expect(screen.getByRole("button", { name: "Copy into", exact: true })).toBeInTheDocument();
+    expect(tree).toBeInTheDocument();
+  });
+
+  it("groups tree context actions into the requested submenu order", () => {
+    const tree = renderPackTree(["scripts\\hello.lua"], "files", {
+      otherOpenPacks: [{ packPath: "K:\\mods\\active.pack", label: "Active" }],
+      onCopyInto: vi.fn(),
+    });
+
+    fireEvent.click(screen.getByText("scripts"));
+    fireEvent.contextMenu(screen.getByText("hello.lua"));
+
+    const contextMenu = screen.getByTestId("pack-tables-context-menu");
+    const topLevelLabels = Array.from(contextMenu.children).map((child) => {
+      const button = child.tagName === "BUTTON" ? child : child.querySelector("button");
+      return button?.textContent?.replace("▶", "").trim() || "separator";
+    });
+    expect(topLevelLabels).toEqual([
+      "Copy into",
+      "Add",
+      "separator",
+      "Rename file…",
+      "Move file…",
+      "Delete file",
+      "separator",
+      "Import",
+      "Export",
+    ]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Add", exact: true }));
+    expect(screen.getByRole("button", { name: "Add New Flow", exact: true })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Import", exact: true }));
+    expect(screen.getByRole("button", { name: "Import Files…", exact: true })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Import Folders…", exact: true })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Export", exact: true }));
+    expect(screen.getByRole("button", { name: "Export Selection…", exact: true })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Export Whole Pack…", exact: true })).toBeInTheDocument();
     expect(tree).toBeInTheDocument();
   });
 
