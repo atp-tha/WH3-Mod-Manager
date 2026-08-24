@@ -3,6 +3,7 @@ import { useLocalizations } from "../../localizationContext";
 import BuildingSetBand from "./BuildingSetBand";
 import BuildingUpgradeArrows from "./BuildingUpgradeArrows";
 import { computeBoardLayout } from "./buildingsLayout";
+import { boardModeOf } from "../../buildingsData/derive";
 import type { BuildingsRegionView, BuildingsTile } from "../../buildingsData/types";
 import "./buildings.css";
 
@@ -106,7 +107,7 @@ const BuildingsBoard = memo(
             edges={layout.edges}
             tileElements={tileElements}
             containerRef={boardRef}
-            layoutToken={`${view.query.region}|${view.query.foreignSlotType ?? ""}|${view.query.culture}|${zoom}|${layout.bands.length}`}
+            layoutToken={`${boardModeOf(view.query)}|${view.query.region}|${view.query.foreignSlotType ?? ""}|${view.query.culture}|${zoom}|${layout.bands.length}`}
           />
         </div>
       </div>

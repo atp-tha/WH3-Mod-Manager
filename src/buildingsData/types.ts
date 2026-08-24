@@ -160,6 +160,22 @@ export interface ForeignSlotTemplate {
   id: string;
 }
 
+/**
+ * One slot template a horde's military force type offers.
+ *
+ * A horde carries its slots with its army: `military_force_type_horde_details` names a primary and
+ * a secondary template per force type, and is the only table outside the startpos that ties a slot
+ * template to a slot type. Twelve of vanilla's fourteen force types name the same pair, so the
+ * templates are deduped and browsed as one board rather than one per force type.
+ */
+export interface HordeSlotTemplate {
+  /** `military_force_type_horde_details_tables.force_type`, kept for provenance. */
+  forceType: string;
+  slotTemplate: string;
+  slotType: string;
+  id: string;
+}
+
 export interface StartPosSettlement {
   campaign: string;
   region: string;
@@ -238,6 +254,8 @@ export interface BuiltBuildingsData {
   foreignRegionSlotTemplates: Record<string, RegionSlot[]>;
   /** Every slot template a `slot_sets_tables.type` offers, combined across that type's slot sets. */
   foreignSlotTemplatesByType: Record<string, ForeignSlotTemplate[]>;
+  /** Every distinct horde slot template, combined across every military force type. */
+  hordeSlotTemplates: HordeSlotTemplate[];
   /** Keyed `campaign|region`. */
   startPosSettlements: Record<string, StartPosSettlement[]>;
   /** Effective `campaign_map_settlements_tables` rows, keyed by settlement id. */
@@ -340,7 +358,18 @@ export interface BuildingsEffectOption extends BuildingsOption {
 // Query and view
 // ---------------------------------------------------------------------------
 
+/**
+ * Which family of slots the board is browsing.
+ *
+ * `normal` is a region's own slots; `undercity` is one `slot_sets_tables.type`, granted by a slot
+ * set rather than by a region; `horde` is the slots a military force type carries with its army.
+ * Neither of the latter two has a region or a settlement type.
+ */
+export type BuildingsBoardMode = "normal" | "undercity" | "horde";
+
 export interface BuildingsRegionQuery {
+  /** Absent means `normal`, so a query written before modes existed still resolves. */
+  mode?: BuildingsBoardMode;
   campaign: string;
   region: string;
   /**

@@ -11,6 +11,7 @@
 import type {
   AvailabilityRow,
   BuildingVariantRow,
+  BuildingsBoardMode,
   BuildingsChainColumn,
   BuildingsForeignSlotTypeOption,
   BuildingsOption,
@@ -26,6 +27,15 @@ import { HIDDEN_BUILDING_CHAIN_PREFIX, variantLocKey } from "./data";
 
 /** Bucket for levels no building set claims, rendered last. */
 export const NO_SET_KEY = "__no_set__";
+
+/**
+ * Which slot family the query is browsing.
+ *
+ * `mode` is authoritative; a query written before it existed said "browse foreign slots" simply by
+ * naming a type, so that still resolves to `undercity`.
+ */
+export const boardModeOf = (query: BuildingsRegionQuery): BuildingsBoardMode =>
+  query.mode ?? (query.foreignSlotType ? "undercity" : "normal");
 
 const ROMAN_NUMERALS: Array<[number, string]> = [
   [1000, "M"],
@@ -276,6 +286,22 @@ export const foreignSlotTemplatesForType = (
     slotSet: entry.slotSet,
   }));
 
+/**
+ * Every horde slot template, shaped like a region slot.
+ *
+ * A horde carries its slots with its army rather than being granted them by a region or a slot set,
+ * so there is no region to name. The campaign is carried through because availability rows still
+ * filter on it. `isForeignSlot` stays unset: a horde slot is the army's own, not somebody else's.
+ */
+export const hordeSlotTemplatesFor = (data: BuiltBuildingsData, campaign = ""): RegionSlot[] =>
+  (data.hordeSlotTemplates ?? []).map((entry) => ({
+    campaign,
+    region: "",
+    slotTemplate: entry.slotTemplate,
+    slotType: entry.slotType,
+    id: entry.id,
+  }));
+
 interface SlotTemplateChains {
   candidateChains: Set<string>;
   sourcesByChain: Map<string, string[]>;
@@ -291,14 +317,23 @@ interface SlotTemplateChains {
  * `slot_template_permitted_building_chains` rules - chain, chain set, super chain and the superchain
  * junction table - rather than one of them growing its own approximation.
  */
-const collectChainsForSlotTemplates = (data: BuiltBuildingsData, slotTemplates: RegionSlot[]): SlotTemplateChains => {
+const collectChainsForSlotTemplates = (
+  data: BuiltBuildingsData,
+  slotTemplates: RegionSlot[],
+  /**
+   * Lifts the legacy `wh_main_horde_*` ban, which exists only because those chains leak into broad
+   * vanilla chain sets a *region* reaches. The horde chain sets name them deliberately, so on a
+   * horde board they are the content.
+   */
+  allowHordeChains = false,
+): SlotTemplateChains => {
   const candidateChains = new Set<string>();
   const sourcesByChain = new Map<string, string[]>();
   const slotTypesByChain = new Map<string, Set<string>>();
   const foreignSlotChains = new Set<string>();
   const addChain = (chain: string, source: string, slotType: string, isForeignSlot: boolean) => {
     // Legacy pre-rework horde chains remain in broad vanilla chain sets but are not region buildings.
-    if (chain.startsWith(HIDDEN_BUILDING_CHAIN_PREFIX)) return;
+    if (!allowHordeChains && chain.startsWith(HIDDEN_BUILDING_CHAIN_PREFIX)) return;
     if (!data.chains[chain]) return;
     candidateChains.add(chain);
     const sources = sourcesByChain.get(chain) ?? [];
@@ -381,23 +416,28 @@ const resolveRegionChainContext = (data: BuiltBuildingsData, query: BuildingsReg
   const cultureOfFaction = (faction: string) => cultureByFaction.get(faction);
 
   // --- 1. region -> slot templates ------------------------------------------
-  // Browsing a foreign slot type replaces the region entirely: its slots are granted by a slot set
-  // and can turn up under any region, so mixing them with one region's own slots would be a view of
-  // something the game never shows together.
-  const regionSlotTemplates = query.foreignSlotType
-    ? []
-    : (data.regionSlotTemplates[`${query.campaign}|${query.region}`] ?? []);
-  const foreignSlotTemplates = query.foreignSlotType
-    ? foreignSlotTemplatesForType(data, query.foreignSlotType, query.campaign)
-    : query.faction
-      ? (data.foreignRegionSlotTemplates[`${query.campaign}|${query.region}|${query.faction}`] ?? [])
-      : [];
-  const slotTemplates = [...regionSlotTemplates, ...foreignSlotTemplates];
+  // A foreign slot type or a horde replaces the region entirely: those slots are granted by a slot
+  // set or carried by an army, and can turn up under any region or none, so mixing them with one
+  // region's own slots would be a view of something the game never shows together.
+  const mode = boardModeOf(query);
+  const regionSlotTemplates =
+    mode === "normal" ? (data.regionSlotTemplates[`${query.campaign}|${query.region}`] ?? []) : [];
+  const foreignSlotTemplates =
+    mode === "undercity"
+      ? query.foreignSlotType
+        ? foreignSlotTemplatesForType(data, query.foreignSlotType, query.campaign)
+        : []
+      : mode === "normal" && query.faction
+        ? (data.foreignRegionSlotTemplates[`${query.campaign}|${query.region}|${query.faction}`] ?? [])
+        : [];
+  const hordeSlotTemplates = mode === "horde" ? hordeSlotTemplatesFor(data, query.campaign) : [];
+  const slotTemplates = [...regionSlotTemplates, ...foreignSlotTemplates, ...hordeSlotTemplates];
 
   // --- 2. slot templates -> candidate chains --------------------------------
   const { candidateChains, sourcesByChain, slotTypesByChain, foreignSlotChains } = collectChainsForSlotTemplates(
     data,
     slotTemplates,
+    mode === "horde",
   );
 
   // --- 3. availability -------------------------------------------------------
@@ -417,19 +457,19 @@ const resolveRegionChainContext = (data: BuiltBuildingsData, query: BuildingsReg
   }
 
   // --- 4. settlement type ----------------------------------------------------
-  // A settlement type describes the settlement a slot belongs to. A foreign slot has no settlement
-  // of its own - it is granted inside whatever settlement the host region has - so browsing a type
-  // leaves the dropdown empty and section 5 skips the filter rather than hiding the ~50 of vanilla's
-  // 53 foreign chains that also name one of the Chaos Dwarf, daemon or Norsca settlement types.
+  // A settlement type describes the settlement a slot belongs to. Neither a foreign slot nor a horde
+  // slot has a settlement of its own - one is granted inside whatever settlement the host region
+  // has, the other travels with an army - so browsing either leaves the dropdown empty and section 5
+  // skips the filter rather than hiding the ~50 of vanilla's 53 foreign chains that also name one of
+  // the Chaos Dwarf, daemon or Norsca settlement types.
   const settlementTypeKeys = new Set<string>();
-  if (!query.foreignSlotType) {
+  if (mode === "normal") {
     for (const chain of availableChains) {
       for (const binding of data.settlementTypeBindings[chain] ?? []) settlementTypeKeys.add(binding.settlementType);
     }
   }
-  const regionSettlements = query.foreignSlotType
-    ? []
-    : (data.startPosSettlements[`${query.campaign}|${query.region}`] ?? []);
+  const regionSettlements =
+    mode === "normal" ? (data.startPosSettlements[`${query.campaign}|${query.region}`] ?? []) : [];
   for (const settlement of regionSettlements) {
     if (settlement.settlementType) settlementTypeKeys.add(settlement.settlementType);
   }
@@ -440,7 +480,7 @@ const resolveRegionChainContext = (data: BuiltBuildingsData, query: BuildingsReg
 
   const cultureChains = availableChains.filter((chain) => !isChainForAnotherCulture(data, chain, query.culture));
   const settlementTypeDisabled =
-    !!query.foreignSlotType || !cultureChains.some((chain) => (data.settlementTypeBindings[chain] ?? []).length > 0);
+    mode !== "normal" || !cultureChains.some((chain) => (data.settlementTypeBindings[chain] ?? []).length > 0);
 
   return {
     cultureOfSubculture,
@@ -529,15 +569,15 @@ export const resolveRegionBuildings = (data: BuiltBuildingsData, query: Building
     settlementTypeDisabled,
   } = resolveRegionChainContext(data, query);
 
-  // Nothing about a foreign slot is regional: no start pos settlement places its buildings, so no
-  // tile can be "already built in this region" either.
-  const regionSettlements = query.foreignSlotType
-    ? []
-    : (data.startPosSettlements[`${query.campaign}|${query.region}`] ?? []);
-  const selectedSettlementType = query.foreignSlotType ? undefined : query.settlementType;
+  // Nothing about a foreign or horde slot is regional: no start pos settlement places its buildings,
+  // so no tile can be "already built in this region" either.
+  const mode = boardModeOf(query);
+  const regionSettlements =
+    mode === "normal" ? (data.startPosSettlements[`${query.campaign}|${query.region}`] ?? []) : [];
+  const selectedSettlementType = mode === "normal" ? query.settlementType : undefined;
   const visibleChains = availableChains
     .filter((chain) => {
-      if (query.foreignSlotType) return true;
+      if (mode !== "normal") return true;
       const bindings = data.settlementTypeBindings[chain];
       if (!selectedSettlementType) return !bindings || bindings.length === 0;
       if (!bindings || bindings.length === 0) return false;
@@ -564,8 +604,12 @@ export const resolveRegionBuildings = (data: BuiltBuildingsData, query: Building
     // Foreign slots are ordinary in exactly the same way: every vanilla foreign chain starts at
     // level 0 and none of them is a settlement, so a `foreign` slot type must not make one look razed.
     const slotTypes = slotTypesByChain.get(chainKey);
+    // A horde board's slots are all `horde_primary`/`horde_secondary`, which would otherwise pass
+    // the test above and make every horde building look like a settlement: level 0 hidden as a ruin
+    // and every tier numbered one too low. Its own numbering is handled below instead.
     const isSettlementOrPortChain =
-      !!slotTypes && slotTypes.size > 0 && !slotTypes.has("secondary") && !slotTypes.has("foreign");
+      mode !== "horde" && !!slotTypes && slotTypes.size > 0 && !slotTypes.has("secondary") && !slotTypes.has("foreign");
+    const isHordePrimaryChain = mode === "horde" && !!slotTypes?.has("horde_primary");
     // `building_units_allowed` often repeats an unlock on every higher level that retains it. The
     // panel describes what each level newly adds, so remember units already introduced lower down
     // this chain. This is deliberately reset per chain: the same unit can be a new unlock elsewhere.
@@ -578,6 +622,18 @@ export const resolveRegionBuildings = (data: BuiltBuildingsData, query: Building
 
       const isRuin = isSettlementOrPortChain && level.level === 0;
       if (isRuin && !query.includeRuinLevels) continue;
+
+      // Horde slots number their tiers from 0, unlike a region's 1-based settlement levels: a horde
+      // primary chain *is* its board's y-axis and is placed by its own level, and a secondary's
+      // `primary_slot_building_building_level_requirement` is already the row index rather than one
+      // past it - `wh2_dlc11_vampirecoast_ship_hull` requires ship tiers 0, 2 and 4. Feeding either
+      // through `tierRowOf` would collapse the bottom two rows into one.
+      const hordeTierRow =
+        mode !== "horde"
+          ? undefined
+          : isHordePrimaryChain
+            ? level.level
+            : Math.max(0, Number(level.primarySlotLevelRequirement) || 0);
 
       const { variant, disabledBy, candidateCount } = pickCultureVariant(
         data,
@@ -620,6 +676,7 @@ export const resolveRegionBuildings = (data: BuiltBuildingsData, query: Building
           chainKey,
           setKey,
           level: level.level,
+          // Horde chains are numbered from 0 throughout, so their first tier is already `I`.
           romanNumeral: toRoman(isSettlementOrPortChain ? level.level : level.level + 1),
           createTime: level.createTime,
           createCost: level.createCost,
@@ -642,7 +699,7 @@ export const resolveRegionBuildings = (data: BuiltBuildingsData, query: Building
           recruitable: newlyRecruitable,
           recruitableRows,
           levelRowValues: level.rawValues,
-          tierRow: tierRowOf(level, isSettlementOrPortChain),
+          tierRow: hordeTierRow ?? tierRowOf(level, isSettlementOrPortChain),
           isExistingInRegion: existingSet.has(levelKey),
           hasNoVariant,
           isRuin,

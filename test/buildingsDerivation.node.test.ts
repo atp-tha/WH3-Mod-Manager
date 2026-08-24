@@ -1128,3 +1128,171 @@ describe("foreign slot types", () => {
     });
   });
 });
+
+/**
+ * Horde boards.
+ *
+ * A horde carries its slots with its army: `military_force_type_horde_details` is the only table
+ * outside the startpos that ties a slot template to a slot type, and it is what makes these
+ * reachable at all. Numbering is the part that differs most from a region - horde tiers run from 0,
+ * so neither the ruin rule nor `tierRowOf` applies.
+ */
+describe("horde boards", () => {
+  /**
+   * Two force types naming the same primary/secondary pair, plus Nakai's own templates, mirroring
+   * how vanilla writes them. `chain_a` stays region-only; the horde chains arrive through a chain
+   * set, which is how every vanilla horde row does it.
+   */
+  const hordeTables = () => ({
+    military_force_type_horde_details_tables: [
+      {
+        force_type: "HORDE",
+        primary_slot_template: "horde_primary",
+        primary_slot_type: "horde_primary",
+        secondary_slot_template: "horde_secondary",
+        secondary_slot_type: "horde_secondary",
+      },
+      {
+        force_type: "OGRE_CAMP",
+        primary_slot_template: "horde_primary",
+        primary_slot_type: "horde_primary",
+        secondary_slot_template: "horde_secondary",
+        secondary_slot_type: "horde_secondary",
+      },
+      {
+        force_type: "NAKAI_BOUND_HORDE",
+        primary_slot_template: "nakai_horde_primary",
+        primary_slot_type: "horde_primary",
+        secondary_slot_template: "nakai_horde_secondary",
+        secondary_slot_type: "horde_secondary",
+      },
+    ],
+    building_chain_sets_tables: [
+      { key: "horde_primary_set", parent_set: "" },
+      { key: "horde_secondary_set", parent_set: "" },
+    ],
+    building_chain_set_items_tables: [
+      { chain: "chain_b", set: "horde_primary_set", super_chain: "", remove: "false" },
+      { chain: "chain_c", set: "horde_secondary_set", super_chain: "", remove: "false" },
+    ],
+    slot_template_permitted_building_chains_tables: [
+      { slot_template: "tmpl_main", chain: "chain_a", chain_set: "", super_chain: "", remove: "false" },
+      { slot_template: "horde_primary", chain: "", chain_set: "horde_primary_set", super_chain: "", remove: "false" },
+      {
+        slot_template: "horde_secondary",
+        chain: "",
+        chain_set: "horde_secondary_set",
+        super_chain: "",
+        remove: "false",
+      },
+    ],
+  });
+
+  const hordeQuery = (overrides: Partial<BuildingsRegionQuery> = {}) =>
+    query({ mode: "horde", region: "", ...overrides });
+
+  const tilesFor = (view: ReturnType<typeof resolveRegionBuildings>, chainKey: string) =>
+    view.bands.flatMap((band) => band.columns.filter((column) => column.chainKey === chainKey)).flatMap((c) => c.tiles);
+
+  it("dedupes the templates the force types share and drops the region's own", () => {
+    const view = resolveRegionBuildings(build(hordeTables()), hordeQuery());
+    expect(view.slotTemplates.map((slot) => slot.slotTemplate)).toEqual([
+      "horde_primary",
+      "horde_secondary",
+      "nakai_horde_primary",
+      "nakai_horde_secondary",
+    ]);
+    expect(view.slotTemplates.every((slot) => slot.region === "" && !slot.isForeignSlot)).toBe(true);
+    expect(chainKeysIn(view)).toEqual(["chain_b", "chain_c"]);
+  });
+
+  it("numbers a horde primary chain by its own level, starting at I with no ruin", () => {
+    const view = resolveRegionBuildings(build(hordeTables()), hordeQuery());
+    expect(tilesFor(view, "chain_b").map((tile) => [tile.level, tile.tierRow, tile.romanNumeral, tile.isRuin])).toEqual(
+      [[0, 0, "I", false]],
+    );
+    expect(tilesFor(view, "chain_b").every((tile) => !tile.isSettlementOrPort)).toBe(true);
+  });
+
+  it("reads a horde secondary's primary slot requirement as the row itself, not one past it", () => {
+    // `wh2_dlc11_vampirecoast_ship_hull` is the real shape: tiers requiring ship level 0, 2 and 4.
+    const data = build({
+      ...hordeTables(),
+      building_levels_tables: [
+        ...baseTables().building_levels_tables,
+        {
+          level_name: "c_2",
+          chain: "chain_c",
+          level: "1",
+          visible_in_ui: "true",
+          primary_slot_building_building_level_requirement: "2",
+        },
+      ],
+      building_culture_variants_tables: [
+        ...baseTables().building_culture_variants_tables,
+        { building: "c_2", culture: "emp", subculture: "", faction: "", disables: "false" },
+      ],
+    });
+
+    expect(tilesFor(resolveRegionBuildings(data, hordeQuery()), "chain_c").map((tile) => tile.tierRow)).toEqual([0, 2]);
+  });
+
+  it("ignores the region, its settlement types and what the region already has built", () => {
+    const data = build({
+      ...hordeTables(),
+      settlement_type_to_building_chains_junctions_tables: [
+        { building_chain: "chain_b", settlement_type: "capital", exclude: "false" },
+      ],
+      start_pos_regions_tables: [{ id: "1", campaign: CAMPAIGN, region: REGION }],
+      start_pos_settlements_tables: [{ settlement_id: "s", region: "1", building1: "b_1" }],
+    });
+
+    // In a region, a chain bound to a settlement type is drawn only once that type is selected.
+    expect(chainKeysIn(resolveRegionBuildings(data, query()))).not.toContain("chain_b");
+    const view = resolveRegionBuildings(data, hordeQuery());
+    expect(chainKeysIn(view)).toContain("chain_b");
+    expect(view.settlementTypeOptions).toEqual([]);
+    expect(view.settlementTypeDisabled).toBe(true);
+    expect(view.existingBuildings).toEqual([]);
+  });
+
+  it("shows the legacy wh_main_horde chains a region board hides", () => {
+    const data = build({
+      ...hordeTables(),
+      building_chains_tables: [
+        ...baseTables().building_chains_tables,
+        { key: "wh_main_horde_legacy", building_superchain: "super_horde", optional_sort_order: "4" },
+      ],
+      building_levels_tables: [
+        ...baseTables().building_levels_tables,
+        { level_name: "horde_1", chain: "wh_main_horde_legacy", level: "0", visible_in_ui: "true" },
+      ],
+      building_culture_variants_tables: [
+        ...baseTables().building_culture_variants_tables,
+        { building: "horde_1", culture: "emp", subculture: "", faction: "", disables: "false" },
+      ],
+      building_set_to_building_junctions_tables: [
+        ...baseTables().building_set_to_building_junctions_tables,
+        { building_chain: "wh_main_horde_legacy", building_level: "", building_set: "set_one", exclude: "false" },
+      ],
+      building_chain_set_items_tables: [
+        { chain: "chain_b", set: "horde_primary_set", super_chain: "", remove: "false" },
+        { chain: "chain_c", set: "horde_secondary_set", super_chain: "", remove: "false" },
+        { chain: "wh_main_horde_legacy", set: "horde_primary_set", super_chain: "", remove: "false" },
+      ],
+      slot_template_permitted_building_chains_tables: [
+        ...hordeTables().slot_template_permitted_building_chains_tables,
+        { slot_template: "tmpl_main", chain: "wh_main_horde_legacy", chain_set: "", super_chain: "", remove: "false" },
+      ],
+    });
+
+    expect(chainKeysIn(resolveRegionBuildings(data, query()))).not.toContain("wh_main_horde_legacy");
+    expect(chainKeysIn(resolveRegionBuildings(data, hordeQuery()))).toContain("wh_main_horde_legacy");
+  });
+
+  it("shows nothing when the install defines no horde force type", () => {
+    const view = resolveRegionBuildings(build(), hordeQuery());
+    expect(view.bands).toEqual([]);
+    expect(view.slotTemplates).toEqual([]);
+  });
+});

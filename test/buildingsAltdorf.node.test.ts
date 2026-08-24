@@ -431,3 +431,102 @@ describe.skipIf(!haveDbDump)("foreign slot types against the shipped tables", ()
     expect(view.settlementTypeDisabled).toBe(true);
   });
 });
+
+/**
+ * Horde boards against the shipped tables.
+ *
+ * Like the foreign slots, nothing here needs a region: a horde carries its slots with its army.
+ * `military_force_type_horde_details` is the only table outside the startpos that ties a slot
+ * template to a slot type, so these assertions are what prove the route through it reaches the
+ * content that has no "horde" anywhere in its key - ogre camps, the Vampire Coast ship, the
+ * dragonship and the Spirit of Grungni.
+ */
+describe.skipIf(!haveDbDump)("horde boards against the shipped tables", () => {
+  const tables: BuildingsTableRows = {};
+  for (const tableName of BUILDINGS_TABLES) tables[tableName] = readTsvTable(tableName);
+  const data = buildBuildingsData(tables, () => undefined);
+
+  const hordeView = (culture?: string): BuildingsRegionView =>
+    resolveRegionBuildings(data, { mode: "horde", campaign: CAMPAIGN, region: "", culture });
+
+  const chainsIn = (view: BuildingsRegionView) =>
+    view.bands.flatMap((band) => band.columns.map((column) => column.chainKey)).sort();
+
+  const tilesFor = (view: BuildingsRegionView, chainKey: string) =>
+    view.bands
+      .flatMap((band) => band.columns.filter((column) => column.chainKey === chainKey))
+      .flatMap((column) => column.tiles);
+
+  it("browses the five slot templates the game's force types name", () => {
+    expect(data.hordeSlotTemplates.map((entry) => entry.slotTemplate)).toEqual([
+      "horde_primary",
+      "horde_secondary",
+      "horde_primary_aislinn",
+      "nakai_horde_primary",
+      "nakai_horde_secondary",
+    ]);
+    // Twelve of the fourteen force types name the same pair; the templates are browsed as one board.
+    expect(tables.military_force_type_horde_details_tables.length).toBe(14);
+  });
+
+  it("reaches the horde content whose keys say nothing about hordes", () => {
+    const chains = chainsIn(hordeView());
+    expect(chains).toContain("wh3_main_ogr_camp_town_centre");
+    expect(chains).toContain("wh2_dlc11_vampirecoast_ship_hull");
+    expect(chains).toContain("wh3_dlc27_hef_dragonship_barracks");
+    expect(chains).toContain("wh3_dlc25_dwf_spirit_of_grungni_barracks");
+    // And the legacy chains a region board hides, which the horde chain sets name deliberately.
+    expect(chains).toContain("wh_dlc03_horde_beastmen_herd");
+    expect(chains).toContain("wh_main_horde_chaos_settlement");
+    // Nothing a region places.
+    expect(chains).not.toContain("wh_main_emp_barracks");
+    expect(chains).not.toContain("wh_main_EMPIRE_settlement_major");
+  });
+
+  it("narrows to one culture's own horde", () => {
+    expect(chainsIn(hordeView("wh3_main_ogr_ogre_kingdoms"))).toEqual([
+      "wh3_dlc26_ogr_camp_gnoblars",
+      "wh3_main_ogr_camp_barracks",
+      "wh3_main_ogr_camp_cav",
+      "wh3_main_ogr_camp_defence_replenishment",
+      "wh3_main_ogr_camp_defence_upkeep",
+      "wh3_main_ogr_camp_growth",
+      "wh3_main_ogr_camp_heavy_cav",
+      "wh3_main_ogr_camp_hunting",
+      "wh3_main_ogr_camp_monster",
+      "wh3_main_ogr_camp_recruitment",
+      "wh3_main_ogr_camp_town_centre",
+      "wh3_main_ogr_camp_upkeep",
+      // Names no culture of its own, so nothing in the data marks it as somebody else's - the same
+      // documented extra a region board carries.
+      "wh_main_horde_chaos_dragon_ogres",
+    ]);
+  });
+
+  it("numbers horde tiers from zero rather than treating them as settlements", () => {
+    const view = hordeView("wh_dlc03_bst_beastmen");
+    // A horde primary chain is its board's y-axis: placed by its own level, first tier `I`, and no
+    // level-0 ruin - the razed state is a region-settlement concept.
+    expect(
+      tilesFor(view, "wh_dlc03_horde_beastmen_herd").map((tile) => [tile.level, tile.tierRow, tile.romanNumeral]),
+    ).toEqual([
+      [0, 0, "I"],
+      [1, 1, "II"],
+      [2, 2, "III"],
+      [3, 3, "IV"],
+      [4, 4, "V"],
+    ]);
+    expect(tilesFor(view, "wh_dlc03_horde_beastmen_herd").every((tile) => !tile.isRuin)).toBe(true);
+    expect(tilesFor(view, "wh_dlc03_horde_beastmen_herd").every((tile) => !tile.isSettlementOrPort)).toBe(true);
+  });
+
+  it("reads a horde secondary's primary requirement as the row itself", () => {
+    // The ship's hull tiers require ship levels 0, 2 and 4 - already row indices, unlike a region
+    // settlement's 1-based levels.
+    expect(
+      tilesFor(hordeView("wh2_dlc11_cst_vampire_coast"), "wh2_dlc11_vampirecoast_ship_hull").map(
+        (tile) => tile.tierRow,
+      ),
+    ).toEqual([0, 2, 4]);
+  });
+});

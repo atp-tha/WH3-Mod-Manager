@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  boardModeQueryPatch,
   buildFactionOptions,
   firstRegionForCampaign,
   foreignSlotTypeQueryPatch,
@@ -175,5 +176,78 @@ describe("foreignSlotTypeQueryPatch", () => {
       subculture: undefined,
       faction: undefined,
     });
+  });
+});
+
+describe("boardModeQueryPatch", () => {
+  const slotType = (key: string, cultures: string[] = []): BuildingsForeignSlotTypeOption => ({
+    key,
+    localizedName: key,
+    slotTemplates: [],
+    cultures,
+    subcultures: [],
+    factions: [],
+  });
+
+  const modeCatalog = {
+    ...catalog,
+    foreignSlotTypes: [slotType("CULT", ["kho"]), slotType("UNDEREMPIRE", ["wh2_main_skv_skaven"])],
+  } as BuildingsCatalog;
+
+  const query: BuildingsRegionQuery = {
+    mode: "normal",
+    campaign: "chaos_campaign",
+    region: "chaos",
+    settlementType: "capital",
+    culture: "kho",
+  };
+
+  it("lands undercity on the under-empire and its culture", () => {
+    expect(boardModeQueryPatch("undercity", query, modeCatalog)).toEqual({
+      mode: "undercity",
+      foreignSlotType: "UNDEREMPIRE",
+      settlementType: undefined,
+      culture: "wh2_main_skv_skaven",
+      subculture: undefined,
+      faction: undefined,
+    });
+  });
+
+  it("keeps a type already selected when re-entering undercity", () => {
+    expect(boardModeQueryPatch("undercity", { ...query, foreignSlotType: "CULT" }, modeCatalog)).toMatchObject({
+      mode: "undercity",
+      foreignSlotType: "CULT",
+    });
+  });
+
+  it("falls back to the first type when the install has no under-empire", () => {
+    const scoped = { ...modeCatalog, foreignSlotTypes: [slotType("CULT", ["kho"])] } as BuildingsCatalog;
+    expect(boardModeQueryPatch("undercity", query, scoped)).toMatchObject({
+      mode: "undercity",
+      foreignSlotType: "CULT",
+    });
+  });
+
+  it("clears the filters horde does not draw and leaves the culture alone", () => {
+    expect(boardModeQueryPatch("horde", { ...query, foreignSlotType: "CULT" }, modeCatalog)).toEqual({
+      mode: "horde",
+      foreignSlotType: undefined,
+      settlementType: undefined,
+    });
+  });
+
+  it("restores a region when returning to normal without one", () => {
+    expect(boardModeQueryPatch("normal", { ...query, mode: "horde", region: "" }, modeCatalog)).toEqual({
+      mode: "normal",
+      foreignSlotType: undefined,
+      settlementType: undefined,
+      region: "chaos",
+    });
+  });
+
+  it("keeps the region it left when returning to normal", () => {
+    expect(
+      boardModeQueryPatch("normal", { ...query, mode: "undercity", foreignSlotType: "CULT" }, modeCatalog),
+    ).toEqual({ mode: "normal", foreignSlotType: undefined, settlementType: undefined });
   });
 });

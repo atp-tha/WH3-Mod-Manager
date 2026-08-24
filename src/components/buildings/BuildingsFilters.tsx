@@ -4,12 +4,14 @@ import { FaMapMarkedAlt } from "react-icons/fa";
 import { useLocalizations } from "../../localizationContext";
 import selectStyle from "../../styles/selectStyle";
 import type {
+  BuildingsBoardMode,
   BuildingsCatalog,
   BuildingsFactionOption,
   BuildingsForeignSlotTypeOption,
   BuildingsOption,
   BuildingsRegionQuery,
 } from "../../buildingsData/types";
+import { boardModeOf } from "../../buildingsData/derive";
 
 export type BuildingsFiltersProps = {
   catalog: BuildingsCatalog;
@@ -97,6 +99,8 @@ const findOption = (options: SelectOption[], value: string | undefined) =>
 
 const labelClass = "flex flex-col gap-1 text-sm text-gray-300";
 const selectWidth = { minWidth: "15rem" };
+/** The mode picker has three short options and does not need the shared width. */
+const modeSelectWidth = { minWidth: "9rem" };
 
 /**
  * The filter bar sits above a dense board, so its own text was left small enough to be hard to
@@ -167,20 +171,57 @@ export const firstRegionForCampaign = (catalog: BuildingsCatalog, campaign: stri
   catalog.regions.find((region) => region.campaigns.length === 0)?.key ??
   "";
 
+/** The undercity type to land on when the mode is switched, when the install has it. */
+const DEFAULT_UNDERCITY_SLOT_TYPE = "UNDEREMPIRE";
+
+/**
+ * The query change that switching board mode implies.
+ *
+ * Each mode owns a different set of filters, so the ones the new mode does not draw have to be
+ * cleared rather than left applying invisibly. Undercity additionally needs a type to browse - the
+ * mode itself is the "browse foreign slots" state now, so an unset type would only mean an empty
+ * board - and reuses `foreignSlotTypeQueryPatch` so the culture narrowing is identical to picking
+ * the type by hand.
+ */
+export const boardModeQueryPatch = (
+  mode: BuildingsBoardMode,
+  query: BuildingsRegionQuery,
+  catalog: BuildingsCatalog,
+): Partial<BuildingsRegionQuery> => {
+  if (mode === "undercity") {
+    const types = catalog.foreignSlotTypes;
+    const selected =
+      types.find((entry) => entry.key === query.foreignSlotType) ??
+      types.find((entry) => entry.key === DEFAULT_UNDERCITY_SLOT_TYPE) ??
+      types[0];
+    return { ...foreignSlotTypeQueryPatch(selected, query), mode };
+  }
+  return {
+    mode,
+    foreignSlotType: undefined,
+    settlementType: undefined,
+    // Leaving undercity or horde with no region left to return to would show an empty board with
+    // no way to tell why.
+    ...(mode === "normal" && !query.region ? { region: firstRegionForCampaign(catalog, query.campaign) } : {}),
+  };
+};
+
 const FilterSelect = ({
   label,
   options,
   value,
   onSelect,
   disabled = false,
+  width = selectWidth,
 }: {
   label: string;
   options: SelectOption[];
   value: string | undefined;
   onSelect: (value: string) => void;
   disabled?: boolean;
+  width?: React.CSSProperties;
 }) => (
-  <label className={`${labelClass}${disabled ? " cursor-not-allowed opacity-60" : ""}`} style={selectWidth}>
+  <label className={`${labelClass}${disabled ? " cursor-not-allowed opacity-60" : ""}`} style={width}>
     {label}
     <WindowedSelect
       // The visible label is the wrapping `<label>`'s own text, which a screen reader reads together
@@ -236,17 +277,25 @@ const BuildingsFilters = memo(
     );
     const campaignOptions = useMemo(() => toOptions(catalog.campaigns), [catalog.campaigns]);
 
-    // The selected type, when one is: while it is set the board is showing foreign slot buildings
-    // instead of a region's, and the culture/subculture/faction dropdowns narrow to what it names.
+    const mode = boardModeOf(query);
+    const modeOptions = useMemo<SelectOption[]>(
+      () => [
+        { value: "normal", label: localized.buildingsModeNormal || "Normal" },
+        { value: "undercity", label: localized.buildingsModeUndercity || "Undercity" },
+        { value: "horde", label: localized.buildingsModeHorde || "Horde" },
+      ],
+      [localized.buildingsModeHorde, localized.buildingsModeNormal, localized.buildingsModeUndercity],
+    );
+
+    // The selected type, when one is: it is what the undercity board shows, and the
+    // culture/subculture/faction dropdowns narrow to what it names.
     const foreignSlotType = useMemo(
       () => catalog.foreignSlotTypes.find((entry) => entry.key === query.foreignSlotType),
       [catalog.foreignSlotTypes, query.foreignSlotType],
     );
-    const foreignSlotTypeOptions = useMemo(
-      () => [noneOption, ...toOptions(catalog.foreignSlotTypes)],
-      [catalog.foreignSlotTypes, noneOption],
-    );
-    const isForeignSlotMode = !!foreignSlotType;
+    // No `(none)` entry: the mode owns "not browsing foreign slots" now, so it would only offer a
+    // way to empty the board.
+    const foreignSlotTypeOptions = useMemo(() => toOptions(catalog.foreignSlotTypes), [catalog.foreignSlotTypes]);
 
     // Only regions the selected campaign actually places slot templates in are pickable; a region
     // with no campaigns recorded stays listed rather than vanishing.
@@ -326,6 +375,14 @@ const BuildingsFilters = memo(
       // earlier in the DOM - loses to them and its open dropdown renders behind the buildings.
       <div className="relative z-30 flex flex-wrap items-end gap-3 border-b border-gray-700 px-4 py-3">
         <FilterSelect
+          label={localized.buildingsBoardMode || "Mode"}
+          options={modeOptions}
+          value={mode}
+          width={modeSelectWidth}
+          onSelect={(next) => onQueryChange(boardModeQueryPatch(next as BuildingsBoardMode, query, catalog))}
+        />
+
+        <FilterSelect
           label={localized.buildingsCampaign || "Campaign"}
           options={campaignOptions}
           value={query.campaign}
@@ -338,26 +395,28 @@ const BuildingsFilters = memo(
           }
         />
 
-        <FilterSelect
-          label={localized.buildingsRegion || "Region"}
-          options={regionOptions}
-          value={query.region}
-          disabled={isForeignSlotMode}
-          onSelect={(region) => onQueryChange({ region, settlementType: undefined })}
-        />
+        {mode === "normal" && (
+          <>
+            <FilterSelect
+              label={localized.buildingsRegion || "Region"}
+              options={regionOptions}
+              value={query.region}
+              onSelect={(region) => onQueryChange({ region, settlementType: undefined })}
+            />
 
-        <button
-          type="button"
-          onClick={() => onOpenMap(query.campaign, query.region)}
-          disabled={isForeignSlotMode}
-          className="mb-0.5 flex h-9 w-9 items-center justify-center rounded border border-gray-700 bg-gray-900 text-gray-300 hover:border-blue-500 hover:bg-gray-800 hover:text-white disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:border-gray-700 disabled:hover:bg-gray-900 disabled:hover:text-gray-300"
-          title={localized.buildingsChooseRegionOnMap || "Choose region on map"}
-          aria-label={localized.buildingsChooseRegionOnMap || "Choose region on map"}
-        >
-          <FaMapMarkedAlt size="1rem" />
-        </button>
+            <button
+              type="button"
+              onClick={() => onOpenMap(query.campaign, query.region)}
+              className="mb-0.5 flex h-9 w-9 items-center justify-center rounded border border-gray-700 bg-gray-900 text-gray-300 hover:border-blue-500 hover:bg-gray-800 hover:text-white"
+              title={localized.buildingsChooseRegionOnMap || "Choose region on map"}
+              aria-label={localized.buildingsChooseRegionOnMap || "Choose region on map"}
+            >
+              <FaMapMarkedAlt size="1rem" />
+            </button>
+          </>
+        )}
 
-        {foreignSlotTypeOptions.length > 1 && (
+        {mode === "undercity" && foreignSlotTypeOptions.length > 0 && (
           <FilterSelect
             label={localized.buildingsForeignSlotType || "Foreign slot type"}
             options={foreignSlotTypeOptions}
@@ -373,7 +432,7 @@ const BuildingsFilters = memo(
           />
         )}
 
-        {settlementOptions.length > 0 && (
+        {mode === "normal" && settlementOptions.length > 0 && (
           <FilterSelect
             label={localized.buildingsSettlementType || "Settlement type"}
             options={settlementOptions}
@@ -503,12 +562,19 @@ const BuildingsFilters = memo(
           )}
         </div>
 
-        {foreignSlotType && (
+        {mode === "undercity" && foreignSlotType && (
           <p className="basis-full text-xs text-amber-300">
             {(
               localized.buildingsForeignSlotNotRegional ||
               "{{type}} slots are granted by a slot set, not by a region: these buildings can appear in any region, so the region is ignored."
             ).replace("{{type}}", foreignSlotType.key)}
+          </p>
+        )}
+
+        {mode === "horde" && (
+          <p className="basis-full text-xs text-amber-300">
+            {localized.buildingsHordeNotRegional ||
+              "Horde slots come with a military force type, not with a region: these buildings travel with the army, so no region or settlement type applies."}
           </p>
         )}
       </div>

@@ -34,11 +34,11 @@ const catalog = {
 
 const renderFilters = (query: Partial<BuildingsRegionQuery>) => {
   const onQueryChange = vi.fn();
-  render(
+  const rendered = render(
     <localizationContext.Provider value={enTranslation}>
       <BuildingsFilters
         catalog={catalog}
-        query={{ campaign: "camp", region: "region", ...query }}
+        query={{ mode: "normal", campaign: "camp", region: "region", ...query }}
         settlementTypeOptions={[]}
         settlementTypeDisabled={false}
         zoom={1}
@@ -48,7 +48,7 @@ const renderFilters = (query: Partial<BuildingsRegionQuery>) => {
       />
     </localizationContext.Provider>,
   );
-  return { onQueryChange };
+  return { ...rendered, onQueryChange };
 };
 
 /** react-select opens its menu on ArrowDown, and renders every option once it is open. */
@@ -58,17 +58,63 @@ const openMenu = (label: string) => {
   return input;
 };
 
+describe("BuildingsFilters board modes", () => {
+  it("drops the region, the map button and the settlement type outside a region board", () => {
+    for (const mode of ["undercity", "horde"] as const) {
+      const { unmount } = renderFilters({ mode, foreignSlotType: mode === "undercity" ? "CULT" : undefined });
+
+      expect(screen.queryByLabelText("Region", { selector: "input" })).toBeNull();
+      expect(screen.queryByLabelText("Choose region on map")).toBeNull();
+      expect(screen.queryByLabelText("Settlement type", { selector: "input" })).toBeNull();
+      // The filters every mode keeps.
+      expect(screen.getByLabelText("Campaign", { selector: "input" })).toBeInTheDocument();
+      expect(screen.getByLabelText("Culture", { selector: "input" })).toBeInTheDocument();
+      unmount();
+    }
+  });
+
+  it("offers the foreign slot type only on an undercity board", () => {
+    const { unmount } = renderFilters({ mode: "undercity", foreignSlotType: "CULT" });
+    expect(screen.getByLabelText("Foreign slot type", { selector: "input" })).toBeInTheDocument();
+    unmount();
+
+    for (const mode of ["normal", "horde"] as const) {
+      const rendered = renderFilters({ mode });
+      expect(screen.queryByLabelText("Foreign slot type", { selector: "input" })).toBeNull();
+      rendered.unmount();
+    }
+  });
+
+  it("says a horde's buildings travel with the army", () => {
+    renderFilters({ mode: "horde" });
+
+    expect(screen.getByText(/Horde slots come with a military force type/)).toBeInTheDocument();
+    expect(screen.queryByText(/not by a region/)).toBeNull();
+  });
+
+  it("switches into a mode with the filters it does not draw cleared", () => {
+    const { onQueryChange } = renderFilters({ settlementType: "capital" });
+
+    openMenu("Mode");
+    fireEvent.click(screen.getByText("Horde"));
+
+    expect(onQueryChange).toHaveBeenCalledWith({
+      mode: "horde",
+      foreignSlotType: undefined,
+      settlementType: undefined,
+    });
+  });
+});
+
 describe("BuildingsFilters foreign slot types", () => {
-  it("says the buildings are not tied to a region and locks the region picker", () => {
-    renderFilters({ foreignSlotType: "CULT" });
+  it("says the buildings are not tied to a region", () => {
+    renderFilters({ mode: "undercity", foreignSlotType: "CULT" });
 
     expect(screen.getByText(/CULT slots are granted by a slot set, not by a region/)).toBeInTheDocument();
-    expect(screen.getByLabelText("Choose region on map")).toBeDisabled();
-    expect(screen.getByLabelText("Region", { selector: "input" })).toBeDisabled();
   });
 
   it("offers only the cultures and subcultures the type's buildings name", () => {
-    renderFilters({ foreignSlotType: "CULT" });
+    renderFilters({ mode: "undercity", foreignSlotType: "CULT" });
 
     openMenu("Culture");
     expect(screen.getByText("Khorne")).toBeInTheDocument();
@@ -79,7 +125,7 @@ describe("BuildingsFilters foreign slot types", () => {
     expect(screen.queryByText("Empire folk")).toBeNull();
   });
 
-  it("keeps every culture while no type is selected", () => {
+  it("keeps every culture on a region board", () => {
     renderFilters({});
 
     expect(screen.queryByText(/not by a region/)).toBeNull();
@@ -90,7 +136,7 @@ describe("BuildingsFilters foreign slot types", () => {
   });
 
   it("drops filters the newly selected type never mentions", () => {
-    const { onQueryChange } = renderFilters({ culture: "emp", subculture: "emp_sub" });
+    const { onQueryChange } = renderFilters({ mode: "undercity", culture: "emp", subculture: "emp_sub" });
 
     openMenu("Foreign slot type");
     fireEvent.click(screen.getByText("CULT"));

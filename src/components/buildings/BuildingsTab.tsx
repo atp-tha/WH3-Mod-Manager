@@ -19,6 +19,7 @@ import BuildingEditModal from "./BuildingEditModal";
 import BuildingCultureVariantsModal from "./BuildingCultureVariantsModal";
 import AddChainModal from "./AddChainModal";
 import { buildingsEditReducer, emptyBuildingsEditState } from "../../buildingsData/edits";
+import { boardModeOf } from "../../buildingsData/derive";
 import { dbClonePackedFilesToBuildingsRows, filterDuplicateBuildingsCloneRows } from "../../buildingsData/dbCloneRows";
 import {
   addBuildingLevelRows,
@@ -50,6 +51,7 @@ type BuildingsTabProps = {
 };
 
 const DEFAULT_QUERY: BuildingsRegionQuery = {
+  mode: "normal",
   campaign: "wh3_main_combi",
   region: "wh3_main_combi_region_altdorf",
   culture: "wh_main_emp_empire",
@@ -417,13 +419,17 @@ const BuildingsTab = memo(({ isActive = true }: BuildingsTabProps) => {
             ? previous.region
             : (regionsForCampaign[0]?.key ?? previous.region);
           // A foreign slot type comes from a slot set a mod may have just been switched off with.
-          // Leaving it selected would show an empty board with no way to tell why.
-          const foreignSlotType = response.catalog!.foreignSlotTypes.some(
-            (option) => option.key === previous.foreignSlotType,
-          )
+          // Leaving it selected would show an empty board with no way to tell why, so fall back to
+          // whatever the install still has - and out of the mode entirely when it has nothing.
+          const types = response.catalog!.foreignSlotTypes;
+          const previousMode = boardModeOf(previous);
+          const foreignSlotType = types.some((option) => option.key === previous.foreignSlotType)
             ? previous.foreignSlotType
-            : undefined;
-          return { ...previous, campaign, region, foreignSlotType };
+            : previousMode === "undercity"
+              ? types[0]?.key
+              : undefined;
+          const mode = previousMode === "undercity" && !foreignSlotType ? "normal" : previousMode;
+          return { ...previous, mode, campaign, region, foreignSlotType };
         });
       })
       .catch((reason) => {
@@ -447,15 +453,20 @@ const BuildingsTab = memo(({ isActive = true }: BuildingsTabProps) => {
     );
     if (!campaignIsAvailable || !regionIsAvailable) return;
     setQuery((previous) => {
-      if (previous.campaign === mapSelectedRegion.campaign && previous.region === mapSelectedRegion.region) {
+      if (
+        boardModeOf(previous) === "normal" &&
+        previous.campaign === mapSelectedRegion.campaign &&
+        previous.region === mapSelectedRegion.region
+      ) {
         return previous;
       }
       return {
         ...previous,
         campaign: mapSelectedRegion.campaign,
         region: mapSelectedRegion.region,
-        // Picking a region on the map is a request for that region's board, which foreign slot
-        // buildings - granted by a slot set rather than by any region - would otherwise replace.
+        // Picking a region on the map is a request for that region's board, which the undercity and
+        // horde boards - neither of them granted by a region - would otherwise replace.
+        mode: "normal",
         foreignSlotType: undefined,
         settlementType: undefined,
       };
@@ -463,7 +474,9 @@ const BuildingsTab = memo(({ isActive = true }: BuildingsTabProps) => {
   }, [catalog, mapSelectedRegion]);
 
   useEffect(() => {
-    if (currentGame !== "wh3" || !catalog?.dbPackPath || !query.campaign || !query.region) return;
+    // Only a region board needs a region; the undercity and horde boards have none to name.
+    if (currentGame !== "wh3" || !catalog?.dbPackPath || !query.campaign) return;
+    if (boardModeOf(query) === "normal" && !query.region) return;
     let isCurrent = true;
     setIsLoading(true);
     window.api

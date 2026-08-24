@@ -292,6 +292,69 @@ describe("foreign slot sets", () => {
 
     expect(data.foreignSlotTemplatesByType.set_legacy.map((entry) => entry.slotTemplate)).toEqual(["tmpl_legacy"]);
   });
+
+  it("dedupes the horde slot templates the force types share", () => {
+    const data = buildBuildingsData(
+      {
+        military_force_type_horde_details_tables: [
+          {
+            force_type: "HORDE",
+            primary_slot_template: "horde_primary",
+            primary_slot_type: "horde_primary",
+            secondary_slot_template: "horde_secondary",
+            secondary_slot_type: "horde_secondary",
+          },
+          // The same pair again: twelve of vanilla's fourteen force types repeat it.
+          {
+            force_type: "OGRE_CAMP",
+            primary_slot_template: "horde_primary",
+            primary_slot_type: "horde_primary",
+            secondary_slot_template: "horde_secondary",
+            secondary_slot_type: "horde_secondary",
+          },
+          {
+            force_type: "NAKAI_BOUND_HORDE",
+            primary_slot_template: "nakai_horde_primary",
+            primary_slot_type: "horde_primary",
+            secondary_slot_template: "nakai_horde_secondary",
+            secondary_slot_type: "horde_secondary",
+          },
+        ],
+      },
+      noLoc,
+    );
+
+    expect(data.hordeSlotTemplates).toEqual([
+      {
+        forceType: "HORDE",
+        slotTemplate: "horde_primary",
+        slotType: "horde_primary",
+        id: "HORDE|primary_slot_template",
+      },
+      {
+        forceType: "HORDE",
+        slotTemplate: "horde_secondary",
+        slotType: "horde_secondary",
+        id: "HORDE|secondary_slot_template",
+      },
+      {
+        forceType: "NAKAI_BOUND_HORDE",
+        slotTemplate: "nakai_horde_primary",
+        slotType: "horde_primary",
+        id: "NAKAI_BOUND_HORDE|primary_slot_template",
+      },
+      {
+        forceType: "NAKAI_BOUND_HORDE",
+        slotTemplate: "nakai_horde_secondary",
+        slotType: "horde_secondary",
+        id: "NAKAI_BOUND_HORDE|secondary_slot_template",
+      },
+    ]);
+  });
+
+  it("has no horde slot templates when the table is absent", () => {
+    expect(buildBuildingsData({}, noLoc).hordeSlotTemplates).toEqual([]);
+  });
 });
 
 describe("ESF-derived startpos slot templates", () => {

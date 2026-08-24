@@ -29,6 +29,7 @@ import type {
   BuiltBuildingsData,
   ChainSetItem,
   ForeignSlotTemplate,
+  HordeSlotTemplate,
   PermittedChainRow,
   RegionSlot,
   SettlementTypeBinding,
@@ -60,6 +61,7 @@ export const BUILDINGS_TABLES = [
   "slot_set_items_tables",
   "slot_template_permitted_building_chains_tables",
   "slot_template_to_building_superchain_junctions_tables",
+  "military_force_type_horde_details_tables",
   "start_pos_region_slot_templates_tables",
   "start_pos_regions_tables",
   "start_pos_settlements_tables",
@@ -117,6 +119,7 @@ export const BUILDINGS_TABLE_KEY_COLUMNS: Record<string, string[]> = {
   slot_set_items_tables: ["id"],
   slot_template_permitted_building_chains_tables: ["chain", "chain_set", "slot_template", "super_chain"],
   slot_template_to_building_superchain_junctions_tables: ["id"],
+  military_force_type_horde_details_tables: ["force_type"],
   // This table is reconstructed from REGION_SLOT records in startpos.esf. The ESF's first value is
   // the per-instance index/key and is deliberately not part of the DB-shaped row.
   start_pos_region_slot_templates_tables: ["campaign", "region", "slot_template", "slot_type"],
@@ -473,6 +476,30 @@ export const buildBuildingsData = (tables: BuildingsTableRows, getLoc: Buildings
         continue;
       }
       bucket.push({ type, slotSet, slotTemplate: item.slotTemplate, slotType: item.slotType, id: item.id });
+    }
+  }
+
+  // Horde slots belong to a military force type rather than to a region or a slot set, so they are
+  // the one slot family a region board can never reach. `military_force_type_horde_details` names
+  // the templates directly - the only place in the DB that ties a slot template to a slot type
+  // outside the startpos - which is what makes a horde board derivable at all. Twelve of vanilla's
+  // fourteen force types name the same `horde_primary`/`horde_secondary` pair, so this is deduped
+  // the same way the foreign types are and browsed as one board.
+  const hordeSlotTemplates: HordeSlotTemplate[] = [];
+  for (const row of rowsOf("military_force_type_horde_details_tables")) {
+    const forceType = str(row, "force_type");
+    if (!forceType) continue;
+    for (const [templateColumn, typeColumn] of [
+      ["primary_slot_template", "primary_slot_type"],
+      ["secondary_slot_template", "secondary_slot_type"],
+    ] as const) {
+      const slotTemplate = str(row, templateColumn);
+      if (!slotTemplate) continue;
+      const slotType = str(row, typeColumn);
+      if (hordeSlotTemplates.some((entry) => entry.slotTemplate === slotTemplate && entry.slotType === slotType)) {
+        continue;
+      }
+      hordeSlotTemplates.push({ forceType, slotTemplate, slotType, id: `${forceType}|${templateColumn}` });
     }
   }
 
@@ -882,6 +909,7 @@ export const buildBuildingsData = (tables: BuildingsTableRows, getLoc: Buildings
     regionSlotTemplates,
     foreignRegionSlotTemplates,
     foreignSlotTemplatesByType,
+    hordeSlotTemplates,
     startPosSettlements,
     campaignMapSettlementClimates,
     availabilitySetsByChain,
