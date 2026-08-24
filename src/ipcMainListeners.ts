@@ -5742,9 +5742,10 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
     byGame: Partial<Record<SupportedGames, FlowExecutionCacheEntry>>;
   }
   const FLOW_EXECUTION_CACHE_FILE = "flow-execution-cache.bin";
+  // 7: automatic flow execution uses saved pack content only; also invalidate v6 entries that included staged data.
   // 5: replacement outputs retain the source pack name; older cached outputs may use the Save
   // Changes node's configured name instead.
-  const FLOW_EXECUTION_CACHE_VERSION = 5;
+  const FLOW_EXECUTION_CACHE_VERSION = 7;
   let flowExecutionCache: FlowExecutionCache | null = null;
   const loadFlowExecutionCache = async (): Promise<FlowExecutionCache> => {
     if (flowExecutionCache !== null) return flowExecutionCache;
@@ -6745,8 +6746,11 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
       delete packHeaderCache[packPath];
       await savePackHeaderCache();
     }
-    if (flowExecutionCache) {
-      delete flowExecutionCache.byGame[appData.currentGame];
+    // The cache is lazy-loaded. Load it before invalidating so a persisted entry cannot survive a
+    // save merely because this process has not needed the cache yet.
+    const flowCache = await loadFlowExecutionCache();
+    if (flowCache.byGame[appData.currentGame]) {
+      delete flowCache.byGame[appData.currentGame];
       await saveFlowExecutionCache();
     }
   };
@@ -12359,15 +12363,7 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
           // Execute flows for enabled mods
           enabledModsWithFlows = sortedMods.filter((iterMod) => {
             const pack = appData.packsData.find((packData) => packData.path == iterMod.path);
-            const deletedFileKeys = new Set(
-              (appData.deletedPackFilePaths[iterMod.path] ?? []).map(normalizePackFilePathKey),
-            );
-            return (
-              pack &&
-              pack.packedFiles.some(
-                (file) => isPackedFlowName(file.name) && !deletedFileKeys.has(normalizePackFilePathKey(file.name)),
-              )
-            );
+            return !!pack?.packedFiles.some((file) => isPackedFlowName(file.name));
           });
           if (enabledModsWithFlows.length > 0) {
             console.log(`Found ${enabledModsWithFlows.length} mods with flows to execute`);
@@ -12424,7 +12420,6 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
                 pack.name,
                 sourcePackForFlowExecution,
                 packPathSubstitutes,
-                appData.deletedPackFilePaths[pack.path] ?? [],
               );
               createdFlowPacks.push(...createdPackPaths);
               for (const replacedPath of flowReplacedPackPaths) replacedPackPaths.add(replacedPath);

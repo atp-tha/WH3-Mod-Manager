@@ -1510,8 +1510,6 @@ export const executeFlowsForPack = async (
     const sourceMod = canReuseFlowSourcePack(sourcePack, sourceStat)
       ? sourcePack
       : await readPack(pathSource, { readFlows: true, skipParsingTables: true });
-    // Filter for flow files. Deletions staged in the editor must affect an automatic launch before
-    // the user has written the pack back to disk.
     const deletedFlowKeys = new Set(Array.from(deletedFlowFileNames, normalizePackFilePathKey));
     const flowFiles = sourceMod.packedFiles.filter(
       (file) => isPackedFlowName(file.name) && !deletedFlowKeys.has(normalizePackFilePathKey(file.name)),

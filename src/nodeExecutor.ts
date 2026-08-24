@@ -331,18 +331,19 @@ const readPackCached = async (
   packReadingOptions: PackReadingOptions,
   executionContext?: FlowExecutionContext,
 ): Promise<Pack> => {
+  const resolvedPackPath = resolveFlowSourcePackPath(packPath, executionContext);
   // The vanilla DB cache stands in for the parse when the request is only for db tables of the game's
   // own pack. getDBVersion is what getPacksTableData resolves with downstream, so passing it here is
   // what lets the cache refuse rather than hand back rows chunked by a different field count.
   const readOrServe = async () =>
-    (await readVanillaPackFromCache(packPath, packReadingOptions, getDBVersion)) ??
-    (await readPack(packPath, packReadingOptions));
+    (await readVanillaPackFromCache(resolvedPackPath, packReadingOptions, getDBVersion)) ??
+    (await readPack(resolvedPackPath, packReadingOptions));
 
   if (!executionContext) {
     return readOrServe();
   }
 
-  const cacheKey = buildReadPackCacheKey(packPath, packReadingOptions);
+  const cacheKey = buildReadPackCacheKey(resolvedPackPath, packReadingOptions);
   let cachedPackPromise = executionContext.readPackCache.get(cacheKey);
   if (!cachedPackPromise) {
     cachedPackPromise = readOrServe();
@@ -7305,10 +7306,14 @@ async function executeDeepCloneNode(
         result.fileCopies,
         packPathByFileName,
         async (sourcePackPath, names) => {
-          const sourcePack = await readPack(sourcePackPath, {
-            skipParsingTables: true,
-            filesToRead: names,
-          });
+          const sourcePack = await readPackCached(
+            sourcePackPath,
+            {
+              skipParsingTables: true,
+              filesToRead: names,
+            },
+            executionContext,
+          );
           return new Map(
             sourcePack.packedFiles
               .filter((packedFile) => names.includes(packedFile.name))
@@ -7831,10 +7836,14 @@ async function executeEditTextFileNode(
       const namesToRead = targetedNames.map((name) => originalNames?.get(name) ?? name);
 
       try {
-        const packWithFiles = await readPack(resolveFlowSourcePackPath(packPath, executionContext), {
-          skipParsingTables: true,
-          filesToRead: namesToRead,
-        });
+        const packWithFiles = await readPackCached(
+          packPath,
+          {
+            skipParsingTables: true,
+            filesToRead: namesToRead,
+          },
+          executionContext,
+        );
         // A vanilla pack is served from the prebuilt index and never separately indexed, so the pack
         // just read is what the outputs point back at.
         const indexedPack = indexedPacks.get(packPath) ?? packWithFiles;
@@ -8014,10 +8023,14 @@ async function executePackFileOperationsNode(
         };
       }
 
-      const packWithFiles = await readPack(sourcePackPath, {
-        skipParsingTables: true,
-        filesToRead: [...namesToRead],
-      });
+      const packWithFiles = await readPackCached(
+        packFile.path,
+        {
+          skipParsingTables: true,
+          filesToRead: [...namesToRead],
+        },
+        executionContext,
+      );
       const bufferByName = new Map(packWithFiles.packedFiles.map((packedFile) => [packedFile.name, packedFile.buffer]));
 
       for (const copy of copies) {
