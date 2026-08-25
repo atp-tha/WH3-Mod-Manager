@@ -316,6 +316,7 @@ const PackFileView = memo(({ packPath, filePath, showDialog }: PackFileViewProps
       </div>
       <div className="flex-1 min-h-0 overflow-hidden">
         <CodeMirror
+          className="h-full"
           value={displayedText}
           height="100%"
           theme={vscodeDark}
