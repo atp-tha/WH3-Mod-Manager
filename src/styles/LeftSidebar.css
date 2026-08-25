@@ -1,7 +1,7 @@
 .react-tabs {
   display: flex;
   margin-left: 36px;
-  height: min(400px, calc(100vh - 3rem));
+  height: auto;
   max-height: calc(100vh - 3rem);
   min-height: 0;
   border: 1px solid #3c3e43;
