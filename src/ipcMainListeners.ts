@@ -5588,6 +5588,7 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
       appData.isFeaturesForModdersEnabled = appState.isFeaturesForModdersEnabled || false;
       appData.moddersPrefix = appState.moddersPrefix || "";
       appData.isShowingSkillNodeSetNames = appState.isShowingSkillNodeSetNames ?? appData.isShowingSkillNodeSetNames;
+      appData.hideRepeatedKeyPrefixes = appState.hideRepeatedKeyPrefixes ?? appData.hideRepeatedKeyPrefixes;
       appData.isShowingHiddenSkills = appState.isShowingHiddenSkills ?? appData.isShowingHiddenSkills;
       appData.isShowingHiddenModifiersInsideSkills =
         appState.isShowingHiddenModifiersInsideSkills ?? appData.isShowingHiddenModifiersInsideSkills;
@@ -10852,6 +10853,7 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
   });
   ipcMain.on("setSkillsViewOptions", (event, skillsViewOptions: SkillsViewOptions) => {
     appData.isShowingSkillNodeSetNames = skillsViewOptions.isShowingSkillNodeSetNames;
+    appData.hideRepeatedKeyPrefixes = skillsViewOptions.hideRepeatedKeyPrefixes;
     appData.isShowingHiddenSkills = skillsViewOptions.isShowingHiddenSkills;
     appData.isShowingHiddenModifiersInsideSkills = skillsViewOptions.isShowingHiddenModifiersInsideSkills;
     appData.isCheckingSkillRequirements = skillsViewOptions.isCheckingSkillRequirements;
@@ -11229,6 +11231,7 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
     windows.skillsWindow?.webContents.send("setModdersPrefix", appData.moddersPrefix);
     windows.skillsWindow?.webContents.send("setSkillsViewOptions", {
       isShowingSkillNodeSetNames: appData.isShowingSkillNodeSetNames,
+      hideRepeatedKeyPrefixes: appData.hideRepeatedKeyPrefixes,
       isShowingHiddenSkills: appData.isShowingHiddenSkills,
       isShowingHiddenModifiersInsideSkills: appData.isShowingHiddenModifiersInsideSkills,
       isCheckingSkillRequirements: appData.isCheckingSkillRequirements,

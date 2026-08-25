@@ -110,6 +110,7 @@ const initialState = {
   currentModToUpload: undefined,
   isLocalizingSubtypes: false,
   isShowingSkillNodeSetNames: false,
+  hideRepeatedKeyPrefixes: true,
   isShowingHiddenSkills: true,
   isShowingHiddenModifiersInsideSkills: true,
   isCheckingSkillRequirements: true,

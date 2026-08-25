@@ -157,6 +157,7 @@ const withDefaults = (config: AppConfig): AppConfig => {
     modRowsSortingType: config.modRowsSortingType ?? SortingType.Ordered,
     enabledModsPaneSortingType: config.enabledModsPaneSortingType ?? SortingType.Ordered,
     currentGame: config.currentGame ?? "wh3",
+    hideRepeatedKeyPrefixes: config.hideRepeatedKeyPrefixes ?? true,
   };
 };
 

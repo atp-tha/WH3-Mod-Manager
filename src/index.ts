@@ -644,6 +644,7 @@ exec ${quoteForShell(process.execPath)}
       windows.mainWindow?.webContents.send("setIsAdmin", appData.isAdmin);
       windows.mainWindow?.webContents.send("setSkillsViewOptions", {
         isShowingSkillNodeSetNames: appData.isShowingSkillNodeSetNames,
+        hideRepeatedKeyPrefixes: appData.hideRepeatedKeyPrefixes,
         isShowingHiddenSkills: appData.isShowingHiddenSkills,
         isShowingHiddenModifiersInsideSkills: appData.isShowingHiddenModifiersInsideSkills,
         isCheckingSkillRequirements: appData.isCheckingSkillRequirements,

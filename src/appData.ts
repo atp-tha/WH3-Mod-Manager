@@ -162,6 +162,7 @@ interface AppData {
   isFeaturesForModdersEnabled: boolean;
   moddersPrefix: string;
   isShowingSkillNodeSetNames: boolean;
+  hideRepeatedKeyPrefixes: boolean;
   isShowingHiddenSkills: boolean;
   isShowingHiddenModifiersInsideSkills: boolean;
   isCheckingSkillRequirements: boolean;
@@ -230,6 +231,7 @@ const appData = {
   isFeaturesForModdersEnabled: false,
   moddersPrefix: "",
   isShowingSkillNodeSetNames: false,
+  hideRepeatedKeyPrefixes: true,
   isShowingHiddenSkills: true,
   isShowingHiddenModifiersInsideSkills: true,
   isCheckingSkillRequirements: true,

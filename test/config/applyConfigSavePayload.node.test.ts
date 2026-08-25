@@ -36,6 +36,8 @@ describe("applyConfigSavePayloadToAppData", () => {
     resetConfigSavePayloadCache();
     appData.allMods = [];
     appData.enabledMods = [];
+    appData.isShowingSkillNodeSetNames = false;
+    appData.hideRepeatedKeyPrefixes = true;
   });
 
   it("takes the mod lists when the payload carries them", () => {
@@ -67,6 +69,19 @@ describe("applyConfigSavePayloadToAppData", () => {
     applyConfigSavePayloadToAppData(unchangedPayload);
 
     expect(appData.allMods.map((mod) => mod.name)).toEqual(["alpha.pack"]);
+  });
+
+  it("updates the skills display options kept by the main process", () => {
+    const state = {
+      ...initialState,
+      isShowingSkillNodeSetNames: true,
+      hideRepeatedKeyPrefixes: false,
+    } as AppState;
+
+    applyConfigSavePayloadToAppData(selectConfigSavePayload(state));
+
+    expect(appData.isShowingSkillNodeSetNames).toBe(true);
+    expect(appData.hideRepeatedKeyPrefixes).toBe(false);
   });
 
   it("does not lose a mod change that a game-change payload consumed", () => {

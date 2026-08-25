@@ -36,6 +36,17 @@ describe("selectConfigSavePayload", () => {
     expect(payload.config.isVisualsHideDuplicatesEnabled).toBe(false);
   });
 
+  it("includes both skills display options in the saved config payload", () => {
+    const payload = selectConfigSavePayload({
+      ...initialState,
+      isShowingSkillNodeSetNames: true,
+      hideRepeatedKeyPrefixes: false,
+    } as AppState);
+
+    expect(payload.config.isShowingSkillNodeSetNames).toBe(true);
+    expect(payload.config.hideRepeatedKeyPrefixes).toBe(false);
+  });
+
   it("retains cached metadata for unavailable preset mods and fills blank live metadata", () => {
     const liveMod = createMod("live.pack", { categories: [] });
     const appState = {

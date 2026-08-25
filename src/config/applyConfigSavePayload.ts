@@ -18,6 +18,8 @@ export function applyConfigSavePayloadToAppData(payload: ConfigSavePayload) {
   appData.isCompatCheckingVanillaPacks = config.isCompatCheckingVanillaPacks;
   appData.isUsingEnglishLocalizations = !!config.isUsingEnglishLocalizations;
   appData.isChangingGameProcessPriority = config.isChangingGameProcessPriority;
+  appData.isShowingSkillNodeSetNames = config.isShowingSkillNodeSetNames ?? appData.isShowingSkillNodeSetNames;
+  appData.hideRepeatedKeyPrefixes = config.hideRepeatedKeyPrefixes ?? appData.hideRepeatedKeyPrefixes;
   appData.skillTreesDisplayMode = config.skillTreesDisplayMode;
   appData.technologyTreesDisplayMode = config.technologyTreesDisplayMode;
 }

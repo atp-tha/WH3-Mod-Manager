@@ -300,6 +300,7 @@ declare global {
     //skills view
     isLocalizingSubtypes: boolean;
     isShowingSkillNodeSetNames: boolean;
+    hideRepeatedKeyPrefixes: boolean;
     isShowingHiddenSkills: boolean;
     isShowingHiddenModifiersInsideSkills: boolean;
     isCheckingSkillRequirements: boolean;
@@ -321,6 +322,7 @@ declare global {
   type SkillsViewOptions = Pick<
     AppState,
     | "isShowingSkillNodeSetNames"
+    | "hideRepeatedKeyPrefixes"
     | "isShowingHiddenSkills"
     | "isShowingHiddenModifiersInsideSkills"
     | "isCheckingSkillRequirements"
@@ -360,6 +362,7 @@ declare global {
     | "userFlowOptions"
     | "nodeEditorFavorites"
     | "isShowingSkillNodeSetNames"
+    | "hideRepeatedKeyPrefixes"
     | "isShowingHiddenSkills"
     | "isShowingHiddenModifiersInsideSkills"
     | "isCheckingSkillRequirements"

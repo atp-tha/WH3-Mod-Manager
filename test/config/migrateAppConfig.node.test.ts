@@ -142,6 +142,7 @@ describe("migrateAppConfig", () => {
     expect(config.currentGame).toBe("wh3");
     expect(config.isVisualsSortByCultureEnabled).toBe(true);
     expect(config.isVisualsHideDuplicatesEnabled).toBe(true);
+    expect(config.hideRepeatedKeyPrefixes).toBe(true);
     expect(config.games.rome2).toEqual({
       currentPreset: { name: "", mods: [], version: 2 },
       presets: [],

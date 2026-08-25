@@ -6,7 +6,7 @@ import SkillsTreeView from "./SkillsTreeView";
 import SkillsView, { SkillsViewHandle, SkillsViewSnapshot } from "./SkillsView";
 import { Resizable } from "re-resizable";
 import debounce from "just-debounce-it";
-import { setIsShowingSkillNodeSetNames } from "../../appSlice";
+import { setHideRepeatedKeyPrefixes, setIsShowingSkillNodeSetNames } from "../../appSlice";
 
 type SkillTab = {
   id: string;
@@ -36,7 +36,6 @@ const isMatchingSelection = (selection: SkillSubtypeSelection | null, skillsData
 const SkillsViewer = memo(() => {
   const [filterInputValue, setFilterInputValue] = useState("");
   const [dbTableFilter, setDBTableFilter] = useState("");
-  const [hideRepeatedKeyPrefixes, setHideRepeatedKeyPrefixes] = useState(true);
   const [tabs, setTabs] = useState<SkillTab[]>([]);
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
   const pendingNewTab = useRef<SkillSubtypeSelection | null>(null);
@@ -78,6 +77,7 @@ const SkillsViewer = memo(() => {
   const skillsData = useAppSelector((state) => state.app.skillsData);
   const localized = useAppSelector((state) => state.app.currentLocalization);
   const isShowingSkillNodeSetNames = useAppSelector((state) => state.app.isShowingSkillNodeSetNames);
+  const hideRepeatedKeyPrefixes = useAppSelector((state) => state.app.hideRepeatedKeyPrefixes);
   const isLocalizingSubtypes = useAppSelector((state) => state.app.isLocalizingSubtypes);
 
   const getTabLabel = useCallback(
@@ -383,7 +383,7 @@ const SkillsViewer = memo(() => {
             id="hideRepeatedSkillKeyPrefixesCheckbox"
             type="checkbox"
             checked={hideRepeatedKeyPrefixes}
-            onChange={(event) => setHideRepeatedKeyPrefixes(event.target.checked)}
+            onChange={(event) => dispatch(setHideRepeatedKeyPrefixes(event.target.checked))}
           ></input>
           <span className="ml-2">{localized.hideRepeatedKeyPrefixes || "Hide Repeated Key Prefixes"}</span>
         </label>
