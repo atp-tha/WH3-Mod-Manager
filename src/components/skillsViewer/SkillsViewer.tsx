@@ -353,7 +353,7 @@ const SkillsViewer = memo(() => {
         </div>
       </div>
 
-      <div className="flex items-center">
+      <div className="flex items-center mt-2">
         <span className="relative">
           <input
             id="dbTableFilter"

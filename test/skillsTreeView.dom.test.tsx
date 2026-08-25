@@ -64,6 +64,10 @@ describe("SkillsTreeView", () => {
 
     expect(screen.getByText("emp_karl_franz")).toBeInTheDocument();
     expect(screen.queryByText("set_emp_karl_franz")).not.toBeInTheDocument();
+
+    const balthasar = screen.getByText("emp_balthasar_gelt");
+    const karl = screen.getByText("emp_karl_franz");
+    expect(Boolean(balthasar.compareDocumentPosition(karl) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
   });
 
   it("removes numeric game and DLC prefixes from unique node-set labels", () => {

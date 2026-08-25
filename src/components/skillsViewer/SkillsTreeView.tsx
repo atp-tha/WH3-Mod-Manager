@@ -65,15 +65,12 @@ const SkillsTreeView = memo((props: SkillsTreeViewProps) => {
     { name: "", children: [], metadata: { subtype: "", subtypeIndex: 0 } } as TreeData,
   );
 
-  // console.log(result);
-  const data = flattenTree(result);
   const hideRepeatedKeyPrefixes = props.hideRepeatedKeyPrefixes ?? true;
 
   const getSkillNodeSetKey = (metadata: TreeMetadata) =>
     skillsData.subtypesToSet?.[metadata.subtype]?.[metadata.subtypeIndex] ?? metadata.subtype;
 
-  const getFullNodeLabel = (element: INode) => {
-    const metadata = element.metadata as TreeMetadata;
+  const getFullNodeLabel = (metadata: TreeMetadata) => {
     if (isShowingSkillNodeSetNames) {
       return getSkillNodeSetKey(metadata);
     }
@@ -85,8 +82,7 @@ const SkillsTreeView = memo((props: SkillsTreeViewProps) => {
     return `${subtypeName}${indexSuffix}`;
   };
 
-  const leafNodes = data.filter((node) => node.children.length === 0);
-  const fullNodeLabels = leafNodes.map(getFullNodeLabel);
+  const fullNodeLabels = (result.children ?? []).map((node) => getFullNodeLabel(node.metadata));
   const displayNodeLabels = (() => {
     if (!hideRepeatedKeyPrefixes) return undefined;
 
@@ -117,14 +113,26 @@ const SkillsTreeView = memo((props: SkillsTreeViewProps) => {
     return displayLabels;
   })();
 
-  const getNodeLabel = (element: INode) => {
-    const fullLabel = getFullNodeLabel(element);
-    return displayNodeLabels?.get(fullLabel) ?? fullLabel;
-  };
+  const getDisplayLabel = (fullLabel: string) => displayNodeLabels?.get(fullLabel) ?? fullLabel;
+
+  if (hideRepeatedKeyPrefixes) {
+    result.children?.sort((first, second) => {
+      const firstLabel = getDisplayLabel(getFullNodeLabel(first.metadata));
+      const secondLabel = getDisplayLabel(getFullNodeLabel(second.metadata));
+      return collator.compare(firstLabel, secondLabel);
+    });
+  }
+
+  // console.log(result);
+  const data = flattenTree(result);
+
+  const getFullNodeLabelForElement = (element: INode) => getFullNodeLabel(element.metadata as TreeMetadata);
+
+  const getNodeLabel = (element: INode) => getDisplayLabel(getFullNodeLabelForElement(element));
 
   const getNodeTooltip = (element: INode) => {
     const metadata = element.metadata as TreeMetadata;
-    const fullLabel = getFullNodeLabel(element);
+    const fullLabel = getFullNodeLabelForElement(element);
     if (displayNodeLabels?.has(fullLabel)) return fullLabel;
 
     if (isShowingSkillNodeSetNames) {
@@ -186,7 +194,11 @@ const SkillsTreeView = memo((props: SkillsTreeViewProps) => {
 
     const res = childNodes.reduce((isShown, currentNode) => {
       if (!currentNode) return isShown;
-      return isShown || getFullNodeLabel(currentNode).includes(props.tableFilter) || areNodeChildrenShown(currentNode);
+      return (
+        isShown ||
+        getFullNodeLabelForElement(currentNode).includes(props.tableFilter) ||
+        areNodeChildrenShown(currentNode)
+      );
     }, false);
 
     return res;
@@ -200,7 +212,8 @@ const SkillsTreeView = memo((props: SkillsTreeViewProps) => {
     let isParentFiltered = false;
     const parentNode = data.find((node) => node.id == element.parent);
     if (parentNode)
-      isParentFiltered = getFullNodeLabel(parentNode).includes(props.tableFilter) || isAnyNodeParentShown(parentNode);
+      isParentFiltered =
+        getFullNodeLabelForElement(parentNode).includes(props.tableFilter) || isAnyNodeParentShown(parentNode);
 
     return isParentFiltered;
   };
@@ -209,7 +222,7 @@ const SkillsTreeView = memo((props: SkillsTreeViewProps) => {
     if (props.tableFilter == "") return false;
 
     return !(
-      getFullNodeLabel(element).includes(props.tableFilter) ||
+      getFullNodeLabelForElement(element).includes(props.tableFilter) ||
       areNodeChildrenShown(element) ||
       isAnyNodeParentShown(element)
     );
