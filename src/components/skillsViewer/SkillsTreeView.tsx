@@ -15,6 +15,24 @@ type SkillsTreeViewProps = {
 
 const collator = new Intl.Collator("en");
 const SKILL_NODE_SET_PREFIX = "set_";
+/** Known game/DLC prefixes that are boilerplate in skill node-set keys. */
+const SKILL_NODE_SET_OUTLIER_PREFIXES = [
+  /^wh_pro\d+_skill_node_set_/,
+  /^wh2_dlc\d+_/,
+  /^wh_dlc\d+_skill_node_set_/,
+  /^wh2_pro\d+_skill_node_/,
+  /^wh3_dlc\d+_skill_node_set_/,
+  /^wh3_dlc\d+_/,
+  /^wh3_pro\d+_/,
+] as const;
+
+const stripKnownSkillNodeSetPrefix = (value: string) => {
+  for (const prefix of SKILL_NODE_SET_OUTLIER_PREFIXES) {
+    const match = prefix.exec(value);
+    if (match) return value.slice(match[0].length);
+  }
+  return value;
+};
 
 const SkillsTreeView = memo((props: SkillsTreeViewProps) => {
   const clickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -74,9 +92,12 @@ const SkillsTreeView = memo((props: SkillsTreeViewProps) => {
 
     const shortened = buildKeyPrefixDisplay(fullNodeLabels).shortened;
     const candidates = fullNodeLabels.map((fullLabel) => {
-      const shortenedLabel = shortened.get(fullLabel) ?? fullLabel;
-      if (isShowingSkillNodeSetNames && shortenedLabel.startsWith(SKILL_NODE_SET_PREFIX)) {
-        return shortenedLabel.slice(SKILL_NODE_SET_PREFIX.length);
+      let shortenedLabel = shortened.get(fullLabel) ?? fullLabel;
+      if (isShowingSkillNodeSetNames) {
+        shortenedLabel = stripKnownSkillNodeSetPrefix(shortenedLabel);
+        if (shortenedLabel.startsWith(SKILL_NODE_SET_PREFIX)) {
+          shortenedLabel = shortenedLabel.slice(SKILL_NODE_SET_PREFIX.length);
+        }
       }
       return shortenedLabel;
     });

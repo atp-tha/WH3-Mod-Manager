@@ -33,6 +33,16 @@ const skillsData = {
   effectToUnitAbilityEnables: {},
 } as SkillsData;
 
+const outlierSkillsData = {
+  ...skillsData,
+  currentSubtype: "outlier_subtype",
+  subtypeToNumSets: { outlier_subtype: 1 },
+  subtypesToSet: {
+    outlier_subtype: ["wh3_dlc123_skill_node_set_emp_louen"],
+  },
+  subtypes: ["outlier_subtype"],
+} as SkillsData;
+
 describe("SkillsTreeView", () => {
   it("also hides the repeated set marker in node-set mode", () => {
     const store = configureStore({
@@ -54,5 +64,27 @@ describe("SkillsTreeView", () => {
 
     expect(screen.getByText("emp_karl_franz")).toBeInTheDocument();
     expect(screen.queryByText("set_emp_karl_franz")).not.toBeInTheDocument();
+  });
+
+  it("removes numeric game and DLC prefixes from unique node-set labels", () => {
+    const store = configureStore({
+      reducer: { app: appReducer },
+      preloadedState: {
+        app: {
+          ...initialState,
+          isShowingSkillNodeSetNames: true,
+          skillsData: outlierSkillsData,
+        },
+      },
+    });
+
+    render(
+      <Provider store={store}>
+        <SkillsTreeView tableFilter="" />
+      </Provider>,
+    );
+
+    expect(screen.getByText("emp_louen")).toBeInTheDocument();
+    expect(screen.queryByText("wh3_dlc123_skill_node_set_emp_louen")).not.toBeInTheDocument();
   });
 });
