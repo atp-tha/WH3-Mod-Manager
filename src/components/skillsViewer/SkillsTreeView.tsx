@@ -14,6 +14,7 @@ type SkillsTreeViewProps = {
 };
 
 const collator = new Intl.Collator("en");
+const SKILL_NODE_SET_PREFIX = "set_";
 
 const SkillsTreeView = memo((props: SkillsTreeViewProps) => {
   const clickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -66,19 +67,44 @@ const SkillsTreeView = memo((props: SkillsTreeViewProps) => {
     return `${subtypeName}${indexSuffix}`;
   };
 
-  const shortenedNodeLabels = hideRepeatedKeyPrefixes
-    ? buildKeyPrefixDisplay(data.filter((node) => node.children.length === 0).map(getFullNodeLabel)).shortened
-    : undefined;
+  const leafNodes = data.filter((node) => node.children.length === 0);
+  const fullNodeLabels = leafNodes.map(getFullNodeLabel);
+  const displayNodeLabels = (() => {
+    if (!hideRepeatedKeyPrefixes) return undefined;
+
+    const shortened = buildKeyPrefixDisplay(fullNodeLabels).shortened;
+    const candidates = fullNodeLabels.map((fullLabel) => {
+      const shortenedLabel = shortened.get(fullLabel) ?? fullLabel;
+      if (isShowingSkillNodeSetNames && shortenedLabel.startsWith(SKILL_NODE_SET_PREFIX)) {
+        return shortenedLabel.slice(SKILL_NODE_SET_PREFIX.length);
+      }
+      return shortenedLabel;
+    });
+    const candidateCounts = new Map<string, number>();
+    for (const candidate of candidates) {
+      candidateCounts.set(candidate, (candidateCounts.get(candidate) ?? 0) + 1);
+    }
+
+    const displayLabels = new Map<string, string>();
+    for (let index = 0; index < fullNodeLabels.length; index++) {
+      const fullLabel = fullNodeLabels[index];
+      const candidate = candidates[index];
+      if (candidate !== fullLabel && candidateCounts.get(candidate) === 1) {
+        displayLabels.set(fullLabel, candidate);
+      }
+    }
+    return displayLabels;
+  })();
 
   const getNodeLabel = (element: INode) => {
     const fullLabel = getFullNodeLabel(element);
-    return shortenedNodeLabels?.get(fullLabel) ?? fullLabel;
+    return displayNodeLabels?.get(fullLabel) ?? fullLabel;
   };
 
   const getNodeTooltip = (element: INode) => {
     const metadata = element.metadata as TreeMetadata;
     const fullLabel = getFullNodeLabel(element);
-    if (shortenedNodeLabels?.has(fullLabel)) return fullLabel;
+    if (displayNodeLabels?.has(fullLabel)) return fullLabel;
 
     if (isShowingSkillNodeSetNames) {
       return metadata.subtype;
