@@ -36,6 +36,7 @@ const isMatchingSelection = (selection: SkillSubtypeSelection | null, skillsData
 const SkillsViewer = memo(() => {
   const [filterInputValue, setFilterInputValue] = useState("");
   const [dbTableFilter, setDBTableFilter] = useState("");
+  const [hideRepeatedKeyPrefixes, setHideRepeatedKeyPrefixes] = useState(true);
   const [tabs, setTabs] = useState<SkillTab[]>([]);
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
   const pendingNewTab = useRef<SkillSubtypeSelection | null>(null);
@@ -296,7 +297,12 @@ const SkillsViewer = memo(() => {
         <Resizable defaultSize={{ width: "17%", height: "85vh" }} maxWidth="100%" minWidth="1">
           <div>
             <div className="overflow-auto h-[85vh] scrollbar scrollbar-track-gray-700 scrollbar-thumb-blue-700">
-              <SkillsTreeView tableFilter={dbTableFilter} onSelect={onTreeSelect} onDoubleClick={onTreeDoubleClick} />
+              <SkillsTreeView
+                tableFilter={dbTableFilter}
+                hideRepeatedKeyPrefixes={hideRepeatedKeyPrefixes}
+                onSelect={onTreeSelect}
+                onDoubleClick={onTreeDoubleClick}
+              />
             </div>
           </div>
         </Resizable>
@@ -371,6 +377,15 @@ const SkillsViewer = memo(() => {
             onChange={() => dispatch(setIsShowingSkillNodeSetNames(!isShowingSkillNodeSetNames))}
           ></input>
           <span className="ml-2">{localized.showSkillNodeSetNames || "Show Skill Node Set Names"}</span>
+        </label>
+        <label htmlFor="hideRepeatedSkillKeyPrefixesCheckbox" className="ml-4 flex items-center text-sm">
+          <input
+            id="hideRepeatedSkillKeyPrefixesCheckbox"
+            type="checkbox"
+            checked={hideRepeatedKeyPrefixes}
+            onChange={(event) => setHideRepeatedKeyPrefixes(event.target.checked)}
+          ></input>
+          <span className="ml-2">{localized.hideRepeatedKeyPrefixes || "Hide Repeated Key Prefixes"}</span>
         </label>
       </div>
     </div>

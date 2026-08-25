@@ -39,5 +39,6 @@
   "nodeEditorEditTextFileFindPlaceholder": "nodeEditorEditTextFileFindPlaceholder",
   "nodeEditorEditTextFileRequired": "nodeEditorEditTextFileRequired",
   "nodeEditorTargetNameHasPath": "nodeEditorTargetNameHasPath",
-  "configurationColumn": "configurationColumn"
+  "configurationColumn": "configurationColumn",
+  "hideRepeatedKeyPrefixes": "hideRepeatedKeyPrefixes"
 }

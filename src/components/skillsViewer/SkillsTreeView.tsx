@@ -4,9 +4,11 @@ import { IoMdArrowDropright } from "react-icons/io";
 import TreeView, { INode, ITreeViewOnSelectProps, flattenTree } from "react-accessible-treeview";
 import cx from "classnames";
 import "@silevis/reactgrid/styles.css";
+import { buildKeyPrefixDisplay } from "../viewer/viewerHelpers";
 
 type SkillsTreeViewProps = {
   tableFilter: string;
+  hideRepeatedKeyPrefixes?: boolean;
   onSelect?: (subtype: string, subtypeIndex: number) => void;
   onDoubleClick?: (subtype: string, subtypeIndex: number) => void;
 };
@@ -46,11 +48,12 @@ const SkillsTreeView = memo((props: SkillsTreeViewProps) => {
 
   // console.log(result);
   const data = flattenTree(result);
+  const hideRepeatedKeyPrefixes = props.hideRepeatedKeyPrefixes ?? true;
 
   const getSkillNodeSetKey = (metadata: TreeMetadata) =>
     skillsData.subtypesToSet?.[metadata.subtype]?.[metadata.subtypeIndex] ?? metadata.subtype;
 
-  const getNodeLabel = (element: INode) => {
+  const getFullNodeLabel = (element: INode) => {
     const metadata = element.metadata as TreeMetadata;
     if (isShowingSkillNodeSetNames) {
       return getSkillNodeSetKey(metadata);
@@ -63,8 +66,20 @@ const SkillsTreeView = memo((props: SkillsTreeViewProps) => {
     return `${subtypeName}${indexSuffix}`;
   };
 
+  const shortenedNodeLabels = hideRepeatedKeyPrefixes
+    ? buildKeyPrefixDisplay(data.filter((node) => node.children.length === 0).map(getFullNodeLabel)).shortened
+    : undefined;
+
+  const getNodeLabel = (element: INode) => {
+    const fullLabel = getFullNodeLabel(element);
+    return shortenedNodeLabels?.get(fullLabel) ?? fullLabel;
+  };
+
   const getNodeTooltip = (element: INode) => {
     const metadata = element.metadata as TreeMetadata;
+    const fullLabel = getFullNodeLabel(element);
+    if (shortenedNodeLabels?.has(fullLabel)) return fullLabel;
+
     if (isShowingSkillNodeSetNames) {
       return metadata.subtype;
     }
@@ -124,7 +139,7 @@ const SkillsTreeView = memo((props: SkillsTreeViewProps) => {
 
     const res = childNodes.reduce((isShown, currentNode) => {
       if (!currentNode) return isShown;
-      return isShown || getNodeLabel(currentNode).includes(props.tableFilter) || areNodeChildrenShown(currentNode);
+      return isShown || getFullNodeLabel(currentNode).includes(props.tableFilter) || areNodeChildrenShown(currentNode);
     }, false);
 
     return res;
@@ -138,7 +153,7 @@ const SkillsTreeView = memo((props: SkillsTreeViewProps) => {
     let isParentFiltered = false;
     const parentNode = data.find((node) => node.id == element.parent);
     if (parentNode)
-      isParentFiltered = getNodeLabel(parentNode).includes(props.tableFilter) || isAnyNodeParentShown(parentNode);
+      isParentFiltered = getFullNodeLabel(parentNode).includes(props.tableFilter) || isAnyNodeParentShown(parentNode);
 
     return isParentFiltered;
   };
@@ -147,7 +162,7 @@ const SkillsTreeView = memo((props: SkillsTreeViewProps) => {
     if (props.tableFilter == "") return false;
 
     return !(
-      getNodeLabel(element).includes(props.tableFilter) ||
+      getFullNodeLabel(element).includes(props.tableFilter) ||
       areNodeChildrenShown(element) ||
       isAnyNodeParentShown(element)
     );

@@ -168,6 +168,17 @@ describe("SkillsViewer", () => {
     expect(screen.getByTestId("tree-filter")).toHaveTextContent("");
   });
 
+  it("hides repeated key prefixes by default and allows the list to show them", () => {
+    renderViewer();
+
+    const prefixCheckbox = screen.getByRole("checkbox", { name: "Hide Repeated Key Prefixes" });
+    expect(prefixCheckbox).toBeChecked();
+
+    fireEvent.click(prefixCheckbox);
+
+    expect(prefixCheckbox).not.toBeChecked();
+  });
+
   it("ignores stale async updates when a new tab request is still pending", () => {
     const store = renderViewer();
 
