@@ -1919,5 +1919,6 @@
   "viewerFailedToReadFileAtPath": "{{path}} の読み取りに失敗しました: {{error}}",
   "viewerLoadModPacksError": "MOD パックのロードに失敗しました: {{error}}",
   "viewerUnsavedPrefix": "未保存:",
-  "viewerDeletedPrefix": "削除されました:"
+  "viewerDeletedPrefix": "削除されました:",
+  "hideRepeatedKeyPrefixes": "繰り返されるキープレフィックスを非表示にする"
 }

@@ -1919,5 +1919,6 @@
   "viewerFailedToReadFileAtPath": "No se pudo leer {{path}}: {{error}}",
   "viewerLoadModPacksError": "No se pudieron cargar los paquetes de modificaciones: {{error}}",
   "viewerUnsavedPrefix": "No guardado:",
-  "viewerDeletedPrefix": "Eliminado:"
+  "viewerDeletedPrefix": "Eliminado:",
+  "hideRepeatedKeyPrefixes": "Ocultar prefijos de clave repetidos"
 }

@@ -1919,5 +1919,6 @@
   "viewerFailedToReadFileAtPath": "{{path}} 읽기 실패: {{error}}",
   "viewerLoadModPacksError": "모드 팩을 로드하지 못했습니다: {{error}}",
   "viewerUnsavedPrefix": "저장되지 않은 항목:",
-  "viewerDeletedPrefix": "삭제됨:"
+  "viewerDeletedPrefix": "삭제됨:",
+  "hideRepeatedKeyPrefixes": "반복되는 키 접두사 숨기기"
 }

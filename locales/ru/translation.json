@@ -1919,5 +1919,6 @@
   "viewerFailedToReadFileAtPath": "Не удалось прочитать {{path}}: {{error}}.",
   "viewerLoadModPacksError": "Не удалось загрузить пакеты модов: {{error}}.",
   "viewerUnsavedPrefix": "Не сохранено:",
-  "viewerDeletedPrefix": "Удалено:"
+  "viewerDeletedPrefix": "Удалено:",
+  "hideRepeatedKeyPrefixes": "Скрыть повторяющиеся префиксы клавиш"
 }

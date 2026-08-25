@@ -1919,5 +1919,6 @@
   "viewerFailedToReadFileAtPath": "Fehler beim Lesen von {{path}}: {{error}}",
   "viewerLoadModPacksError": "Mod-Packs konnten nicht geladen werden: {{error}}",
   "viewerUnsavedPrefix": "Nicht gespeichert:",
-  "viewerDeletedPrefix": "Gelöscht:"
+  "viewerDeletedPrefix": "Gelöscht:",
+  "hideRepeatedKeyPrefixes": "Wiederholte Schlüsselpräfixe ausblenden"
 }

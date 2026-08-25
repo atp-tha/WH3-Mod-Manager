@@ -1919,5 +1919,6 @@
   "viewerFailedToReadFileAtPath": "Nie udało się odczytać {{path}}: {{error}}",
   "viewerLoadModPacksError": "Nie udało się załadować pakietów modów: {{error}}",
   "viewerUnsavedPrefix": "Niezapisane:",
-  "viewerDeletedPrefix": "Usunięto:"
+  "viewerDeletedPrefix": "Usunięto:",
+  "hideRepeatedKeyPrefixes": "Ukryj powtarzające się przedrostki klawiszy"
 }

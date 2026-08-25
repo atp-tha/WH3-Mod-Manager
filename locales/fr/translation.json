@@ -1919,5 +1919,6 @@
   "viewerFailedToReadFileAtPath": "Échec de la lecture de {{path}} : {{error}}",
   "viewerLoadModPacksError": "Échec du chargement des packs de modules : {{error}}",
   "viewerUnsavedPrefix": "Non enregistré :",
-  "viewerDeletedPrefix": "Supprimé :"
+  "viewerDeletedPrefix": "Supprimé :",
+  "hideRepeatedKeyPrefixes": "Masquer les préfixes de touches répétés"
 }
