@@ -14,6 +14,7 @@ import {
   getGlobalSearchResultFilePath,
   type GlobalSearchDbResult,
   type GlobalSearchKinds,
+  type GlobalSearchLocResult,
   type GlobalSearchProgress,
   type GlobalSearchRequest,
   type GlobalSearchResult,
@@ -32,8 +33,8 @@ export type GlobalSearchPanelProps = {
   isOpen: boolean;
   /** The packs with a tab in the viewer right now, for the per-pack source checkboxes. */
   openPacks: GlobalSearchOpenPack[];
-  onOpenDbResult: (result: GlobalSearchDbResult) => void;
-  onOpenFileResult: (result: Exclude<GlobalSearchResult, GlobalSearchDbResult>) => void;
+  onOpenDbResult: (result: GlobalSearchDbResult | GlobalSearchLocResult) => void;
+  onOpenFileResult: (result: Exclude<GlobalSearchResult, GlobalSearchDbResult | GlobalSearchLocResult>) => void;
   onClose: () => void;
 };
 
@@ -360,13 +361,13 @@ const GlobalSearchPanel = memo(
 
     const openResult = useCallback(
       (result: GlobalSearchResult) => {
-        if (result.kind === "db") {
+        if (result.kind === "db" || result.kind === "loc") {
           onOpenDbResult(result);
           return;
         }
-        // Loc tables and rigid models have no compatible content pane. Keep their results useful as
-        // search hits, but do not send them into PackFileView where they can only produce an error.
-        if (result.kind === "loc" || result.kind === "rigidModel") return;
+        // Rigid models have no compatible content pane. Keep their results useful as search hits,
+        // but do not send them into PackFileView where they can only produce an error.
+        if (result.kind === "rigidModel") return;
         onOpenFileResult(result);
       },
       [onOpenDbResult, onOpenFileResult],
@@ -430,23 +431,16 @@ const GlobalSearchPanel = memo(
         }
 
         const { result } = row;
-        const isOpenable = result.kind === "db" || result.kind === "text";
+        const isOpenable = result.kind === "db" || result.kind === "loc" || result.kind === "text";
         const unsupportedTitle =
-          result.kind === "loc"
-            ? localized.globalSearchLocUnavailable || "Loc tables cannot be opened in this viewer."
-            : localized.globalSearchRigidModelTitle ||
-              "Rigid models have no viewer; use the path to locate the file.";
+          localized.globalSearchRigidModelTitle || "Rigid models have no viewer; use the path to locate the file.";
         return (
           <div key={key} style={style} className="flex items-center">
             <button
               type="button"
               onClick={() => openResult(result)}
               disabled={!isOpenable}
-              title={
-                isOpenable
-                  ? undefined
-                  : unsupportedTitle
-              }
+              title={isOpenable ? undefined : unsupportedTitle}
               className={
                 "flex w-full items-center gap-3 pl-9 pr-2 text-left text-sm " +
                 // The colours live on the spans below, so a row that cannot be opened is dimmed as a

@@ -153,6 +153,15 @@ type ReferenceSelection = {
   displayedRowIndex: number;
 };
 
+export type SearchNavigationRequest = {
+  requestId: number;
+  target: DBTableSelection;
+  /** Zero-based row index for a DB result. */
+  rowIndex?: number;
+  /** Loc results identify their row by its key because vanilla loc search is cache-backed. */
+  rowKey?: string;
+};
+
 let textMeasureContext: CanvasRenderingContext2D | undefined;
 
 const getColumnFieldKey = (colIndex: number): string => String(colIndex);
@@ -781,6 +790,8 @@ const AgGridWrapper = memo(
     onGoToReference,
     referenceSelection,
     onReferenceSelectionHandled,
+    searchSelection,
+    onSearchSelectionHandled,
     onCopyRowsInto,
     otherOpenPacks,
     showDialog,
@@ -809,6 +820,8 @@ const AgGridWrapper = memo(
     onGoToReference?: (request: GoToReferenceRequest) => void;
     referenceSelection?: ReferenceSelection;
     onReferenceSelectionHandled?: (requestId: number) => void;
+    searchSelection?: ReferenceSelection;
+    onSearchSelectionHandled?: (requestId: number) => void;
     onCopyRowsInto?: (displayedRows: number[], targetPackPath: string, openAfterCopy: boolean) => void | Promise<void>;
     otherOpenPacks?: ViewerPackTarget[];
     showDialog: ShowViewerDialog;
@@ -1351,6 +1364,22 @@ const AgGridWrapper = memo(
       gridRef.current?.api.ensureIndexVisible(referenceSelection.displayedRowIndex, "middle");
       onReferenceSelectionHandled?.(referenceSelection.requestId);
     }, [currentSchema.fields.length, onReferenceSelectionHandled, referenceSelection, rowData.length]);
+
+    useEffect(() => {
+      if (!searchSelection) return;
+      if (searchSelection.displayedRowIndex < 0 || searchSelection.displayedRowIndex >= rowData.length) return;
+
+      setSelectionRanges([
+        normalizeSelectionRange(
+          searchSelection.displayedRowIndex,
+          0,
+          searchSelection.displayedRowIndex,
+          Math.max(0, currentSchema.fields.length - 1),
+        ),
+      ]);
+      gridRef.current?.api.ensureIndexVisible(searchSelection.displayedRowIndex, "middle");
+      onSearchSelectionHandled?.(searchSelection.requestId);
+    }, [currentSchema.fields.length, onSearchSelectionHandled, rowData.length, searchSelection]);
 
     useEffect(() => {
       const onWindowMouseUp = () => {
@@ -1897,11 +1926,21 @@ type PackTablesTableViewProps = {
   onGoToReference?: (request: GoToReferenceRequest) => void;
   referenceNavigation?: ReferenceNavigationRequest;
   onReferenceNavigationHandled?: (requestId: number) => void;
+  searchNavigation?: SearchNavigationRequest;
+  onSearchNavigationHandled?: (requestId: number) => void;
 };
 
 const PackTablesTableView = memo((props: PackTablesTableViewProps) => {
-  const { showDialog, otherOpenPacks, onCopyInto, onGoToReference, referenceNavigation, onReferenceNavigationHandled } =
-    props;
+  const {
+    showDialog,
+    otherOpenPacks,
+    onCopyInto,
+    onGoToReference,
+    referenceNavigation,
+    onReferenceNavigationHandled,
+    searchNavigation,
+    onSearchNavigationHandled,
+  } = props;
   const dispatch = useAppDispatch();
   const localized: Record<string, string> = useContext(localizationContext);
   const currentDBTableSelection = useAppSelector((state) => state.app.currentDBTableSelection);
@@ -1914,7 +1953,9 @@ const PackTablesTableView = memo((props: PackTablesTableViewProps) => {
   const [tableFilterInput, setTableFilterInput] = useState<string>("");
   const [tableFilter, setTableFilter] = useState<string>("");
   const [referenceSelection, setReferenceSelection] = useState<ReferenceSelection | undefined>(undefined);
+  const [searchSelection, setSearchSelection] = useState<ReferenceSelection | undefined>(undefined);
   const handledReferenceRequestIdRef = useRef<number | null>(null);
+  const handledSearchNavigationRequestIdRef = useRef<number | null>(null);
   const selectCurrentPackData = useMemo(makeSelectCurrentPackData, []);
   const selectCurrentPackUnsavedFiles = useMemo(makeSelectCurrentPackUnsavedFiles, []);
 
@@ -2094,8 +2135,17 @@ const PackTablesTableView = memo((props: PackTablesTableViewProps) => {
     setTableFilter("");
   }, [setTableFilterDebounced]);
 
+  const handleSearchSelectionHandled = useCallback(
+    (requestId: number) => {
+      setSearchSelection((current) => (current?.requestId === requestId ? undefined : current));
+      onSearchNavigationHandled?.(requestId);
+    },
+    [onSearchNavigationHandled],
+  );
+
   useEffect(() => {
     setReferenceSelection(undefined);
+    setSearchSelection(undefined);
   }, [openedTableKey]);
 
   useEffect(() => {
@@ -2167,6 +2217,69 @@ const PackTablesTableView = memo((props: PackTablesTableViewProps) => {
     onReferenceNavigationHandled,
     openedTableKey,
     referenceNavigation,
+  ]);
+
+  useEffect(() => {
+    if (!searchNavigation || handledSearchNavigationRequestIdRef.current === searchNavigation.requestId) {
+      return;
+    }
+
+    const target = searchNavigation.target;
+    const current = currentDBTableSelection;
+    if (
+      !current ||
+      current.packPath !== target.packPath ||
+      current.dbName !== target.dbName ||
+      current.dbSubname !== target.dbSubname ||
+      (current.dbFolder ?? DEFAULT_DB_TABLE_ROOT) !== (target.dbFolder ?? DEFAULT_DB_TABLE_ROOT)
+    ) {
+      return;
+    }
+
+    // The table component remains mounted while a tab is being switched. Wait for this target's
+    // prepared data rather than trying to navigate the table that was active one render ago.
+    if (!currentSchema || !activePreparedTableData || !openedTableKey || hydratedTableKey !== openedTableKey) {
+      return;
+    }
+
+    if (normalizedTableFilter !== "") {
+      clearTableFilter();
+      return;
+    }
+
+    const targetRowIndex =
+      typeof searchNavigation.rowIndex === "number"
+        ? searchNavigation.rowIndex
+        : searchNavigation.rowKey === undefined
+          ? -1
+          : activePreparedTableData.data.findIndex(
+              (row) => String(row[getColumnFieldKey(0)] ?? "") === searchNavigation.rowKey,
+            );
+    if (targetRowIndex < 0 || targetRowIndex >= activePreparedTableData.data.length) {
+      handledSearchNavigationRequestIdRef.current = searchNavigation.requestId;
+      onSearchNavigationHandled?.(searchNavigation.requestId);
+      return;
+    }
+
+    const displayedRowIndex = filteredRowIndices.indexOf(targetRowIndex);
+    if (displayedRowIndex < 0) {
+      clearTableFilter();
+      return;
+    }
+
+    handledSearchNavigationRequestIdRef.current = searchNavigation.requestId;
+    setSearchSelection({ requestId: searchNavigation.requestId, displayedRowIndex });
+  }, [
+    activePreparedTableData,
+    clearTableFilter,
+    currentDBTableSelection,
+    currentSchema,
+    filteredRowIndices,
+    hydratedTableKey,
+    normalizedTableFilter,
+    openedTableKey,
+    onSearchNavigationHandled,
+    searchNavigation,
   ]);
 
   const canHideDefaultColumns = colCount > HIDE_DEFAULT_COLUMNS_MIN_COLUMN_COUNT;
@@ -2529,6 +2642,8 @@ const PackTablesTableView = memo((props: PackTablesTableViewProps) => {
           onGoToReference={onGoToReference}
           referenceSelection={referenceSelection}
           onReferenceSelectionHandled={onReferenceNavigationHandled}
+          searchSelection={searchSelection}
+          onSearchSelectionHandled={handleSearchSelectionHandled}
           onCopyRowsInto={onCopyInto ? handleCopyRowsInto : undefined}
           otherOpenPacks={otherOpenPacks}
           showDialog={showDialog}

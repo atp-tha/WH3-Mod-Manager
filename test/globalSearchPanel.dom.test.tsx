@@ -318,17 +318,18 @@ describe("GlobalSearchPanel", () => {
     expect(onOpenFileResult).not.toHaveBeenCalled();
   });
 
-  it("does not offer to open a loc result, which has no file viewer", async () => {
+  it("opens a loc result through the table handler", async () => {
     setupApi(async (request) => emptyResponse(request.searchId, [locResult]));
-    const { onOpenFileResult } = renderPanel();
+    const { onOpenDbResult, onOpenFileResult } = renderPanel();
 
     await userEvent.type(screen.getByLabelText("Global search"), "chaos");
     await userEvent.click(searchButton());
 
     const row = await screen.findByText("Chaos Warriors");
-    expect(row.closest("button")).toBeDisabled();
+    expect(row.closest("button")).toBeEnabled();
 
     await userEvent.click(row.closest("button") as HTMLButtonElement);
+    expect(onOpenDbResult).toHaveBeenCalledWith(locResult);
     expect(onOpenFileResult).not.toHaveBeenCalled();
   });
 

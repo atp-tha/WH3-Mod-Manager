@@ -6,7 +6,11 @@ import { faChevronDown, faFile, faMagnifyingGlass, faXmark } from "@fortawesome/
 import PackTablesTreeView, { CopyIntoSource, PackTablesTreeViewHandle, ViewerPackTarget } from "./PackTablesTreeView";
 import ImportConflictsModal from "./ImportConflictsModal";
 import PackFileView from "./PackFileView";
-import PackTablesTableView, { type GoToReferenceRequest, type ReferenceNavigationRequest } from "./PackTablesTableView";
+import PackTablesTableView, {
+  type GoToReferenceRequest,
+  type ReferenceNavigationRequest,
+  type SearchNavigationRequest,
+} from "./PackTablesTableView";
 import { Resizable } from "re-resizable";
 import debounce from "just-debounce-it";
 import localizationContext from "../../localizationContext";
@@ -39,7 +43,7 @@ import { clearPreparedTableForPack } from "./tablePrepCache";
 import { getDefaultSaveAsPackName, getPackFileInventory, getPreferredTreeTab, hasLoadedDBTable } from "./viewerHelpers";
 import GlobalSearchPanel from "./GlobalSearchPanel";
 import { useKeepMountedOnceActive } from "../useKeepMountedOnceActive";
-import type { GlobalSearchDbResult, GlobalSearchResult } from "@/src/globalSearch/types";
+import type { GlobalSearchDbResult, GlobalSearchLocResult, GlobalSearchResult } from "@/src/globalSearch/types";
 
 type ViewerTabKind = "db" | "flow" | "file";
 
@@ -333,6 +337,8 @@ const ModsViewer = memo(() => {
    * packsData carries it, and only requestOpenModInViewer makes main read and push it.
    */
   const pendingSearchNavigationRef = useRef<{ packPath: string; apply: () => void } | null>(null);
+  const searchNavigationIdRef = useRef(0);
+  const [searchNavigation, setSearchNavigation] = useState<SearchNavigationRequest | undefined>(undefined);
   const saveAsPackNameInputRef = useRef<HTMLInputElement>(null);
   const newPackNameInputRef = useRef<HTMLInputElement>(null);
   const copyTableNameInputRef = useRef<HTMLInputElement>(null);
@@ -789,6 +795,10 @@ const ModsViewer = memo(() => {
     setReferenceNavigation((current) => (current?.requestId === requestId ? undefined : current));
   }, []);
 
+  const handleSearchNavigationHandled = useCallback((requestId: number) => {
+    setSearchNavigation((current) => (current?.requestId === requestId ? undefined : current));
+  }, []);
+
   useEffect(() => {
     const pending = pendingReferenceNavigationRef.current;
     if (!pending) return;
@@ -864,21 +874,37 @@ const ModsViewer = memo(() => {
   }, [isPackLoaded, packsDataByPath]);
 
   const handleOpenGlobalSearchDbResult = useCallback(
-    (result: GlobalSearchDbResult) => {
-      navigateToPack(result.packPath, () =>
-        handleOpenDBTable({
-          packPath: result.packPath,
-          dbName: result.dbName,
-          dbSubname: result.dbSubname,
-          dbFolder: result.dbFolder,
-        }),
-      );
+    (result: GlobalSearchDbResult | GlobalSearchLocResult) => {
+      const target =
+        result.kind === "db"
+          ? {
+              packPath: result.packPath,
+              dbName: result.dbName,
+              dbSubname: result.dbSubname,
+              dbFolder: result.dbFolder,
+            }
+          : (() => {
+              const parsed = parseDBTablePath(result.filePath.replaceAll("/", "\\"));
+              return parsed ? { packPath: result.packPath, ...parsed } : undefined;
+            })();
+      if (!target) return;
+
+      const navigation: SearchNavigationRequest = {
+        requestId: ++searchNavigationIdRef.current,
+        target,
+        ...(result.kind === "db" ? { rowIndex: result.rowIndex } : { rowKey: result.key }),
+      };
+
+      navigateToPack(result.packPath, () => {
+        setSearchNavigation(navigation);
+        handleOpenDBTable(target);
+      });
     },
     [handleOpenDBTable, navigateToPack],
   );
 
   const handleOpenGlobalSearchFileResult = useCallback(
-    (result: Exclude<GlobalSearchResult, GlobalSearchDbResult>) => {
+    (result: Exclude<GlobalSearchResult, GlobalSearchDbResult | GlobalSearchLocResult>) => {
       navigateToPack(result.packPath, () =>
         handleOpenPackedFile({ packPath: result.packPath, filePath: result.filePath }),
       );
@@ -2541,6 +2567,8 @@ const ModsViewer = memo(() => {
                         onGoToReference={handleGoToReference}
                         referenceNavigation={referenceNavigation}
                         onReferenceNavigationHandled={handleReferenceNavigationHandled}
+                        searchNavigation={searchNavigation}
+                        onSearchNavigationHandled={handleSearchNavigationHandled}
                       />
                     )
                   ) : (
