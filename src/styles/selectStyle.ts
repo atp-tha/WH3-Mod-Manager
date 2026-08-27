@@ -39,6 +39,12 @@ export const wrappedValueSelectStyle = {
     ...base,
     minWidth: 0,
   }),
+  option: (base: any, state: any) => ({
+    ...selectStyle.option(base, state),
+    minWidth: 0,
+    overflowWrap: "anywhere",
+    whiteSpace: "normal",
+  }),
   singleValue: (base: any) => ({
     ...selectStyle.singleValue(base),
     minWidth: 0,
