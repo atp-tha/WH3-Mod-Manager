@@ -8,7 +8,13 @@ export const factionFlagPath = (flagsPath: string | undefined): string | undefin
   return /\.png$/i.test(folder) ? folder : `${folder}\\mon_64.png`;
 };
 
-/** Adds the factions represented by the ESF region owners and their flag asset paths. */
+/**
+ * Adds the factions represented by the ESF region owners and their flag asset paths.
+ *
+ * Landless factions from the faction table follow the owners. The map only ever colours the ones
+ * that own something, but ownership editing needs a faction to be pickable before it holds land,
+ * and an imported ownership file naming one has to resolve to a real name and flag.
+ */
 export const addFactionDataToEsfMap = (
   map: EsfMapPayload,
   buildings: BuiltBuildingsData,
@@ -29,23 +35,37 @@ export const addFactionDataToEsfMap = (
     regionCounts.set(key, (regionCounts.get(key) ?? 0) + 1);
   }
 
-  const factions: EsfMapFaction[] = [...regionCounts.entries()]
+  const byLabel = (first: EsfMapFaction, second: EsfMapFaction) =>
+    first.label.localeCompare(second.label) || first.key.localeCompare(second.key);
+
+  const buildFaction = (key: string, lowerKey: string, regionCount: number): EsfMapFaction => {
+    const faction = factionsByKey.get(lowerKey);
+    const flagPath = factionFlagPath(faction?.flagPath);
+    const flagUrl = flagPath ? getFlagUrl?.(flagPath) : undefined;
+    return {
+      key,
+      label: faction?.localizedName || key,
+      ...(flagPath ? { flagPath } : {}),
+      ...(flagUrl ? { flagUrl } : {}),
+      ...(faction?.subculture ? { subculture: faction.subculture } : {}),
+      regionCount,
+    };
+  };
+
+  const owners: EsfMapFaction[] = [...regionCounts.entries()]
     .map(([lowerKey, regionCount]) => {
-      const faction = factionsByKey.get(lowerKey);
-      const key = faction?.key ?? ownerKeyByLowerKey.get(lowerKey);
-      if (!key) return undefined;
-      const flagPath = factionFlagPath(faction?.flagPath);
-      const flagUrl = flagPath ? getFlagUrl?.(flagPath) : undefined;
-      return {
-        key,
-        label: faction?.localizedName || key,
-        ...(flagPath ? { flagPath } : {}),
-        ...(flagUrl ? { flagUrl } : {}),
-        regionCount,
-      };
+      const key = factionsByKey.get(lowerKey)?.key ?? ownerKeyByLowerKey.get(lowerKey);
+      return key ? buildFaction(key, lowerKey, regionCount) : undefined;
     })
     .filter((faction): faction is EsfMapFaction => !!faction)
-    .sort((first, second) => first.label.localeCompare(second.label) || first.key.localeCompare(second.key));
+    .sort(byLabel);
 
-  return { ...map, factions };
+  // Quest and rebel factions never hold a region on the campaign map, so they would only pad the
+  // brush list with entries that produce an unloadable startpos.
+  const landless: EsfMapFaction[] = buildings.factions
+    .filter((faction) => !faction.isQuestFaction && !faction.isRebel && !regionCounts.has(faction.key.toLowerCase()))
+    .map((faction) => buildFaction(faction.key, faction.key.toLowerCase(), 0))
+    .sort(byLabel);
+
+  return { ...map, factions: [...owners, ...landless] };
 };

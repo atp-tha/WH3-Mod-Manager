@@ -3652,10 +3652,16 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
     try {
       const signature = await getEsfMapSignature(enabledMods, campaignName);
       const buildings = await ensureBuildingsData(enabledMods);
+      // Indexed rather than scanned per lookup: the faction roster asks for a flag per faction, and
+      // most of the roster holds no land.
+      const iconPathsByNormalizedPath = new Map<string, string>();
+      for (const iconPath of Object.keys(buildings.icons)) {
+        // First registration wins, as the scan this replaces did.
+        const normalized = normalizeAssetPath(iconPath);
+        if (!iconPathsByNormalizedPath.has(normalized)) iconPathsByNormalizedPath.set(normalized, iconPath);
+      }
       const registeredIconPath = (requestedPath: string) =>
-        Object.keys(buildings.icons).find(
-          (iconPath) => normalizeAssetPath(iconPath) === normalizeAssetPath(requestedPath),
-        );
+        iconPathsByNormalizedPath.get(normalizeAssetPath(requestedPath));
       const decorate = (map: import("./esfMap/types").EsfMapPayload) => {
         const withFactions = addFactionDataToEsfMap(map, buildings.data, (flagPath) => {
           const registeredPath = registeredIconPath(flagPath);
@@ -7541,9 +7547,7 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
         }
         return { success: true, text: decodePackedFileText(unsavedFile) };
       }
-      const deletedFileKeys = new Set(
-        (appData.deletedPackFilePaths[packPath] ?? []).map(normalizePackFilePathKey),
-      );
+      const deletedFileKeys = new Set((appData.deletedPackFilePaths[packPath] ?? []).map(normalizePackFilePathKey));
       if (deletedFileKeys.has(normalizePackFilePathKey(fileName))) {
         return {
           success: false,
@@ -7604,9 +7608,7 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
       // Check if there are unsaved flow files for this pack
       const unsavedFiles = appData.unsavedPacksData[packPath] || [];
       const unsavedFlowFiles = unsavedFiles.filter((file) => isPackedFlowName(file.name));
-      const deletedFileKeys = new Set(
-        (appData.deletedPackFilePaths[packPath] ?? []).map(normalizePackFilePathKey),
-      );
+      const deletedFileKeys = new Set((appData.deletedPackFilePaths[packPath] ?? []).map(normalizePackFilePathKey));
       // Read the pack to get flow files
       const pack = await readPack(packPath, { skipParsingTables: true, readFlows: true });
       // Find all flow files in the pack
@@ -7892,9 +7894,7 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
       seenPaths.add(resolvedPath);
 
       const unsavedFlowFiles = appData.unsavedPacksData[mod.path] ?? [];
-      const deletedFileKeys = new Set(
-        (appData.deletedPackFilePaths[mod.path] ?? []).map(normalizePackFilePathKey),
-      );
+      const deletedFileKeys = new Set((appData.deletedPackFilePaths[mod.path] ?? []).map(normalizePackFilePathKey));
       let hasFlows = unsavedFlowFiles.some((file) => isPackedFlowName(file.name));
       const retainedPack = appData.packsData.find((pack) => nodePath.resolve(pack.path) === resolvedPath);
       if (!hasFlows && retainedPack) {
@@ -8527,7 +8527,10 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
       const results = await Promise.allSettled(
         withoutDataMods.map(async (mod) => {
           const destinationPath = nodePath.join(gamePath, "data", mod.name);
-          mainWindow?.webContents.send("handleLog", `CREATING SYMLINK of ${mod.path} to ${gamePath}\\data\\${mod.name}`);
+          mainWindow?.webContents.send(
+            "handleLog",
+            `CREATING SYMLINK of ${mod.path} to ${gamePath}\\data\\${mod.name}`,
+          );
           await fsExtra.symlink(mod.path, destinationPath);
           return destinationPath;
         }),
@@ -12668,6 +12671,66 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
       if (requestingWindow && !requestingWindow.isDestroyed()) requestingWindow.focus();
     }
   });
+  /**
+   * Writes the campaign map's region ownership to a file the user picks.
+   *
+   * Defaults to the game folder because that is where the game reads a hand-written map.json from.
+   */
+  ipcMain.handle(
+    "exportRegionOwnership",
+    async (
+      event,
+      json: string,
+      suggestedName: string,
+    ): Promise<{ success: boolean; savedPath?: string; canceled?: boolean; error?: string }> => {
+      const requestingWindow = BrowserWindow.fromWebContents(event.sender);
+      try {
+        const defaultDirectory =
+          appData.gamesToGameFolderPaths[appData.currentGame]?.gamePath || app.getPath("documents");
+        const result = await dialog.showSaveDialog(requestingWindow || mainWindow || new BrowserWindow(), {
+          defaultPath: nodePath.join(defaultDirectory, suggestedName || "map.json"),
+          filters: [{ name: "JSON", extensions: ["json"] }],
+        });
+        if (result.canceled || !result.filePath) return { success: false, canceled: true };
+
+        const savedPath = result.filePath.toLowerCase().endsWith(".json") ? result.filePath : `${result.filePath}.json`;
+        await fs.promises.writeFile(savedPath, json, "utf8");
+        return { success: true, savedPath };
+      } catch (error) {
+        console.error("Error exporting region ownership:", error);
+        return { success: false, error: error instanceof Error ? error.message : "Unknown error" };
+      } finally {
+        if (requestingWindow && !requestingWindow.isDestroyed()) requestingWindow.focus();
+      }
+    },
+  );
+  /** Reads a region ownership file the user picks. Parsing stays in the renderer, with the map it applies to. */
+  ipcMain.handle(
+    "importRegionOwnership",
+    async (
+      event,
+    ): Promise<{ success: boolean; text?: string; filePath?: string; canceled?: boolean; error?: string }> => {
+      const requestingWindow = BrowserWindow.fromWebContents(event.sender);
+      try {
+        const defaultDirectory =
+          appData.gamesToGameFolderPaths[appData.currentGame]?.gamePath || app.getPath("documents");
+        const result = await dialog.showOpenDialog(requestingWindow || mainWindow || new BrowserWindow(), {
+          properties: ["openFile"],
+          defaultPath: defaultDirectory,
+          filters: [{ name: "JSON", extensions: ["json"] }],
+        });
+        if (result.canceled || result.filePaths.length === 0) return { success: false, canceled: true };
+
+        const filePath = result.filePaths[0];
+        return { success: true, text: await fs.promises.readFile(filePath, "utf8"), filePath };
+      } catch (error) {
+        console.error("Error importing region ownership:", error);
+        return { success: false, error: error instanceof Error ? error.message : "Unknown error" };
+      } finally {
+        if (requestingWindow && !requestingWindow.isDestroyed()) requestingWindow.focus();
+      }
+    },
+  );
   ipcMain.handle("selectDirectory", async (event, defaultPath?: string) => {
     // Parent the dialog on whichever window asked, not always the main one: parenting it elsewhere
     // moves focus to that window, and the caller is left behind when the dialog closes.

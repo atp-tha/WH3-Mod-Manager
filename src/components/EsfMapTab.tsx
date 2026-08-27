@@ -1,8 +1,15 @@
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAppDispatch, useAppSelector } from "../hooks";
-import { clearMapRegionSelection, selectMapRegion, setMapCampaignName } from "../appSlice";
+import { addToast, clearMapRegionSelection, selectMapRegion, setMapCampaignName } from "../appSlice";
 import { useLocalizations } from "../localizationContext";
 import { useDeferredWhileInactive } from "./useDeferredWhileInactive";
+import {
+  applyOwnershipEdits,
+  formatRegionOwnershipJson,
+  ownershipEditsFromImport,
+  parseRegionOwnership,
+} from "../esfMap/ownership";
+import type { OwnershipEdits } from "../esfMap/ownership";
 import type { EsfMapArea, EsfMapCampaignOption, EsfMapMarker, EsfMapPayload } from "../esfMap/types";
 
 type EsfMapTabProps = {
@@ -11,6 +18,10 @@ type EsfMapTabProps = {
 
 const MAP_AREA_OPACITY = 0.36;
 const FACTION_FLAG_SIZE = 20;
+/** Deep enough to walk back a mis-click run, shallow enough that the snapshots stay cheap. */
+const OWNERSHIP_HISTORY_LIMIT = 200;
+/** How many factions the brush list renders at once. The faction table runs to thousands of rows. */
+const LISTED_FACTION_LIMIT = 200;
 
 type MapView = "regions" | "factions" | "climate";
 
@@ -94,7 +105,8 @@ const EsfMapTab = memo(({ isActive = true }: EsfMapTabProps) => {
     scrollTop: number;
   }>();
   const suppressMapClickRef = useRef(false);
-  const [map, setMap] = useState<EsfMapPayload>();
+  /** The map as the startpos has it. Ownership edits are overlaid onto it below, never into it. */
+  const [baseMap, setBaseMap] = useState<EsfMapPayload>();
   const [campaignOptions, setCampaignOptions] = useState<EsfMapCampaignOption[]>([]);
   const [selectedMarkerId, setSelectedMarkerId] = useState<number>();
   const [selectedSettlementType, setSelectedSettlementType] = useState("");
@@ -106,10 +118,33 @@ const EsfMapTab = memo(({ isActive = true }: EsfMapTabProps) => {
   const [isDraggingMap, setIsDraggingMap] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string>();
+  const [isEditingOwnership, setIsEditingOwnership] = useState(false);
+  /** The faction a left click paints, held as its canonical key. Independent of the region selection. */
+  const [brushFaction, setBrushFaction] = useState<string>();
+  const [ownershipEdits, setOwnershipEdits] = useState<OwnershipEdits>({});
+  const [editHistory, setEditHistory] = useState<OwnershipEdits[]>([]);
+  const [isTransferringOwnership, setIsTransferringOwnership] = useState(false);
 
   const mapText = (key: string, fallback: string) => localized[key] || fallback;
   const mapMessage = (key: string, fallback: string, values: Record<string, string | number>) =>
     interpolateMapText(mapText(key, fallback), values);
+
+  const factionsByKey = useMemo(
+    () => new Map((baseMap?.factions ?? []).map((faction) => [faction.key.toLowerCase(), faction])),
+    [baseMap],
+  );
+  // Everything below reads the edited map, so the canvas, the sidebar and the counts all agree.
+  const map = useMemo(
+    () => (baseMap ? applyOwnershipEdits(baseMap, ownershipEdits, factionsByKey) : undefined),
+    [baseMap, factionsByKey, ownershipEdits],
+  );
+  const baseOwnerByRegion = useMemo(
+    () => new Map((baseMap?.markers ?? []).map((marker) => [marker.key, marker.ownerFaction ?? null] as const)),
+    [baseMap],
+  );
+  const editedRegionCount = Object.keys(ownershipEdits).length;
+  const isEditingFactions = mapView === "factions" && isEditingOwnership;
+  const brushFactionKey = factionKey(brushFaction);
 
   useEffect(() => {
     if (currentGame !== "wh3") return;
@@ -121,11 +156,11 @@ const EsfMapTab = memo(({ isActive = true }: EsfMapTabProps) => {
       .then((response) => {
         if (!current) return;
         if (!response.success) {
-          setMap(undefined);
+          setBaseMap(undefined);
           setError(response.error);
           return;
         }
-        setMap(response.map);
+        setBaseMap(response.map);
         setCampaignOptions(response.map.availableCampaigns);
         setSelectedSettlementType("");
         setClimateSelectionKey(undefined);
@@ -133,7 +168,7 @@ const EsfMapTab = memo(({ isActive = true }: EsfMapTabProps) => {
       })
       .catch((reason) => {
         if (current) {
-          setMap(undefined);
+          setBaseMap(undefined);
           setError(reason instanceof Error ? reason.message : String(reason));
         }
       })
@@ -169,19 +204,30 @@ const EsfMapTab = memo(({ isActive = true }: EsfMapTabProps) => {
   const isAllClimateSelected =
     climateSelectionKey === null || (climateSelectionKey === undefined && !selectedMarkerClimateKey);
 
-  const factionsByKey = useMemo(
-    () => new Map((map?.factions ?? []).map((faction) => [faction.key.toLowerCase(), faction])),
-    [map],
-  );
-
-  const filteredFactions = useMemo(() => {
+  // The roster carries thousands of factions so any of them can be handed land, but only landholders
+  // belong in the list: the rest are reachable by filtering for them, and are capped so that neither
+  // the render nor the flag requests scale with the whole faction table.
+  const factionMatches = useMemo(() => {
     if (!map) return [];
     const query = filter.trim().toLowerCase();
-    if (!query) return map.factions;
-    return map.factions.filter((faction) =>
+    const factions =
+      isEditingFactions && query ? map.factions : map.factions.filter((faction) => faction.regionCount > 0);
+    if (!query) return factions;
+    return factions.filter((faction) =>
       [faction.key, faction.label].some((value) => value.toLowerCase().includes(query)),
     );
-  }, [filter, map]);
+  }, [filter, isEditingFactions, map]);
+
+  const filteredFactions = useMemo(
+    () => (isEditingFactions ? factionMatches.slice(0, LISTED_FACTION_LIMIT) : factionMatches),
+    [factionMatches, isEditingFactions],
+  );
+  const hiddenFactionCount = factionMatches.length - filteredFactions.length;
+
+  const landholdingFactionCount = useMemo(
+    () => (map?.factions ?? []).filter((faction) => faction.regionCount > 0).length,
+    [map],
+  );
 
   const climateByKey = useMemo(
     () => new Map((map?.climates ?? []).map((climate) => [climate.key.toLowerCase(), climate] as const)),
@@ -242,6 +288,146 @@ const EsfMapTab = memo(({ isActive = true }: EsfMapTabProps) => {
     [centerMapOnPoint, map],
   );
 
+  // Edits are keyed by region key, so they survive a mod toggle reloading the same campaign. Another
+  // campaign has other regions entirely, so carrying them over would paint the wrong places.
+  const campaignKey = baseMap?.campaignKey;
+  useEffect(() => {
+    setOwnershipEdits({});
+    setEditHistory([]);
+    setBrushFaction(undefined);
+  }, [campaignKey]);
+
+  const pushEditHistory = useCallback(
+    () => setEditHistory((history) => [...history, ownershipEdits].slice(-OWNERSHIP_HISTORY_LIMIT)),
+    [ownershipEdits],
+  );
+
+  /** Records an owner for a region, dropping the edit again when it lands back on the startpos owner. */
+  const paintRegion = (regionKey: string, owner: string | null) => {
+    const startposOwner = baseOwnerByRegion.get(regionKey) ?? null;
+    const currentOwner = regionKey in ownershipEdits ? ownershipEdits[regionKey] : startposOwner;
+    if (factionKey(currentOwner) === factionKey(owner)) return;
+
+    pushEditHistory();
+    setOwnershipEdits((edits) => {
+      const next = { ...edits };
+      if (factionKey(startposOwner) === factionKey(owner)) delete next[regionKey];
+      else next[regionKey] = owner;
+      return next;
+    });
+  };
+
+  const undoOwnershipEdit = useCallback(() => {
+    if (editHistory.length === 0) return;
+    setOwnershipEdits(editHistory[editHistory.length - 1]);
+    setEditHistory((history) => history.slice(0, -1));
+  }, [editHistory]);
+
+  const revertOwnershipEdits = () => {
+    if (editedRegionCount === 0) return;
+    pushEditHistory();
+    setOwnershipEdits({});
+  };
+
+  useEffect(() => {
+    if (!isActive || !isEditingFactions) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.shiftKey || event.altKey || !(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "z")
+        return;
+      const target = event.target as HTMLElement | null;
+      if (target && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName))) return;
+      event.preventDefault();
+      undoOwnershipEdit();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isActive, isEditingFactions, undoOwnershipEdit]);
+
+  const showOwnershipToast = (type: ToastType, messages: string[]) =>
+    dispatch(addToast({ type, messages, startTime: Date.now() }));
+
+  const exportOwnership = async () => {
+    if (!map || isTransferringOwnership) return;
+    setIsTransferringOwnership(true);
+    try {
+      const result = await window.api?.exportRegionOwnership(formatRegionOwnershipJson(map), "map.json");
+      if (!result || result.canceled) return;
+      if (result.success) {
+        showOwnershipToast("success", [
+          mapMessage("mapOwnershipExported", "Region ownership written to {{path}}", {
+            path: result.savedPath ?? "",
+          }),
+        ]);
+      } else {
+        showOwnershipToast("warning", [
+          mapMessage("mapOwnershipExportFailed", "Could not write the region ownership file: {{error}}", {
+            error: result.error ?? "",
+          }),
+        ]);
+      }
+    } finally {
+      setIsTransferringOwnership(false);
+    }
+  };
+
+  const importOwnership = async () => {
+    if (!baseMap || isTransferringOwnership) return;
+    setIsTransferringOwnership(true);
+    try {
+      const result = await window.api?.importRegionOwnership();
+      if (!result || result.canceled) return;
+
+      const importFailed = (reason: string) =>
+        showOwnershipToast("warning", [
+          mapMessage("mapOwnershipImportFailed", "Could not read the region ownership file: {{error}}", {
+            error: reason,
+          }),
+        ]);
+      if (!result.success || result.text === undefined) {
+        importFailed(result.error ?? mapText("mapOwnershipImportUnknownError", "Unknown error"));
+        return;
+      }
+      const parsed = parseRegionOwnership(result.text);
+      if ("error" in parsed) {
+        importFailed(parsed.error);
+        return;
+      }
+
+      const { edits, unknownRegions, unknownFactions } = ownershipEditsFromImport(
+        baseMap,
+        parsed.ownership,
+        baseMap.factions,
+      );
+      pushEditHistory();
+      setOwnershipEdits(edits);
+
+      const messages = [
+        mapMessage("mapOwnershipImported", "Imported ownership for {{count}} region(s).", {
+          count: Object.keys(edits).length,
+        }),
+      ];
+      if (unknownRegions.length > 0) {
+        messages.push(
+          mapMessage("mapOwnershipUnknownRegions", "{{count}} region(s) skipped, not in this campaign: {{keys}}", {
+            count: unknownRegions.length,
+            keys: unknownRegions.slice(0, 5).join(", "),
+          }),
+        );
+      }
+      if (unknownFactions.length > 0) {
+        messages.push(
+          mapMessage("mapOwnershipUnknownFactions", "{{count}} unknown faction key(s) kept as written: {{keys}}", {
+            count: unknownFactions.length,
+            keys: unknownFactions.slice(0, 5).join(", "),
+          }),
+        );
+      }
+      showOwnershipToast(unknownRegions.length + unknownFactions.length > 0 ? "warning" : "success", messages);
+    } finally {
+      setIsTransferringOwnership(false);
+    }
+  };
+
   useEffect(() => {
     if (!map) return;
     const selectedRegion =
@@ -257,19 +443,21 @@ const EsfMapTab = memo(({ isActive = true }: EsfMapTabProps) => {
   }, [map, mapSelectedRegion]);
 
   useEffect(() => {
+    // While painting the list follows the brush, not whatever region was clicked last.
+    const listedFactionKey = isEditingFactions ? brushFactionKey : selectedMarkerFactionKey;
     const itemKey =
       mapView === "regions"
         ? selectedMarkerId === undefined
           ? undefined
           : `region:${selectedMarkerId}`
-        : mapView === "factions" && selectedMarkerFactionKey
-          ? `faction:${selectedMarkerFactionKey}`
+        : mapView === "factions" && listedFactionKey
+          ? `faction:${listedFactionKey}`
           : undefined;
     if (!itemKey) return;
 
     const listItem = mapListItemRefs.current.get(itemKey);
     if (listItem?.scrollIntoView) listItem.scrollIntoView({ behavior: "instant", block: "nearest" });
-  }, [filter, map, mapView, selectedMarkerFactionKey, selectedMarkerId]);
+  }, [brushFactionKey, filter, isEditingFactions, map, mapView, selectedMarkerFactionKey, selectedMarkerId]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -331,7 +519,24 @@ const EsfMapTab = memo(({ isActive = true }: EsfMapTabProps) => {
         }
       }
 
-      if (mapView === "factions" && selectedFactionKey) {
+      if (mapView === "factions" && isEditingOwnership) {
+        // Painting needs the whole board visible, not just one faction's holdings.
+        for (const area of map.areas) {
+          const ownerKey = factionKey(area.ownerFaction);
+          if (!ownerKey || !regionMatchesSettlementType(area.regionKey)) continue;
+          drawAreaPath(context, area, map.height, map.displayFlipY);
+          context.fillStyle = factionColour(ownerKey);
+          context.fill("evenodd");
+        }
+        for (const area of brushFactionKey ? map.areas : []) {
+          if (!regionMatchesSettlementType(area.regionKey) || factionKey(area.ownerFaction) !== brushFactionKey)
+            continue;
+          drawAreaPath(context, area, map.height, map.displayFlipY);
+          context.strokeStyle = "rgba(255, 255, 255, 0.9)";
+          context.lineWidth = 1.2;
+          context.stroke();
+        }
+      } else if (mapView === "factions" && selectedFactionKey) {
         for (const area of map.areas) {
           if (!regionMatchesSettlementType(area.regionKey) || factionKey(area.ownerFaction) !== selectedFactionKey)
             continue;
@@ -398,9 +603,13 @@ const EsfMapTab = memo(({ isActive = true }: EsfMapTabProps) => {
 
     const backgroundSrc = map.backgroundImage?.src;
     const backgroundTextSrc = map.backgroundTextImage?.src;
+    // Only landholders put a flag on the map, and the roster is mostly factions that hold nothing.
     const flagSources =
       mapView === "factions"
-        ? map.factions.map((faction) => faction.flagUrl).filter((src): src is string => !!src)
+        ? map.factions
+            .filter((faction) => faction.regionCount > 0)
+            .map((faction) => faction.flagUrl)
+            .filter((src): src is string => !!src)
         : [];
     const imageSources = Array.from(
       new Set([backgroundSrc, backgroundTextSrc, ...flagSources].filter(Boolean)),
@@ -440,7 +649,18 @@ const EsfMapTab = memo(({ isActive = true }: EsfMapTabProps) => {
     return () => {
       cancelled = true;
     };
-  }, [climateByKey, climateSelectionKey, factionsByKey, map, mapView, selectedMarkerId, selectedSettlementType, zoom]);
+  }, [
+    brushFactionKey,
+    climateByKey,
+    climateSelectionKey,
+    factionsByKey,
+    isEditingOwnership,
+    map,
+    mapView,
+    selectedMarkerId,
+    selectedSettlementType,
+    zoom,
+  ]);
 
   useEffect(() => {
     const anchor = mapZoomAnchorRef.current;
@@ -560,16 +780,12 @@ const EsfMapTab = memo(({ isActive = true }: EsfMapTabProps) => {
     }
   };
 
-  const selectAtCanvasPoint = (event: React.MouseEvent<HTMLCanvasElement>) => {
-    if (suppressMapClickRef.current) {
-      suppressMapClickRef.current = false;
-      return;
-    }
-    if (!map) return;
+  const markerAtCanvasPoint = (event: React.MouseEvent<HTMLCanvasElement>): EsfMapMarker | undefined => {
+    if (!map) return undefined;
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (!canvas) return undefined;
     const context = canvas.getContext("2d");
-    if (!context) return;
+    if (!context) return undefined;
     const rect = canvas.getBoundingClientRect();
     const x = Math.max(0, Math.min(map.width - 1, ((event.clientX - rect.left) / rect.width) * map.width));
     const rawY = Math.max(0, Math.min(map.height - 1, ((event.clientY - rect.top) / rect.height) * map.height));
@@ -597,7 +813,26 @@ const EsfMapTab = memo(({ isActive = true }: EsfMapTabProps) => {
       }
       if (closestDistance <= 256) areaMarker = closest;
     }
-    selectMapMarker(areaMarker);
+    return areaMarker;
+  };
+
+  const handleMapClick = (event: React.MouseEvent<HTMLCanvasElement>) => {
+    if (suppressMapClickRef.current) {
+      suppressMapClickRef.current = false;
+      return;
+    }
+    const marker = markerAtCanvasPoint(event);
+    if (marker && isEditingFactions && brushFaction) paintRegion(marker.key, brushFaction);
+    selectMapMarker(marker);
+  };
+
+  const handleMapContextMenu = (event: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!isEditingFactions) return;
+    event.preventDefault();
+    const marker = markerAtCanvasPoint(event);
+    if (!marker) return;
+    paintRegion(marker.key, null);
+    selectMapMarker(marker);
   };
 
   if (currentGame !== "wh3") {
@@ -610,7 +845,7 @@ const EsfMapTab = memo(({ isActive = true }: EsfMapTabProps) => {
 
   return (
     <div className="flex h-[92vh] min-h-0 flex-col text-gray-200">
-      <div className="flex items-center gap-3 border-b border-gray-700 px-4 py-2 text-sm">
+      <div className="flex flex-wrap items-center gap-3 border-b border-gray-700 px-4 py-2 text-sm">
         <span className="font-medium text-gray-100">{mapText("mapTitle", "Campaign map")}</span>
         <div
           className="flex rounded border border-gray-700 bg-gray-900 p-0.5"
@@ -639,7 +874,21 @@ const EsfMapTab = memo(({ isActive = true }: EsfMapTabProps) => {
         {map && campaignOptions.length > 0 && (
           <select
             value={mapCampaignName}
-            onChange={(event) => dispatch(setMapCampaignName(event.target.value))}
+            onChange={(event) => {
+              // The edits below are keyed by region, and another campaign has none of these regions.
+              if (editedRegionCount > 0) {
+                showOwnershipToast("info", [
+                  mapMessage(
+                    "mapOwnershipEditsCleared",
+                    "{{count}} region ownership edit(s) dropped: campaign changed.",
+                    {
+                      count: editedRegionCount,
+                    },
+                  ),
+                ]);
+              }
+              dispatch(setMapCampaignName(event.target.value));
+            }}
             className="rounded border border-gray-700 bg-gray-900 px-2 py-1 text-xs text-gray-200"
             aria-label={mapText("mapTitle", "Campaign map")}
           >
@@ -664,6 +913,68 @@ const EsfMapTab = memo(({ isActive = true }: EsfMapTabProps) => {
               </option>
             ))}
           </select>
+        )}
+        {map && mapView === "factions" && (
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              aria-pressed={isEditingOwnership}
+              onClick={() => setIsEditingOwnership((isEditing) => !isEditing)}
+              title={mapText(
+                "mapEditOwnershipHint",
+                "Left click gives a region to the selected faction, right click empties it.",
+              )}
+              className={`rounded border px-2 py-1 text-xs ${
+                isEditingOwnership
+                  ? "border-blue-500 bg-blue-800 text-gray-100"
+                  : "border-gray-700 bg-gray-900 text-gray-400 hover:bg-gray-800 hover:text-gray-200"
+              }`}
+            >
+              {mapText("mapEditOwnership", "Edit ownership")}
+            </button>
+            {isEditingOwnership && (
+              <>
+                <button
+                  type="button"
+                  onClick={undoOwnershipEdit}
+                  disabled={editHistory.length === 0}
+                  title={mapText("mapUndoHint", "Undo (Ctrl+Z)")}
+                  className="rounded border border-gray-700 bg-gray-900 px-2 py-1 text-xs text-gray-300 hover:bg-gray-800 disabled:opacity-40 disabled:hover:bg-gray-900"
+                >
+                  {mapText("mapUndo", "Undo")}
+                </button>
+                <button
+                  type="button"
+                  onClick={revertOwnershipEdits}
+                  disabled={editedRegionCount === 0}
+                  className="rounded border border-gray-700 bg-gray-900 px-2 py-1 text-xs text-gray-300 hover:bg-gray-800 disabled:opacity-40 disabled:hover:bg-gray-900"
+                >
+                  {mapText("mapRevertEdits", "Revert edits")}
+                </button>
+                {editedRegionCount > 0 && (
+                  <span className="text-xs text-amber-300">
+                    {mapMessage("mapEditedRegions", "{{count}} edited", { count: editedRegionCount })}
+                  </span>
+                )}
+              </>
+            )}
+            <button
+              type="button"
+              onClick={importOwnership}
+              disabled={isTransferringOwnership}
+              className="rounded border border-gray-700 bg-gray-900 px-2 py-1 text-xs text-gray-300 hover:bg-gray-800 disabled:opacity-40 disabled:hover:bg-gray-900"
+            >
+              {mapText("mapImportOwnership", "Import…")}
+            </button>
+            <button
+              type="button"
+              onClick={exportOwnership}
+              disabled={isTransferringOwnership}
+              className="rounded border border-gray-700 bg-gray-900 px-2 py-1 text-xs text-gray-300 hover:bg-gray-800 disabled:opacity-40 disabled:hover:bg-gray-900"
+            >
+              {mapText("mapExportOwnership", "Export…")}
+            </button>
+          </div>
         )}
         {map && (
           <span className="text-xs text-gray-500">
@@ -723,8 +1034,9 @@ const EsfMapTab = memo(({ isActive = true }: EsfMapTabProps) => {
                 onPointerMove={moveMapDrag}
                 onPointerUp={endMapDrag}
                 onPointerCancel={endMapDrag}
-                onClick={selectAtCanvasPoint}
-                className={`block ${isDraggingMap ? "cursor-grabbing" : "cursor-grab"} touch-none select-none rounded border border-gray-700 bg-slate-950`}
+                onClick={handleMapClick}
+                onContextMenu={handleMapContextMenu}
+                className={`block ${isDraggingMap ? "cursor-grabbing" : isEditingFactions ? "cursor-crosshair" : "cursor-grab"} touch-none select-none rounded border border-gray-700 bg-slate-950`}
               />
             </div>
           </div>
@@ -732,9 +1044,15 @@ const EsfMapTab = memo(({ isActive = true }: EsfMapTabProps) => {
           <div className="flex min-h-0 flex-col overflow-hidden rounded border border-gray-700 bg-gray-900">
             <div className="border-b border-gray-800 px-3 py-2 text-sm text-gray-300">
               {mapView === "factions"
-                ? mapMessage("mapFactionSummary", "{{count}} factions · flags at settlements", {
-                    count: map.factions.length,
-                  })
+                ? isEditingOwnership
+                  ? brushFaction
+                    ? mapMessage("mapPaintingAs", "Painting as {{faction}}", {
+                        faction: factionsByKey.get(brushFactionKey ?? "")?.label ?? brushFaction,
+                      })
+                    : mapText("mapPickFactionToPaint", "Pick a faction to paint with")
+                  : mapMessage("mapFactionSummary", "{{count}} factions · flags at settlements", {
+                      count: landholdingFactionCount,
+                    })
                 : mapView === "climate"
                   ? mapMessage("mapClimateSummary", "{{count}} climates · colours at settlements", {
                       count: map.climates.length,
@@ -876,7 +1194,9 @@ const EsfMapTab = memo(({ isActive = true }: EsfMapTabProps) => {
                 </>
               ) : (
                 filteredFactions.map((faction) => {
-                  const isSelected = factionKey(selectedMarker?.ownerFaction) === faction.key.toLowerCase();
+                  const isSelected = isEditingFactions
+                    ? brushFactionKey === faction.key.toLowerCase()
+                    : factionKey(selectedMarker?.ownerFaction) === faction.key.toLowerCase();
                   return (
                     <button
                       key={faction.key}
@@ -886,7 +1206,10 @@ const EsfMapTab = memo(({ isActive = true }: EsfMapTabProps) => {
                         if (element) mapListItemRefs.current.set(key, element);
                         else mapListItemRefs.current.delete(key);
                       }}
-                      onClick={() => selectMapFaction(faction.key.toLowerCase())}
+                      aria-pressed={isEditingFactions ? isSelected : undefined}
+                      onClick={() =>
+                        isEditingFactions ? setBrushFaction(faction.key) : selectMapFaction(faction.key.toLowerCase())
+                      }
                       className={`mb-1 flex w-full items-center gap-2 rounded border px-2 py-1.5 text-left text-sm ${
                         isSelected
                           ? "border-blue-500 bg-blue-950/60 text-gray-100"
@@ -894,7 +1217,7 @@ const EsfMapTab = memo(({ isActive = true }: EsfMapTabProps) => {
                       }`}
                     >
                       {faction.flagUrl ? (
-                        <img src={faction.flagUrl} alt="" className="h-6 w-6 shrink-0 object-contain" />
+                        <img src={faction.flagUrl} alt="" loading="lazy" className="h-6 w-6 shrink-0 object-contain" />
                       ) : (
                         <span className="h-2 w-2 shrink-0 rounded-full bg-gray-500" />
                       )}
@@ -923,6 +1246,15 @@ const EsfMapTab = memo(({ isActive = true }: EsfMapTabProps) => {
                     : mapView === "climate"
                       ? mapText("mapNoMatchingClimates", "No matching climates.")
                       : mapText("mapNoMatchingRegions", "No matching regions.")}
+                </div>
+              )}
+              {mapView === "factions" && isEditingOwnership && (
+                <div className="px-2 py-3 text-[0.8125rem] text-gray-500">
+                  {hiddenFactionCount > 0
+                    ? mapMessage("mapMoreFactionsMatch", "{{count}} more match. Narrow the filter to reach them.", {
+                        count: hiddenFactionCount,
+                      })
+                    : mapText("mapFilterForLandlessFactions", "Filter by name to reach factions that hold no land.")}
                 </div>
               )}
             </div>

@@ -29,6 +29,9 @@ export interface EsfMapFaction {
   flagPath?: string;
   /** Runtime asset-protocol URL; omitted from the persisted map cache. */
   flagUrl?: string;
+  /** From `factions_tables`; applied to a region's marker when ownership is edited. */
+  subculture?: string;
+  /** Zero for a faction the roster offers but the startpos gives no land. */
   regionCount: number;
 }
 
