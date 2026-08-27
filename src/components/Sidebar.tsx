@@ -13,7 +13,7 @@ import {
 } from "../appSlice";
 import { UpdateNotification } from "./UpdateNotification";
 import OptionsDrawer from "./OptionsDrawer";
-import selectStyle from "../styles/selectStyle";
+import selectStyle, { wrappedValueSelectStyle } from "../styles/selectStyle";
 import SaveGames from "./SaveGames";
 import SidebarTooltip from "./SidebarTooltip";
 import { faXmark } from "@fortawesome/free-solid-svg-icons";
@@ -679,7 +679,7 @@ const Sidebar = memo(() => {
             value={defaultOption}
             options={options}
             onChange={onChange}
-            styles={selectStyle}
+            styles={wrappedValueSelectStyle}
             onCreateOption={(name) => newPresetMade(name)}
           ></Creatable>
           <div
