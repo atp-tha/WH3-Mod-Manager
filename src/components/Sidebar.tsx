@@ -11,11 +11,11 @@ import {
   createOnGameStartPreset,
   setIsHelpOpen,
 } from "../appSlice";
-import { Tooltip } from "flowbite-react";
 import { UpdateNotification } from "./UpdateNotification";
 import OptionsDrawer from "./OptionsDrawer";
 import selectStyle from "../styles/selectStyle";
 import SaveGames from "./SaveGames";
+import SidebarTooltip from "./SidebarTooltip";
 import { faXmark } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import CompatScreen from "./CompatScreen";
@@ -660,7 +660,7 @@ const Sidebar = memo(() => {
       />
       <div className="fixed h-[90vh] max-h-[90vh] overflow-y-auto z-[40]">
         <div id="presetSection">
-          <Tooltip
+          <SidebarTooltip
             placement="left"
             style="light"
             content={
@@ -673,7 +673,7 @@ const Sidebar = memo(() => {
             }
           >
             <span className="text-slate-100 select-none">{localized.selectOrCreatePreset}</span>
-          </Tooltip>
+          </SidebarTooltip>
           <Creatable
             id="createOrSelectPreset"
             value={defaultOption}
@@ -758,7 +758,7 @@ const Sidebar = memo(() => {
           {conflictingStartposMods.length > 0 && (
             <div className="text-center text-red-700 font-semibold mb-4">
               <div className="make-tooltip-w-full">
-                <Tooltip
+                <SidebarTooltip
                   placement="left"
                   content={
                     <>
@@ -777,7 +777,7 @@ const Sidebar = memo(() => {
                   <span className="cursor-default">
                     {localized.multipleStartposMods || "Multiple startpos mods enabled!"}
                   </span>
-                </Tooltip>
+                </SidebarTooltip>
               </div>
             </div>
           )}
@@ -788,7 +788,7 @@ const Sidebar = memo(() => {
                 className="make-tooltip-w-full w-full cursor-pointer"
                 onClick={openWorkshopRepairModal}
               >
-                <Tooltip
+                <SidebarTooltip
                   placement="left"
                   content={
                     <>
@@ -820,7 +820,7 @@ const Sidebar = memo(() => {
                   <span className="cursor-pointer">
                     {localized.workshopModsMayBeOutdated || "Workshop mods may be outdated"}
                   </span>
-                </Tooltip>
+                </SidebarTooltip>
               </button>
             </div>
           )}
@@ -828,24 +828,21 @@ const Sidebar = memo(() => {
           {missingModDependencies.length > 0 && (
             <div className="text-center text-red-700 font-semibold mb-4">
               <div className="make-tooltip-w-full cursor-pointer" onClick={() => onMissingDependenciesClicked()}>
-                <Tooltip
+                <SidebarTooltip
                   placement="left"
                   content={missingModDependencies.map(([mod, reqs]) => (
                     <div key={mod.path}>
                       <span className="">{mod.humanName + ` ${localized.missing}`}</span>
-                      {
-                        // eslint-disable-next-line @typescript-eslint/no-unused-vars
-                        reqs.map(([reqId, reqHumanName]) => (
-                          <div key={`${mod.path}_${reqHumanName}`} className="text-red-600">
-                            {reqHumanName}
-                          </div>
-                        ))
-                      }
+                      {reqs.map(([reqId, reqHumanName]) => (
+                        <div key={`${mod.path}_${reqHumanName}`} className="text-red-600">
+                          {reqHumanName}
+                        </div>
+                      ))}
                     </div>
                   ))}
                 >
                   {localized.missingReqMods}
-                </Tooltip>
+                </SidebarTooltip>
               </div>
             </div>
           )}
@@ -853,7 +850,7 @@ const Sidebar = memo(() => {
           {currentGame == "wh3" && Object.keys(timeCheckedOverwrittenDataPackedFiles).length > 0 && (
             <div className="text-center text-red-700 font-semibold mb-4">
               <div className="make-tooltip-w-full">
-                <Tooltip
+                <SidebarTooltip
                   placement="left"
                   content={
                     <>
@@ -872,7 +869,7 @@ const Sidebar = memo(() => {
                   }
                 >
                   <span className="cursor-default">{localized.outdatedOverwritingPacks}</span>
-                </Tooltip>
+                </SidebarTooltip>
               </div>
             </div>
           )}
@@ -880,7 +877,7 @@ const Sidebar = memo(() => {
           {currentGame == "wh3" && Object.keys(outdatedPackFiles).length > 0 && (
             <div className="text-center text-red-700 font-semibold mb-4">
               <div className="make-tooltip-w-full">
-                <Tooltip
+                <SidebarTooltip
                   placement="left"
                   content={
                     <>
@@ -899,7 +896,7 @@ const Sidebar = memo(() => {
                   }
                 >
                   {localized.outdatedPacks}
-                </Tooltip>
+                </SidebarTooltip>
               </div>
             </div>
           )}
@@ -907,7 +904,7 @@ const Sidebar = memo(() => {
           {outdatedMergedPacks.length > 0 && (
             <div className="text-center text-red-700 font-semibold mb-4">
               <div className="make-tooltip-w-full">
-                <Tooltip
+                <SidebarTooltip
                   placement="left"
                   content={
                     <>
@@ -921,14 +918,14 @@ const Sidebar = memo(() => {
                   }
                 >
                   {localized.outdatedMergedMods}
-                </Tooltip>
+                </SidebarTooltip>
               </div>
             </div>
           )}
           {enabledMods.length > 0 && (
             <div className="text-center text-slate-100 mb-4">
               <div className="make-tooltip-w-full">
-                <Tooltip
+                <SidebarTooltip
                   placement="left"
                   content={enabledMods.map((mod) => (
                     <div key={mod.path}>{mod.name.replace(".pack", "")}</div>
@@ -937,7 +934,7 @@ const Sidebar = memo(() => {
                   <span className="cursor-default">
                     {localized.enabledMods} {enabledMods.length}
                   </span>
-                </Tooltip>
+                </SidebarTooltip>
               </div>
             </div>
           )}
@@ -957,7 +954,7 @@ const Sidebar = memo(() => {
             >
               {(isWH3Running && (
                 <div className="make-tooltip-w-full flex">
-                  <Tooltip
+                  <SidebarTooltip
                     placement="left"
                     content={
                       <div>
@@ -976,7 +973,7 @@ const Sidebar = memo(() => {
                         src={require(`../assets/game_icons/${currentGame}.png`)}
                       />
                     </div>
-                  </Tooltip>
+                  </SidebarTooltip>
                   {isWaitingForRelaunch && <div className="dots-loader h-3 w-3 self-center mt-2 opacity-90"></div>}
                 </div>
               )) || (
@@ -1003,11 +1000,11 @@ const Sidebar = memo(() => {
                 disabled={saves.length < 1}
               >
                 <div className="make-tooltip-w-full">
-                  <Tooltip placement="left" content={(saves[0] && `Load ${saves[0].name}`) || "No saves found!"}>
+                  <SidebarTooltip placement="left" content={(saves[0] && `Load ${saves[0].name}`) || "No saves found!"}>
                     {((isWaitingForContinueRelaunch || isContinueDelayPending) && (
                       <div className="dots-loader mb-1 ml-2 h-3 w-3 self-center mt-2 opacity-90"></div>
                     )) || <span className="ml-[-25%]">{localized.continue}</span>}
-                  </Tooltip>
+                  </SidebarTooltip>
                 </div>
               </button>
               <button
@@ -1018,7 +1015,7 @@ const Sidebar = memo(() => {
                 disabled={saves.length < 1}
               >
                 <div className="make-tooltip-w-full">
-                  <Tooltip placement="left" content={(saves[0] && `Show all saves`) || "No saves found!"}>
+                  <SidebarTooltip placement="left" content={(saves[0] && `Show all saves`) || "No saves found!"}>
                     <svg
                       aria-hidden="true"
                       className="h-6 w-6"
@@ -1030,7 +1027,7 @@ const Sidebar = memo(() => {
                     >
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7"></path>
                     </svg>
-                  </Tooltip>
+                  </SidebarTooltip>
                 </div>
               </button>
             </div>

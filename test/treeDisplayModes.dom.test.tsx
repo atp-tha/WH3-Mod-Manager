@@ -70,6 +70,8 @@ const localizedStrings = {
   dbViewer: "DB Viewer",
   faqAbbreviated: "FAQ",
   workshopModsMayBeOutdated: "Workshop mods may be outdated",
+  missingReqMods: "Missing required mods",
+  missing: "missing",
 };
 
 const createMod = (overrides: Partial<Mod> = {}): Mod => ({
@@ -284,6 +286,27 @@ describe("tree display DOM behavior", () => {
     });
 
     expect(screen.queryByText("Multiple startpos mods enabled!")).not.toBeInTheDocument();
+  });
+
+  it("renders sidebar warning tooltips outside the scrolling sidebar", () => {
+    const mod = createMod({
+      reqModIdToName: [["missing-dependency", "Missing dependency"]],
+    });
+
+    renderWithState(<Sidebar />, {
+      currentPreset: { name: "", mods: [mod] },
+      allMods: [mod],
+    });
+
+    const warning = screen.getByText("Missing required mods");
+    fireEvent.mouseEnter(warning);
+
+    const tooltip = [...document.querySelectorAll('[data-testid="flowbite-tooltip"]')].find((element) =>
+      element.textContent?.includes("Missing dependency"),
+    );
+    expect(tooltip).toBeDefined();
+    expect(tooltip?.parentElement).toBe(document.body);
+    expect(tooltip?.closest(".overflow-y-auto")).toBeNull();
   });
 
   it("warns when an enabled Workshop mod has an older installed timestamp", () => {
