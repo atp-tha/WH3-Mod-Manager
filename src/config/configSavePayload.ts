@@ -128,6 +128,9 @@ export function selectConfigSavePayload(appState: AppState): ConfigSavePayload {
       hiddenMainWindowTabs: appState.hiddenMainWindowTabs,
       isVisualsSortByCultureEnabled: appState.isVisualsSortByCultureEnabled,
       isVisualsHideDuplicatesEnabled: appState.isVisualsHideDuplicatesEnabled,
+      loadOrderRules: appState.loadOrderRules,
+      disabledModLoadOrderRules: appState.disabledModLoadOrderRules,
+      loadOrderRuleDisabledPacks: appState.loadOrderRuleDisabledPacks,
     },
   };
 

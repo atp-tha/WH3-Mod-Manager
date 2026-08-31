@@ -46,6 +46,7 @@ import {
   setPackCollisions,
   setPackCollisionsCheckProgress,
   setPackHeaderData,
+  setModLoadOrderRules,
   setPackSearchResults,
   setPacksData,
   setPacksDataRead,
@@ -285,6 +286,10 @@ window.api?.workshopUpdateCheck((event, message) => {
 
 window.api?.setPackHeaderData((event, packHeaderData: PackHeaderData[]) => {
   store.dispatch(setPackHeaderData(packHeaderData));
+});
+
+window.api?.setModLoadOrderRules((event, modLoadOrderRules: Record<string, LoadOrderRule[]>) => {
+  store.dispatch(setModLoadOrderRules(modLoadOrderRules));
 });
 
 window.api?.setCustomizableMods((event, customizableMods: Record<string, string[]>) => {

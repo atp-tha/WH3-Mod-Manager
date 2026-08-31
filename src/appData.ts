@@ -179,6 +179,12 @@ interface AppData {
   outdatedPackFiles: Record<string, string[]>;
   enabledMods: Mod[];
   allMods: Mod[];
+  /** Pack name -> the rules that pack ships inside itself, from the last mod scan. */
+  modLoadOrderRules: Record<string, LoadOrderRule[]>;
+  /** The current game's rules, mirrored from the last config payload the renderer sent. */
+  loadOrderRules: LoadOrderRule[];
+  disabledModLoadOrderRules: string[];
+  loadOrderRuleDisabledPacks: string[];
   startArgs: string[];
   isAdmin: boolean;
   gameUpdates: GameUpdateData[];
@@ -254,6 +260,10 @@ const appData = {
   outdatedPackFiles: {},
   enabledMods: [],
   allMods: [],
+  modLoadOrderRules: {},
+  loadOrderRules: [],
+  disabledModLoadOrderRules: [],
+  loadOrderRuleDisabledPacks: [],
   startArgs: [],
   isAdmin: false,
   gameUpdates: [],

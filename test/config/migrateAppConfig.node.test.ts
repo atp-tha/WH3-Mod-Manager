@@ -147,6 +147,10 @@ describe("migrateAppConfig", () => {
       currentPreset: { name: "", mods: [], version: 2 },
       presets: [],
       modUserData: {},
+      // Load order rules are per game, so an untouched game starts with none of each kind.
+      loadOrderRules: [],
+      disabledModLoadOrderRules: [],
+      loadOrderRuleDisabledPacks: [],
     });
     expect(config.gameFolderPaths.rome2.modSourceOrder).toEqual(["data", "workshop"]);
     expect(config.alwaysEnabledModNames).toEqual([]);

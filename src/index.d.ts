@@ -20,6 +20,21 @@ declare global {
     error?: string;
   }
 
+  type LoadOrderRule = import("./loadOrderRules").LoadOrderRule;
+  type LoadOrderEdges = import("./loadOrderRules").LoadOrderEdges;
+  type LoadOrderRuleConflict = import("./loadOrderRules").LoadOrderRuleConflict;
+
+  /**
+   * What resolving the rules produced, minus the edge map, which holds Sets and so cannot live in
+   * redux. Components rebuild the map from `rules` with buildLoadOrderEdges.
+   */
+  interface LoadOrderRulesResolution {
+    rules: LoadOrderRule[];
+    conflicts: LoadOrderRuleConflict[];
+    disabledRules: LoadOrderRule[];
+    supersededRules: LoadOrderRule[];
+  }
+
   type MergedModsData = {
     path: string;
     lastChanged: number;
@@ -86,6 +101,10 @@ declare global {
     path: string;
     isMovie: boolean;
     hasStartpos: boolean;
+    /** Whether the pack ships its own whmm\load_order.whmm, spotted during the header's index walk. */
+    hasLoadOrderRules?: boolean;
+    /** That file's name as the pack spells it, which is what a targeted read has to ask for. */
+    loadOrderRulesFileName?: string;
     dependencyPacks: string[];
   }
 
@@ -249,6 +268,14 @@ declare global {
     /** Bumped to make the node editor re-read the open flow when the selection itself cannot change. */
     currentFlowFileReloadNonce: number;
     currentTab: MainWindowTab;
+    /** Ordering rules the user made, for the current game. */
+    loadOrderRules: LoadOrderRule[];
+    disabledModLoadOrderRules: string[];
+    loadOrderRuleDisabledPacks: string[];
+    /** Pack name -> the rules that pack ships inside itself. Rebuilt by each mod scan. */
+    modLoadOrderRules: Record<string, LoadOrderRule[]>;
+    /** Derived from the four above; never persisted. */
+    loadOrderRulesResolution: LoadOrderRulesResolution;
     /**
      * Left sidebar tabs the user has hidden. All Mods can never be in here: it is what the current
      * tab falls back to. Skill Trees and Tech Trees are steered by the tree display modes instead.
@@ -380,6 +407,15 @@ declare global {
     presets: SavedPreset[];
     /** Mod name -> data. */
     modUserData: Record<string, StoredModUserData>;
+    /**
+     * Ordering rules the user made. Per game rather than global because a pack name only means
+     * something within one game.
+     */
+    loadOrderRules: LoadOrderRule[];
+    /** Canonical keys of individual mod-supplied rules the user switched off. */
+    disabledModLoadOrderRules: string[];
+    /** Packs whose own rules the user ignores wholesale, including any they add later. */
+    loadOrderRuleDisabledPacks: string[];
   }
 
   /** The config.json document. */
@@ -1176,6 +1212,7 @@ declare global {
     | "ancillaries"
     | "map"
     | "nodeEditor"
+    | "loadOrderRules"
     | "presets";
 
   export interface WorkshopItemStatisticStringified {

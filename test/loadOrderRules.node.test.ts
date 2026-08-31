@@ -1,0 +1,291 @@
+import { describe, expect, it } from "vitest";
+
+import {
+  applyLoadOrderEdges,
+  buildLoadOrderEdges,
+  findRulesOverriddenByPins,
+  loadOrderPackNameKey,
+  loadOrderRuleKey,
+  normalizeLoadOrderPackName,
+  resolveLoadOrderRules,
+  type LoadOrderRule,
+  type ResolveLoadOrderRulesInput,
+} from "../src/loadOrderRules";
+
+const resolve = (input: Partial<ResolveLoadOrderRulesInput>) =>
+  resolveLoadOrderRules({
+    userRules: [],
+    modRules: {},
+    presentPackNames: ["a.pack", "b.pack", "c.pack"],
+    ...input,
+  });
+
+const named = (names: string[]) => names.map((name) => ({ name }));
+const namesOf = (items: { name: string }[]) => items.map((item) => item.name);
+
+describe("normalizeLoadOrderPackName", () => {
+  it("adds the extension, strips folders and keeps the given casing", () => {
+    expect(normalizeLoadOrderPackName("MyMod")).toBe("MyMod.pack");
+    expect(normalizeLoadOrderPackName("MyMod.pack")).toBe("MyMod.pack");
+    expect(normalizeLoadOrderPackName("  spaced.pack  ")).toBe("spaced.pack");
+    expect(normalizeLoadOrderPackName("C:\\games\\data\\deep.pack")).toBe("deep.pack");
+    expect(normalizeLoadOrderPackName("some/unix/path.pack")).toBe("path.pack");
+    expect(normalizeLoadOrderPackName("   ")).toBe("");
+  });
+
+  it("compares case-insensitively without lowercasing what is stored", () => {
+    expect(loadOrderPackNameKey("MyMod")).toBe("mymod.pack");
+    expect(loadOrderPackNameKey("MYMOD.pack")).toBe(loadOrderPackNameKey("mymod"));
+  });
+});
+
+describe("loadOrderRuleKey", () => {
+  it("is stable regardless of how the pack wrote the name", () => {
+    const first = loadOrderRuleKey({ before: "A", after: "B.pack", sourcePackName: "Src" });
+    const second = loadOrderRuleKey({ before: "a.PACK", after: "b", sourcePackName: "src.pack" });
+    expect(first).toBe(second);
+  });
+
+  it("separates a user rule from a mod rule about the same pair", () => {
+    expect(loadOrderRuleKey({ before: "a.pack", after: "b.pack" })).not.toBe(
+      loadOrderRuleKey({ before: "a.pack", after: "b.pack", sourcePackName: "c.pack" }),
+    );
+  });
+});
+
+describe("resolveLoadOrderRules", () => {
+  it("keeps a plain user rule", () => {
+    const { rules, edges, conflicts } = resolve({ userRules: [{ before: "a.pack", after: "b.pack" }] });
+    expect(rules).toHaveLength(1);
+    expect(edges.edgeCount).toBe(1);
+    expect(conflicts).toHaveLength(0);
+  });
+
+  it("reports a rule naming a pack that is not in the list, and drops it", () => {
+    const { rules, conflicts } = resolve({ userRules: [{ before: "a.pack", after: "missing.pack" }] });
+    expect(rules).toHaveLength(0);
+    expect(conflicts).toEqual([expect.objectContaining({ kind: "missingPack", packName: "missing.pack" })]);
+  });
+
+  it("ignores a rule pointing a pack at itself", () => {
+    const { rules, conflicts } = resolve({ userRules: [{ before: "a.pack", after: "A.PACK" }] });
+    expect(rules).toHaveLength(0);
+    expect(conflicts).toHaveLength(0);
+  });
+
+  it("applies a mod's own rules automatically", () => {
+    const { rules } = resolve({ modRules: { "a.pack": [{ before: "a.pack", after: "b.pack" }] } });
+    expect(rules).toEqual([expect.objectContaining({ before: "a.pack", after: "b.pack", sourcePackName: "a.pack" })]);
+  });
+
+  it("lets a user rule override a mod rule about the same pair, in either direction", () => {
+    const { rules, supersededRules } = resolve({
+      userRules: [{ before: "b.pack", after: "a.pack" }],
+      modRules: { "a.pack": [{ before: "a.pack", after: "b.pack" }] },
+    });
+
+    expect(rules).toEqual([expect.objectContaining({ before: "b.pack", after: "a.pack" })]);
+    expect(rules[0].sourcePackName).toBeUndefined();
+    expect(supersededRules).toEqual([expect.objectContaining({ sourcePackName: "a.pack" })]);
+  });
+
+  it("drops both mod rules when two mods demand opposite orders for one pair", () => {
+    const { rules, conflicts } = resolve({
+      modRules: {
+        "a.pack": [{ before: "a.pack", after: "b.pack" }],
+        "b.pack": [{ before: "b.pack", after: "a.pack" }],
+      },
+    });
+
+    expect(rules).toHaveLength(0);
+    expect(conflicts.filter((conflict) => conflict.kind === "contradiction")).toHaveLength(2);
+  });
+
+  it("keeps one edge when two mods happen to agree", () => {
+    const { rules, conflicts } = resolve({
+      modRules: {
+        "a.pack": [{ before: "a.pack", after: "b.pack" }],
+        "b.pack": [{ before: "a.pack", after: "b.pack" }],
+      },
+    });
+
+    expect(rules).toHaveLength(1);
+    expect(conflicts).toHaveLength(0);
+  });
+
+  it("breaks a cycle by dropping one rule and reporting it", () => {
+    const { rules, conflicts, edges } = resolve({
+      userRules: [
+        { before: "a.pack", after: "b.pack" },
+        { before: "b.pack", after: "c.pack" },
+        { before: "c.pack", after: "a.pack" },
+      ],
+    });
+
+    expect(rules).toHaveLength(2);
+    expect(edges.edgeCount).toBe(2);
+    expect(conflicts).toEqual([expect.objectContaining({ kind: "cycle" })]);
+  });
+
+  it("drops the same rule from a cycle whatever order the rules arrive in", () => {
+    const cyclicRules: LoadOrderRule[] = [
+      { before: "a.pack", after: "b.pack" },
+      { before: "b.pack", after: "c.pack" },
+      { before: "c.pack", after: "a.pack" },
+    ];
+
+    const forwards = resolve({ userRules: cyclicRules });
+    const backwards = resolve({ userRules: [...cyclicRules].reverse() });
+
+    expect(backwards.conflicts.map((conflict) => loadOrderRuleKey(conflict.rule))).toEqual(
+      forwards.conflicts.map((conflict) => loadOrderRuleKey(conflict.rule)),
+    );
+  });
+
+  it("prefers the user's rule over a mod's when a cycle forces a choice", () => {
+    const { rules, conflicts } = resolve({
+      userRules: [{ before: "b.pack", after: "a.pack" }],
+      modRules: {
+        "c.pack": [
+          { before: "a.pack", after: "c.pack" },
+          { before: "c.pack", after: "b.pack" },
+        ],
+      },
+    });
+
+    expect(rules.some((rule) => rule.sourcePackName == undefined)).toBe(true);
+    expect(conflicts).toEqual([expect.objectContaining({ kind: "cycle" })]);
+  });
+
+  describe("disabling", () => {
+    const modRules = { "a.pack": [{ before: "a.pack", after: "b.pack" }] };
+
+    it("produces no edge but still reports the rule so it can be restored", () => {
+      const disabledRuleKeys = [loadOrderRuleKey({ before: "a.pack", after: "b.pack", sourcePackName: "a.pack" })];
+      const { rules, edges, disabledRules } = resolve({ modRules, disabledRuleKeys });
+
+      expect(rules).toHaveLength(0);
+      expect(edges.edgeCount).toBe(0);
+      expect(disabledRules).toEqual([expect.objectContaining({ before: "a.pack", after: "b.pack" })]);
+    });
+
+    it("mutes every rule from a pack, including one that pack adds later", () => {
+      const { rules, disabledRules } = resolve({
+        modRules: {
+          "a.pack": [
+            { before: "a.pack", after: "b.pack" },
+            { before: "a.pack", after: "c.pack" },
+          ],
+        },
+        disabledPackNames: ["A.PACK"],
+      });
+
+      expect(rules).toHaveLength(0);
+      expect(disabledRules).toHaveLength(2);
+    });
+
+    it("never disables the user's own rules", () => {
+      const { rules } = resolve({
+        userRules: [{ before: "a.pack", after: "b.pack" }],
+        disabledRuleKeys: [loadOrderRuleKey({ before: "a.pack", after: "b.pack" })],
+        disabledPackNames: ["a.pack", "b.pack"],
+      });
+
+      expect(rules).toHaveLength(1);
+    });
+
+    it("rescues the rules that were being dropped alongside the disabled one", () => {
+      const modRulesWithCycle = {
+        "a.pack": [{ before: "a.pack", after: "b.pack" }],
+        "b.pack": [{ before: "b.pack", after: "c.pack" }],
+        "c.pack": [{ before: "c.pack", after: "a.pack" }],
+      };
+
+      const withCycle = resolve({ modRules: modRulesWithCycle });
+      expect(withCycle.conflicts.filter((conflict) => conflict.kind === "cycle")).toHaveLength(1);
+
+      const withoutOffender = resolve({ modRules: modRulesWithCycle, disabledPackNames: ["c.pack"] });
+      expect(withoutOffender.conflicts).toHaveLength(0);
+      expect(withoutOffender.rules).toHaveLength(2);
+    });
+
+    it("stops a disabled rule from causing a contradiction", () => {
+      const { rules, conflicts } = resolve({
+        modRules: {
+          "a.pack": [{ before: "a.pack", after: "b.pack" }],
+          "b.pack": [{ before: "b.pack", after: "a.pack" }],
+        },
+        disabledPackNames: ["b.pack"],
+      });
+
+      expect(conflicts).toHaveLength(0);
+      expect(rules).toEqual([expect.objectContaining({ before: "a.pack", after: "b.pack" })]);
+    });
+  });
+});
+
+describe("applyLoadOrderEdges", () => {
+  it("returns the input untouched when there are no rules", () => {
+    const items = named(["a.pack", "b.pack", "c.pack"]);
+    expect(applyLoadOrderEdges(items, buildLoadOrderEdges([]))).toBe(items);
+  });
+
+  it("moves only what the rules constrain and leaves the rest in place", () => {
+    const edges = buildLoadOrderEdges([{ before: "c.pack", after: "a.pack" }]);
+    const sorted = applyLoadOrderEdges(named(["a.pack", "b.pack", "c.pack", "d.pack"]), edges);
+
+    expect(namesOf(sorted)).toEqual(["b.pack", "c.pack", "a.pack", "d.pack"]);
+  });
+
+  it("keeps unconstrained packs in their original order", () => {
+    const edges = buildLoadOrderEdges([{ before: "z.pack", after: "y.pack" }]);
+    const sorted = applyLoadOrderEdges(named(["a.pack", "b.pack", "y.pack", "z.pack"]), edges);
+
+    expect(namesOf(sorted)).toEqual(["a.pack", "b.pack", "z.pack", "y.pack"]);
+  });
+
+  it("satisfies a chain of rules", () => {
+    const edges = buildLoadOrderEdges([
+      { before: "c.pack", after: "b.pack" },
+      { before: "b.pack", after: "a.pack" },
+    ]);
+    const sorted = applyLoadOrderEdges(named(["a.pack", "b.pack", "c.pack"]), edges);
+
+    expect(namesOf(sorted)).toEqual(["c.pack", "b.pack", "a.pack"]);
+  });
+
+  it("ignores rules about packs that are not in this list", () => {
+    const edges = buildLoadOrderEdges([{ before: "elsewhere.pack", after: "a.pack" }]);
+    const items = named(["a.pack", "b.pack"]);
+
+    expect(namesOf(applyLoadOrderEdges(items, edges))).toEqual(["a.pack", "b.pack"]);
+  });
+
+  it("matches pack names case-insensitively", () => {
+    const edges = buildLoadOrderEdges([{ before: "B.PACK", after: "A.pack" }]);
+    expect(namesOf(applyLoadOrderEdges(named(["a.pack", "b.pack"]), edges))).toEqual(["b.pack", "a.pack"]);
+  });
+
+  it("keeps every item when handed edges that loop", () => {
+    const edges = buildLoadOrderEdges([
+      { before: "a.pack", after: "b.pack" },
+      { before: "b.pack", after: "a.pack" },
+    ]);
+    const sorted = applyLoadOrderEdges(named(["a.pack", "b.pack", "c.pack"]), edges);
+
+    expect(namesOf(sorted).toSorted()).toEqual(["a.pack", "b.pack", "c.pack"]);
+  });
+});
+
+describe("findRulesOverriddenByPins", () => {
+  it("reports a rule the final order does not satisfy", () => {
+    const rules: LoadOrderRule[] = [{ before: "a.pack", after: "b.pack" }];
+    expect(findRulesOverriddenByPins(["b.pack", "a.pack"], rules)).toEqual([
+      expect.objectContaining({ kind: "overriddenByPin" }),
+    ]);
+  });
+
+  it("says nothing when the order already satisfies the rule", () => {
+    expect(findRulesOverriddenByPins(["a.pack", "b.pack"], [{ before: "a.pack", after: "b.pack" }])).toEqual([]);
+  });
+});

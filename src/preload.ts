@@ -158,6 +158,9 @@ const api = {
     ipcRenderer.on("setModData", callback),
   setPackHeaderData: (callback: (event: Electron.IpcRendererEvent, packHeaderData: PackHeaderData[]) => void) =>
     ipcRenderer.on("setPackHeaderData", callback),
+  setModLoadOrderRules: (
+    callback: (event: Electron.IpcRendererEvent, modLoadOrderRules: Record<string, LoadOrderRule[]>) => void,
+  ) => ipcRenderer.on("setModLoadOrderRules", callback),
   setPacksData: (callback: (event: Electron.IpcRendererEvent, packsData: PackViewData[]) => void) =>
     ipcRenderer.on("setPacksData", callback),
   applySavedPackData: (callback: (event: Electron.IpcRendererEvent, payload: ApplySavedPackDataPayload) => void) =>

@@ -1,3 +1,5 @@
+import { isLoadOrderRulesPackedFilePath } from "./loadOrderRulesFile";
+
 export type PackedFileViewerKind = "text" | "image";
 
 export const TEXT_FILE_EXTENSIONS = new Set([
@@ -19,6 +21,9 @@ export const TEXT_FILE_EXTENSIONS = new Set([
 export const isTextPackedFilePath = (lowerFilePath: string): boolean => {
   const normalized = lowerFilePath;
   if (normalized.startsWith("whmmflows\\")) return true;
+  // .whmm is not a text extension, but the rules file is text and has to stay openable so that a
+  // viewer which does not know about the dedicated editor still shows something useful.
+  if (isLoadOrderRulesPackedFilePath(normalized)) return true;
   const extension = normalized.endsWith(".xml.material")
     ? ".xml.material"
     : normalized.slice(normalized.lastIndexOf("."));
@@ -47,7 +52,7 @@ export const getPackedFileLowerExtension = (filePath: string): string => {
 
 export const getPackedFileViewerKind = (filePath: string): PackedFileViewerKind | undefined => {
   const normalizedFilePath = filePath.replace(/\//g, "\\").toLowerCase();
-  if (normalizedFilePath.startsWith("whmmflows\\")) {
+  if (normalizedFilePath.startsWith("whmmflows\\") || isLoadOrderRulesPackedFilePath(normalizedFilePath)) {
     return "text";
   }
 

@@ -6,6 +6,7 @@ import { MdCategory } from "react-icons/md";
 import { FaMapMarkedAlt, FaProjectDiagram } from "react-icons/fa";
 import { BsCollection, BsDiagram3, BsPersonVcard } from "react-icons/bs";
 import { GiCastle, GiClassicalKnowledge, GiCrossedSwords, GiSwapBag } from "react-icons/gi";
+import { TbArrowsSort } from "react-icons/tb";
 import { useAppDispatch, useAppSelector } from "../hooks";
 import { setCurrentTab } from "../appSlice";
 import localizationContext from "../localizationContext";
@@ -33,11 +34,14 @@ const LeftSidebar = memo(() => {
   const isBuildingsTabVisible = currentGame === "wh3" && !isHidden("buildings");
   const isAncillariesTabVisible = currentGame === "wh3" && !isHidden("ancillaries");
   const isMapTabVisible = currentGame === "wh3" && !isHidden("map");
+  // Rules are keyed on pack names, so every game can use them.
+  const isLoadOrderRulesTabVisible = !isHidden("loadOrderRules");
   const tabIndexToTabType: MainWindowTab[] = useMemo(() => {
     const tabs: MainWindowTab[] = ["mods"];
     if (isEnabledModsTabVisible) tabs.push("enabledMods");
     if (isCategoriesTabVisible) tabs.push("categories");
     if (isPresetsTabVisible) tabs.push("presets");
+    if (isLoadOrderRulesTabVisible) tabs.push("loadOrderRules");
     if (isSkillsTabVisible) tabs.push("skills");
     if (isTechTreesTabVisible) tabs.push("techTrees");
     if (isUnitViewerVisible) tabs.push("unitViewer");
@@ -52,6 +56,7 @@ const LeftSidebar = memo(() => {
     isBuildingsTabVisible,
     isCategoriesTabVisible,
     isEnabledModsTabVisible,
+    isLoadOrderRulesTabVisible,
     isMapTabVisible,
     isPresetsTabVisible,
     isSkillsTabVisible,
@@ -191,6 +196,17 @@ const LeftSidebar = memo(() => {
                 </span>
                 <span className="text-xs absolute hidden-child -right-0 -bottom-2 opacity-60">
                   Ctrl+{tabIndexToTabType.indexOf("presets") + 1}
+                </span>
+              </div>
+            </Tab>
+          )}
+          {isLoadOrderRulesTabVisible && (
+            <Tab>
+              <div className="flex items-center h-full parent-unhide-child relative">
+                <TbArrowsSort size="1.4rem" />
+                <span className="ml-2 mr-2 hidden-child">{localized.loadOrderRulesTab || "Load Order Rules"}</span>
+                <span className="text-xs absolute hidden-child -right-0 -bottom-2 opacity-60">
+                  Ctrl+{tabIndexToTabType.indexOf("loadOrderRules") + 1}
                 </span>
               </div>
             </Tab>

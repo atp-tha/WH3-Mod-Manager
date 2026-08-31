@@ -326,6 +326,12 @@ import { tryOpenFile } from "./utility/fileHelpers";
 import getPackTableData from "./utility/frontend/packDataHandling";
 import { findLatestScriptLog } from "./utility/logPaths";
 import { decodePackedTextBuffer, getPackedFileMimeType, getPackedFileViewerKind } from "./utility/packFileViewing";
+import { refreshMainLoadOrderRules } from "./mainLoadOrderRules";
+import {
+  isLoadOrderRulesPackedFilePath,
+  LOAD_ORDER_RULES_PACKED_FILE_PATH,
+  parseLoadOrderRulesFile,
+} from "./utility/loadOrderRulesFile";
 import { collator } from "./utility/packFileSorting";
 import { launchGame, resolveGameLaunchPlan } from "./utility/gameLaunch";
 import { packFileContains } from "./utility/packSearch";
@@ -5253,6 +5259,7 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
       mainWindow?.webContents.send("modsPopulated", mods);
       await afterModsPopulated?.();
       const packHeadersToSend: PackHeaderData[] = [];
+      const modLoadOrderRules: Record<string, LoadOrderRule[]> = {};
       await Promise.all(
         mods.map(async (mod) => {
           try {
@@ -5263,6 +5270,13 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
             const packHeaderData = await readPackHeaderCached(mod.path);
             if (packHeaderData.isMovie || packHeaderData.hasStartpos || packHeaderData.dependencyPacks.length > 0)
               packHeadersToSend.push(packHeaderData);
+
+            // The header scan already told us whether this pack has rules, so only the few that do
+            // get opened again.
+            if (packHeaderData.hasLoadOrderRules) {
+              const rules = await readModLoadOrderRulesCached(mod.path, mod.name, packHeaderData);
+              if (rules.length > 0) modLoadOrderRules[mod.name] = rules;
+            }
           } catch (e) {
             if (e instanceof Error) {
               log(e.message);
@@ -5271,6 +5285,9 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
         }),
       );
       mainWindow?.webContents.send("setPackHeaderData", packHeadersToSend);
+      appData.modLoadOrderRules = modLoadOrderRules;
+      refreshMainLoadOrderRules();
+      mainWindow?.webContents.send("setModLoadOrderRules", modLoadOrderRules);
       await savePackHeaderCache();
       if (!appData.saveSetupDone) {
         appData.saveSetupDone = true;
@@ -5679,6 +5696,11 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
     isMovie: boolean;
     hasStartpos: boolean;
     dependencyPacks: string[];
+    /** Absent on entries written before load order rules existed, which forces a re-read. */
+    hasLoadOrderRules?: boolean;
+    loadOrderRulesFileName?: string;
+    /** The parsed rules, kept here so a restart does not reopen every pack that has them. */
+    loadOrderRules?: LoadOrderRule[];
   }
   type PackHeaderCache = Record<string, PackHeaderCacheEntry>;
   const PACK_HEADER_CACHE_FILE = "pack-headers-cache.bin";
@@ -5721,12 +5743,15 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
         entry &&
         entry.size === stat.size &&
         entry.lastChangedLocal === stat.mtimeMs &&
-        typeof entry.hasStartpos === "boolean"
+        typeof entry.hasStartpos === "boolean" &&
+        typeof entry.hasLoadOrderRules === "boolean"
       ) {
         return {
           path,
           isMovie: entry.isMovie,
           hasStartpos: entry.hasStartpos,
+          hasLoadOrderRules: entry.hasLoadOrderRules,
+          loadOrderRulesFileName: entry.loadOrderRulesFileName,
           dependencyPacks: entry.dependencyPacks,
         };
       }
@@ -5738,10 +5763,51 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
         lastChangedLocal: stat.mtimeMs,
         isMovie: data.isMovie,
         hasStartpos: data.hasStartpos,
+        hasLoadOrderRules: data.hasLoadOrderRules ?? false,
+        loadOrderRulesFileName: data.loadOrderRulesFileName,
         dependencyPacks: data.dependencyPacks,
       };
     }
     return data;
+  };
+
+  /**
+   * The rules a pack ships inside itself.
+   *
+   * Only ever called for packs whose header scan already said they have the file, so the great
+   * majority of packs are never reopened for this. The parsed result is cached next to the header
+   * data under the same size and mtime key.
+   */
+  const readModLoadOrderRulesCached = async (
+    packPath: string,
+    packName: string,
+    headerData: PackHeaderData,
+  ): Promise<LoadOrderRule[]> => {
+    if (!headerData.hasLoadOrderRules) return [];
+
+    const cache = await loadPackHeaderCache();
+    const entry = cache[packPath];
+    if (entry?.loadOrderRules) return entry.loadOrderRules;
+
+    let rules: LoadOrderRule[] = [];
+    try {
+      const fileName = headerData.loadOrderRulesFileName ?? LOAD_ORDER_RULES_PACKED_FILE_PATH;
+      const pack = await readPack(packPath, { filesToRead: [fileName], skipParsingTables: true });
+      const packedFile = pack.packedFiles.find((file) => isLoadOrderRulesPackedFilePath(file.name));
+      if (packedFile?.buffer) {
+        const parsed = parseLoadOrderRulesFile(decodePackedTextBuffer(packedFile.buffer), packName);
+        if (parsed.errors.length > 0) {
+          console.log(`load order rules in ${packName} have ${parsed.errors.length} bad line(s):`, parsed.errors);
+        }
+        rules = parsed.rules;
+      }
+    } catch (error) {
+      // A pack we cannot read rules from simply contributes none; it must not break the mod scan.
+      console.log("failed to read load order rules from", packPath, error);
+    }
+
+    if (entry) entry.loadOrderRules = rules;
+    return rules;
   };
   interface FlowExecutionCacheEntry {
     signatureHash: string;

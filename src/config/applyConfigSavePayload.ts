@@ -1,5 +1,6 @@
 import appData from "../appData";
 import { getEnabledMods } from "../modsHelpers";
+import { refreshMainLoadOrderRules } from "../mainLoadOrderRules";
 
 /**
  * Applies the parts of a save payload that main keeps in memory.
@@ -22,4 +23,11 @@ export function applyConfigSavePayloadToAppData(payload: ConfigSavePayload) {
   appData.hideRepeatedKeyPrefixes = config.hideRepeatedKeyPrefixes ?? appData.hideRepeatedKeyPrefixes;
   appData.skillTreesDisplayMode = config.skillTreesDisplayMode;
   appData.technologyTreesDisplayMode = config.technologyTreesDisplayMode;
+
+  // The rules are per game and arrive flattened for whichever game the renderer is on, so they are
+  // simply mirrored and re-resolved. A game switch reaches main as a payload like any other.
+  appData.loadOrderRules = config.loadOrderRules ?? [];
+  appData.disabledModLoadOrderRules = config.disabledModLoadOrderRules ?? [];
+  appData.loadOrderRuleDisabledPacks = config.loadOrderRuleDisabledPacks ?? [];
+  refreshMainLoadOrderRules();
 }

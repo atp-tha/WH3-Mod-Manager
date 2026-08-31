@@ -31,6 +31,11 @@ import type { PackFileRenameEntry } from "../../utility/packFileRenamePlan";
 import { clearPackDataStoreForPack } from "./packDataStore";
 import { clearPreparedTableForPackedFile } from "./tablePrepCache";
 import localizationContext from "../../localizationContext";
+import {
+  isLoadOrderRulesPackedFilePath,
+  LOAD_ORDER_RULES_PACKED_FILE_PATH,
+  serializeLoadOrderRuleRows,
+} from "../../utility/loadOrderRulesFile";
 
 type PackTablesTreeViewProps = {
   packPath: string;
@@ -69,6 +74,7 @@ export type CopyIntoSource = {
 };
 export type PackTablesTreeViewHandle = {
   openNewFlowDialog: () => void;
+  createLoadOrderRulesFile: () => void;
 };
 
 const isDBPackedFileName = (packFileName: string): boolean => parseDBTablePath(packFileName) != undefined;
@@ -254,6 +260,9 @@ const PackTablesTreeView = React.memo(
         setContextMenu(null);
         setActiveTreeTab("files");
         setIsNewFlowDialogOpen(true);
+      },
+      createLoadOrderRulesFile: () => {
+        void handleCreateLoadOrderRules();
       },
     }));
 
@@ -1174,6 +1183,46 @@ const PackTablesTreeView = React.memo(
       }
     };
 
+    /**
+     * Creates the pack's whmm\load_order.whmm and opens it.
+     *
+     * There is no name dialog because the path is fixed - a pack has one rules file or none - so an
+     * existing one is opened rather than silently overwritten.
+     */
+    const handleCreateLoadOrderRules = async () => {
+      setContextMenu(null);
+      if (!packData) {
+        props.showDialog(localized.viewerPackNotLoaded || "The pack is still loading. Please try again.", {
+          title: localized.viewerCreateFailed || "Create Failed",
+        });
+        return;
+      }
+
+      setActiveTreeTab("files");
+
+      const existingName = [...(packData.tables ?? []), ...Object.keys(packData.packedFiles ?? {}), ...unsavedFiles.map((file) => file.name)].find(
+        (fileName) => isLoadOrderRulesPackedFilePath(fileName),
+      );
+      if (existingName) {
+        props.onOpenPackedFile({ filePath: existingName, packPath: packData.packPath });
+        return;
+      }
+
+      const result = await window.api?.saveTextPackedFileEdits(
+        packData.packPath,
+        LOAD_ORDER_RULES_PACKED_FILE_PATH,
+        serializeLoadOrderRuleRows([]),
+      );
+      if (!result?.success) {
+        props.showDialog(result?.error || localized.viewerCreateFailed || "Create Failed", {
+          title: localized.viewerCreateFailed || "Create Failed",
+        });
+        return;
+      }
+
+      props.onOpenPackedFile({ filePath: LOAD_ORDER_RULES_PACKED_FILE_PATH, packPath: packData.packPath });
+    };
+
     const handleCreateNewTable = async () => {
       if (!packData) return;
 
@@ -1581,6 +1630,15 @@ const PackTablesTreeView = React.memo(
                     className="w-full text-left px-3 py-2 hover:bg-gray-700 text-white text-sm"
                   >
                     {localized.viewerAddNewFlow || "Add New Flow"}
+                  </button>
+                )}
+                {showAddNewFlowInContext && (
+                  <button
+                    type="button"
+                    onClick={() => void handleCreateLoadOrderRules()}
+                    className="w-full text-left px-3 py-2 hover:bg-gray-700 text-white text-sm"
+                  >
+                    {localized.viewerAddNewLoadOrderRules || "Add New Load Order Rules"}
                   </button>
                 )}
               </ContextMenuSubmenu>

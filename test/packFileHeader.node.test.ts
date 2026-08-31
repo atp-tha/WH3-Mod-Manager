@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { packedFileIndexHasStartpos, readPackHeader } from "../src/packFileHandler";
+import { packedFileIndexHasStartpos, readPackHeader, scanPackedFileIndex } from "../src/packFileHandler";
 
 const makeIndexEntry = (name: string, hasCompressionFlag: boolean) => {
   const metadata = Buffer.alloc(hasCompressionFlag ? 5 : 4);
@@ -36,6 +36,7 @@ describe("pack header file index metadata", () => {
         path: packPath,
         isMovie: false,
         hasStartpos: true,
+        hasLoadOrderRules: false,
         dependencyPacks: ["data.pack"],
       });
     } finally {
@@ -63,5 +64,45 @@ describe("pack header file index metadata", () => {
 
     expect(packedFileIndexHasStartpos(index, 1, true)).toBe(false);
     expect(packedFileIndexHasStartpos(index.subarray(0, 4), 1, true)).toBe(false);
+  });
+});
+
+describe("scanPackedFileIndex", () => {
+  it("spots the load order rules file in the same pass as startpos", () => {
+    const index = Buffer.concat([
+      makeIndexEntry("db\\units_tables\\data__", true),
+      makeIndexEntry("whmm\\load_order.whmm", true),
+      makeIndexEntry("campaigns\\main_warhammer\\startpos.esf", true),
+    ]);
+
+    expect(scanPackedFileIndex(index, 3, true)).toEqual({
+      hasStartpos: true,
+      hasLoadOrderRules: true,
+      loadOrderRulesFileName: "whmm\\load_order.whmm",
+    });
+  });
+
+  it("matches the rules file however the pack spells the path, and reports that spelling", () => {
+    const index = Buffer.concat([makeIndexEntry("WHMM/Load_Order.WHMM", true)]);
+    const scan = scanPackedFileIndex(index, 1, true);
+
+    expect(scan.hasLoadOrderRules).toBe(true);
+    // A targeted read looks the file up by its stored name, so the original casing has to survive.
+    expect(scan.loadOrderRulesFileName).toBe("WHMM/Load_Order.WHMM");
+  });
+
+  it("does not mistake a flow or a nested lookalike for it", () => {
+    const index = Buffer.concat([
+      makeIndexEntry("whmmflows\\thing.json", true),
+      makeIndexEntry("db\\whmm\\load_order.whmm", true),
+      makeIndexEntry("whmm\\notes.txt", true),
+    ]);
+
+    expect(scanPackedFileIndex(index, 3, true).hasLoadOrderRules).toBe(false);
+  });
+
+  it("reports neither for a pack holding nothing special", () => {
+    const index = Buffer.concat([makeIndexEntry("db\\units_tables\\data__", true)]);
+    expect(scanPackedFileIndex(index, 1, true)).toEqual({ hasStartpos: false, hasLoadOrderRules: false });
   });
 });

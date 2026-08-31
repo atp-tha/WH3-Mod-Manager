@@ -17,6 +17,7 @@ export const hideableMainWindowTabs: {
   { tab: "enabledMods", labelKey: "enabledModsCapitalized", fallbackLabel: "Enabled Mods" },
   { tab: "categories", labelKey: "categories", fallbackLabel: "Categories" },
   { tab: "presets", labelKey: "presetsTab", fallbackLabel: "Presets" },
+  { tab: "loadOrderRules", labelKey: "loadOrderRulesTab", fallbackLabel: "Load Order Rules" },
   { tab: "unitViewer", labelKey: "unitViewerTab", fallbackLabel: "Unit Viewer" },
   { tab: "buildings", labelKey: "buildingsTab", fallbackLabel: "Buildings" },
   { tab: "ancillaries", labelKey: "ancillariesTab", fallbackLabel: "Ancillaries" },

@@ -26,6 +26,7 @@ import {
   setAreModsEnabled,
 } from "../appSlice";
 import { getFilteredMods, getLoadOrderInsertionIndex, sortByNameAndLoadOrder } from "../modSortingHelpers";
+import { buildLoadOrderEdges } from "../loadOrderRules";
 import { FloatingOverlay } from "@floating-ui/react";
 import ModDropdown from "./ModDropdown";
 import { isModAlwaysEnabled } from "../modsHelpers";
@@ -72,6 +73,12 @@ type SharedModListViewOptions = {
   filter: string;
   isAuthorEnabled: boolean;
   isDev: boolean;
+  /**
+   * Passed rather than read from the registry in modSortingHelpers, because a useMemo cannot list a
+   * module variable as a dependency: a rule change would not invalidate the memo and the list would
+   * keep an order the rules no longer describe.
+   */
+  loadOrderEdges: LoadOrderEdges;
 };
 
 type ModListViewOptions = SharedModListViewOptions & { sortingType: SortingType };
@@ -86,11 +93,19 @@ type ModListViewOptions = SharedModListViewOptions & { sortingType: SortingType 
  * enabledMods directly, the same set placement mode writes its indices against.
  */
 const buildModListView = (sourceMods: Mod[], options: ModListViewOptions): ModListView => {
-  const { hiddenModNames, alwaysEnabledModNames, sortingType, customizableMods, filter, isAuthorEnabled, isDev } =
-    options;
+  const {
+    hiddenModNames,
+    alwaysEnabledModNames,
+    sortingType,
+    customizableMods,
+    filter,
+    isAuthorEnabled,
+    isDev,
+    loadOrderEdges,
+  } = options;
 
   const modsToOrder = sourceMods.filter((mod) => !hiddenModNames.has(mod.name) || alwaysEnabledModNames.has(mod.name));
-  const orderedMods = sortByNameAndLoadOrder(modsToOrder);
+  const orderedMods = sortByNameAndLoadOrder(modsToOrder, loadOrderEdges);
 
   let unfilteredMods = modRowSorting.getSortedMods(sourceMods, orderedMods, sortingType, customizableMods);
   if (isDev) {
@@ -214,13 +229,17 @@ const ModRows = memo((props: ModRowsProps) => {
   const currentPresetMods = useAppSelector((state) => state.app.currentPreset.mods);
   const hiddenModNames = useMemo(() => new Set(hiddenModNamesList), [hiddenModNamesList]);
   const alwaysEnabledModNames = useMemo(() => new Set(alwaysEnabledModNamesList), [alwaysEnabledModNamesList]);
+  // The accepted rules come from redux so every memo below can name them as a dependency.
+  const loadOrderRuleRules = useAppSelector((state) => state.app.loadOrderRulesResolution.rules);
+  const loadOrderEdges = useMemo(() => buildLoadOrderEdges(loadOrderRuleRules), [loadOrderRuleRules]);
+
   const enabledMods = useMemo(
     () => currentPresetMods.filter((iterMod) => iterMod.isEnabled || alwaysEnabledModNames.has(iterMod.name)),
     [alwaysEnabledModNames, currentPresetMods],
   );
   const canonicalEnabledMods = useMemo(
-    () => getVisibleMods(sortByNameAndLoadOrder(enabledMods), noHiddenModNames),
-    [enabledMods],
+    () => getVisibleMods(sortByNameAndLoadOrder(enabledMods, loadOrderEdges), noHiddenModNames),
+    [enabledMods, loadOrderEdges],
   );
   const presetMods = useMemo(
     () => (currentTab == "enabledMods" ? enabledMods : currentPresetMods),
@@ -241,7 +260,7 @@ const ModRows = memo((props: ModRowsProps) => {
     () => presetMods.filter((iterMod) => !hiddenModNames.has(iterMod.name) || alwaysEnabledModNames.has(iterMod.name)),
     [alwaysEnabledModNames, hiddenModNames, presetMods],
   );
-  const orderedMods = useMemo(() => sortByNameAndLoadOrder(modsToOrder), [modsToOrder]);
+  const orderedMods = useMemo(() => sortByNameAndLoadOrder(modsToOrder, loadOrderEdges), [modsToOrder, loadOrderEdges]);
   const loadOrderIndexByModName = useMemo(
     () => new Map(orderedMods.map((mod, index) => [mod.name, index])),
     [orderedMods],
@@ -261,8 +280,18 @@ const ModRows = memo((props: ModRowsProps) => {
       filter: loadOrderModName ? "" : filter,
       isAuthorEnabled,
       isDev,
+      loadOrderEdges,
     }),
-    [alwaysEnabledModNames, customizableMods, filter, hiddenModNames, isAuthorEnabled, isDev, loadOrderModName],
+    [
+      alwaysEnabledModNames,
+      customizableMods,
+      filter,
+      hiddenModNames,
+      isAuthorEnabled,
+      isDev,
+      loadOrderEdges,
+      loadOrderModName,
+    ],
   );
 
   const disabledModsView = useMemo(

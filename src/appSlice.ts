@@ -7,9 +7,16 @@ import { SortingType } from "./utility/modRowSorting";
 import {
   compareModNames,
   getSparseLoadOrderByModName,
+  setActiveLoadOrderEdges,
   sortModsAsInEntries,
   sortByNameAndLoadOrder,
 } from "./modSortingHelpers";
+import {
+  loadOrderPackNameKey,
+  loadOrderRuleKey,
+  normalizeLoadOrderPackName,
+  resolveLoadOrderRules,
+} from "./loadOrderRules";
 import {
   isPresetModEnabled,
   toPresetEntries,
@@ -30,6 +37,28 @@ import { DEFAULT_DB_TABLE_ROOT } from "./utility/packFileHelpers";
 import { uncategorizedCategoryName } from "./utility/categoryNames";
 
 const packFilePathKey = (path: string) => path.replaceAll("/", "\\").toLowerCase();
+
+/**
+ * Re-resolves the rules and republishes them.
+ *
+ * The result goes into state so React memos can depend on it, and into the module level registry so
+ * the many callers that sort without a redux connection - the used_mods.txt writer, preset helpers -
+ * see the same ordering. Both have to be updated together or the two would disagree.
+ */
+const refreshLoadOrderRules = (state: AppState) => {
+  const { edges, ...resolution } = resolveLoadOrderRules({
+    userRules: state.loadOrderRules,
+    modRules: state.modLoadOrderRules,
+    disabledRuleKeys: state.disabledModLoadOrderRules,
+    disabledPackNames: state.loadOrderRuleDisabledPacks,
+    // Every known pack, not just the enabled ones: a rule about a pack that is merely switched off
+    // is still a real rule, and applying edges to a list simply ignores packs the list lacks.
+    presentPackNames: state.currentPreset.mods.map((mod) => mod.name),
+  });
+
+  state.loadOrderRulesResolution = resolution;
+  setActiveLoadOrderEdges(edges);
+};
 
 const isMainWindowTabAvailable = (state: AppState, tab: MainWindowTab) => {
   if (isHideableMainWindowTab(tab) && state.hiddenMainWindowTabs.includes(tab)) return false;
@@ -56,6 +85,8 @@ const isMainWindowTabAvailable = (state: AppState, tab: MainWindowTab) => {
       return state.currentGame === "wh3";
     case "nodeEditor":
       return state.isFeaturesForModdersEnabled;
+    case "loadOrderRules":
+      return true;
     case "twui":
       return false;
     default:
@@ -188,6 +219,8 @@ const applyPresetEntriesToMods = (mods: Mod[], entries: PresetModEntry[]) => {
 };
 
 const setCurrentPresetToMods = (state: AppState, mods: Mod[]) => {
+  // Which packs exist decides which rules are live and which are reported as naming a missing pack,
+  // so the resolution is refreshed at the end of this function.
   const previousModsByName = new Map(state.currentPreset.mods.map((mod) => [mod.name, mod]));
   const workshopSubscriptionTimesByName = new Map<string, number>();
   for (const mod of mods) {
@@ -237,6 +270,9 @@ const setCurrentPresetToMods = (state: AppState, mods: Mod[]) => {
     }
   }
 
+  // Before sanitize, which sorts: the rules have to be current or it would pin today's positions
+  // against yesterday's ordering.
+  refreshLoadOrderRules(state);
   sanitizeEnabledModLoadOrders(state.currentPreset.mods);
 
   const appStartIndex = state.presets.findIndex((preset) => preset.name === "On App Start");
@@ -1206,9 +1242,16 @@ const appSlice = createSlice({
       state.categories = Array.from(categoriesFromMods);
       state.categoryColors = fromConfigAppState.categoryColors || {};
 
+      // Rules are stored per game, so a game switch arrives here as a wholesale replacement. Missing
+      // this would leave the previous game's rules quietly reordering the new game's list.
+      state.loadOrderRules = fromConfigAppState.loadOrderRules ?? [];
+      state.disabledModLoadOrderRules = fromConfigAppState.disabledModLoadOrderRules ?? [];
+      state.loadOrderRuleDisabledPacks = fromConfigAppState.loadOrderRuleDisabledPacks ?? [];
+
       findAlwaysEnabledMods(state.currentPreset.mods, fromConfigAppState.alwaysEnabledModNames).forEach(
         (mod) => (mod.isEnabled = true),
       );
+      refreshLoadOrderRules(state);
       sanitizeEnabledModLoadOrders(state.currentPreset.mods);
 
       state.wasOnboardingEverRun = fromConfigAppState.wasOnboardingEverRun;
@@ -1321,6 +1364,65 @@ const appSlice = createSlice({
         const loadOrder = loadOrderByModName.get(mod.name);
         if (loadOrder != null) mod.loadOrder = loadOrder;
       });
+    },
+    /**
+     * Adds one of the user's own rules. The pair is unique, so re-stating a pair the other way round
+     * replaces it rather than creating a contradiction the resolver would have to break.
+     */
+    addLoadOrderRule: (state: AppState, action: PayloadAction<LoadOrderRule>) => {
+      const before = normalizeLoadOrderPackName(action.payload.before);
+      const after = normalizeLoadOrderPackName(action.payload.after);
+      if (before === "" || after === "" || loadOrderPackNameKey(before) === loadOrderPackNameKey(after)) return;
+
+      const pairKey = [loadOrderPackNameKey(before), loadOrderPackNameKey(after)].sort().join("\t");
+      state.loadOrderRules = state.loadOrderRules.filter(
+        (rule) => [loadOrderPackNameKey(rule.before), loadOrderPackNameKey(rule.after)].sort().join("\t") !== pairKey,
+      );
+      state.loadOrderRules.push({ before, after });
+      refreshLoadOrderRules(state);
+    },
+    removeLoadOrderRule: (state: AppState, action: PayloadAction<LoadOrderRule>) => {
+      const targetKey = loadOrderRuleKey({ before: action.payload.before, after: action.payload.after });
+      state.loadOrderRules = state.loadOrderRules.filter(
+        (rule) => loadOrderRuleKey({ before: rule.before, after: rule.after }) !== targetKey,
+      );
+      refreshLoadOrderRules(state);
+    },
+    /**
+     * Switches one mod-supplied rule off. Stored as an opt-out key rather than a flag on the rule,
+     * because the rule lives in someone else's pack and is re-read from scratch on every scan.
+     */
+    setModLoadOrderRuleDisabled: (
+      state: AppState,
+      action: PayloadAction<{ rule: LoadOrderRule; isDisabled: boolean }>,
+    ) => {
+      const { rule, isDisabled } = action.payload;
+      if (!rule.sourcePackName) return;
+
+      const key = loadOrderRuleKey(rule);
+      const withoutKey = state.disabledModLoadOrderRules.filter((disabledKey) => disabledKey !== key);
+      state.disabledModLoadOrderRules = isDisabled ? [...withoutKey, key] : withoutKey;
+      refreshLoadOrderRules(state);
+    },
+    /** Ignores a pack's rules wholesale, which unlike ticking them off one by one also covers new ones. */
+    setLoadOrderRulePackDisabled: (
+      state: AppState,
+      action: PayloadAction<{ packName: string; isDisabled: boolean }>,
+    ) => {
+      const packName = normalizeLoadOrderPackName(action.payload.packName);
+      if (packName === "") return;
+
+      const key = loadOrderPackNameKey(packName);
+      const withoutPack = state.loadOrderRuleDisabledPacks.filter(
+        (disabledPack) => loadOrderPackNameKey(disabledPack) !== key,
+      );
+      state.loadOrderRuleDisabledPacks = action.payload.isDisabled ? [...withoutPack, packName] : withoutPack;
+      refreshLoadOrderRules(state);
+    },
+    /** Replaces every mod-supplied rule; the scan that produced them saw the whole mod list. */
+    setModLoadOrderRules: (state: AppState, action: PayloadAction<Record<string, LoadOrderRule[]>>) => {
+      state.modLoadOrderRules = action.payload;
+      refreshLoadOrderRules(state);
     },
     resetModLoadOrderAll: (state: AppState) => {
       state.currentPreset.mods.forEach((mod) => {
@@ -1868,6 +1970,11 @@ export const {
   setCurrentGame,
   setCurrentGameNaive,
   resetModLoadOrder,
+  addLoadOrderRule,
+  removeLoadOrderRule,
+  setModLoadOrderRuleDisabled,
+  setLoadOrderRulePackDisabled,
+  setModLoadOrderRules,
   resetModLoadOrderAll,
   toggleAlwaysEnabledMods,
   toggleAlwaysHiddenMods,

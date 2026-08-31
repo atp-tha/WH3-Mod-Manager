@@ -42,10 +42,12 @@ import { clearPackDataStoreForPack } from "./packDataStore";
 import { clearPreparedTableForPack } from "./tablePrepCache";
 import { getDefaultSaveAsPackName, getPackFileInventory, getPreferredTreeTab, hasLoadedDBTable } from "./viewerHelpers";
 import GlobalSearchPanel from "./GlobalSearchPanel";
+import LoadOrderRulesView from "./LoadOrderRulesView";
+import { isLoadOrderRulesPackedFilePath } from "@/src/utility/loadOrderRulesFile";
 import { useKeepMountedOnceActive } from "../useKeepMountedOnceActive";
 import type { GlobalSearchDbResult, GlobalSearchLocResult, GlobalSearchResult } from "@/src/globalSearch/types";
 
-type ViewerTabKind = "db" | "flow" | "file";
+type ViewerTabKind = "db" | "flow" | "file" | "loadOrderRules";
 
 type ViewerTab = {
   id: string;
@@ -567,17 +569,34 @@ const ModsViewer = memo(() => {
     [localized.viewerFlowPrefix],
   );
 
-  const buildPackedFileTabCandidate = useCallback((filePath: string, packPath: string): ViewerTabCandidate => {
-    const packLabel = getPackNameFromPath(packPath) ?? packPath;
-    const shortFileName = filePath.split(/[\\/]/).pop() ?? filePath;
-    return {
-      fileKey: `file|${packPath}|${filePath}`,
-      title: `${shortFileName}${packLabel ? ` | ${packLabel}` : ""}`,
-      kind: "file",
-      packPath,
-      filePath,
-    };
-  }, []);
+  const buildPackedFileTabCandidate = useCallback(
+    (filePath: string, packPath: string): ViewerTabCandidate => {
+      const packLabel = getPackNameFromPath(packPath) ?? packPath;
+      const shortFileName = filePath.split(/[\\/]/).pop() ?? filePath;
+
+      // The rules file is text on disk but gets its own two column editor, the same way a flow is
+      // json on disk but opens in the node editor.
+      if (isLoadOrderRulesPackedFilePath(filePath)) {
+        const rulesLabel = localized.viewerLoadOrderRulesTitle || "Load Order Rules";
+        return {
+          fileKey: `loadOrderRules|${packPath}`,
+          title: `${rulesLabel}${packLabel ? ` | ${packLabel}` : ""}`,
+          kind: "loadOrderRules",
+          packPath,
+          filePath,
+        };
+      }
+
+      return {
+        fileKey: `file|${packPath}|${filePath}`,
+        title: `${shortFileName}${packLabel ? ` | ${packLabel}` : ""}`,
+        kind: "file",
+        packPath,
+        filePath,
+      };
+    },
+    [localized.viewerLoadOrderRulesTitle],
+  );
 
   const openOrActivatePackTab = useCallback(
     (packPath: string) => {
@@ -1749,6 +1768,11 @@ const ModsViewer = memo(() => {
     treeViewRefs.current[activePackPath ?? ""]?.openNewFlowDialog();
   };
 
+  const handleAddLoadOrderRules = () => {
+    setIsFileMenuOpen(false);
+    treeViewRefs.current[activePackPath ?? ""]?.createLoadOrderRulesFile();
+  };
+
   const handleOpenDBPack = () => {
     if (isDBPackOpen) return;
     setIsFileMenuOpen(false);
@@ -2312,6 +2336,14 @@ const ModsViewer = memo(() => {
                         <button
                           type="button"
                           role="menuitem"
+                          onClick={handleAddLoadOrderRules}
+                          className="block w-full whitespace-nowrap px-3 py-2 text-left text-sm text-gray-200 hover:bg-gray-700"
+                        >
+                          {localized.viewerAddNewLoadOrderRules || "Add New Load Order Rules"}
+                        </button>
+                        <button
+                          type="button"
+                          role="menuitem"
                           onClick={handleOpenDBPack}
                           disabled={isDBPackOpen}
                           className={
@@ -2553,6 +2585,12 @@ const ModsViewer = memo(() => {
                       </div>
                     ) : activeTab.kind === "flow" && activeTab.flowFile ? (
                       <NodeEditor currentFile={activeTab.flowFile} currentPack={activeTab.packPath} />
+                    ) : activeTab.kind === "loadOrderRules" && activeTab.filePath ? (
+                      <LoadOrderRulesView
+                        packPath={activeTab.packPath}
+                        filePath={activeTab.filePath}
+                        showDialog={showDialog}
+                      />
                     ) : activeTab.kind === "file" && activeTab.filePath ? (
                       <PackFileView
                         packPath={activeTab.packPath}

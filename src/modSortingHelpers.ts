@@ -1,12 +1,54 @@
 import { decodeModText } from "./utility/htmlEntities";
+import { applyLoadOrderEdges, EMPTY_LOAD_ORDER_EDGES, type LoadOrderEdges } from "./loadOrderRules";
 
 const collator = new Intl.Collator("en");
 
 /** Works on anything with a name and an optional load order, so preset entries can use it too. */
 type Sortable = { name: string; loadOrder?: number };
 
-export function sortByNameAndLoadOrder<T extends Sortable>(mods: T[]): T[] {
-  const sortedMods = getModsSortedByName(mods);
+/**
+ * The rules currently in force, for the many callers that sort without being in a position to pass
+ * them - main process handlers, the used_mods.txt writer, the preset and config helpers.
+ *
+ * React must NOT rely on this: a memo cannot list a module variable as a dependency, so a component
+ * that let the rules arrive this way would keep showing a stale order. Those callers pass `edges`
+ * explicitly instead, from redux, which is what makes the change visible to their dependency arrays.
+ */
+let activeLoadOrderEdges: LoadOrderEdges = EMPTY_LOAD_ORDER_EDGES;
+
+export const setActiveLoadOrderEdges = (edges: LoadOrderEdges) => {
+  activeLoadOrderEdges = edges;
+};
+
+export const getActiveLoadOrderEdges = () => activeLoadOrderEdges;
+
+/** Test helper; module level state would otherwise leak from one test into the next. */
+export const resetActiveLoadOrderEdges = () => {
+  activeLoadOrderEdges = EMPTY_LOAD_ORDER_EDGES;
+};
+
+/**
+ * The automatic order: by name, then refined so it also satisfies the load order rules.
+ *
+ * Rules only reorder what they actually constrain, so with none set this is exactly the name sort
+ * it has always been.
+ */
+export function getModsSortedByNameAndRules<T extends { name: string }>(
+  mods: T[],
+  edges: LoadOrderEdges = activeLoadOrderEdges,
+): T[] {
+  return applyLoadOrderEdges(getModsSortedByName(mods), edges);
+}
+
+/**
+ * Rules refine the automatic order below; the pinned mods spliced in afterwards are untouched by
+ * them, which is what keeps a manual position winning over any rule.
+ */
+export function sortByNameAndLoadOrder<T extends Sortable>(
+  mods: T[],
+  edges: LoadOrderEdges = activeLoadOrderEdges,
+): T[] {
+  const sortedMods = getModsSortedByNameAndRules(mods, edges);
   const orderedMods = sortedMods
     .filter((mod) => mod.loadOrder != null)
     .sort((modF, modS) => (modF.loadOrder as number) - (modS.loadOrder as number));

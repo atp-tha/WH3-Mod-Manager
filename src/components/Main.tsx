@@ -15,6 +15,7 @@ import UnitViewerTab from "./UnitViewerTab";
 import BuildingsTab from "./buildings/BuildingsTab";
 import AncillariesTab from "./ancillaries/AncillariesTab";
 import EsfMapTab from "./EsfMapTab";
+import LoadOrderRulesTab from "./loadOrderRules/LoadOrderRulesTab";
 
 type MainProps = {
   scrollElement: RefObject<HTMLDivElement>;
@@ -35,6 +36,7 @@ const Main = (props: MainProps) => {
   const isBuildingsTab = currentTab == "buildings" && currentGame === "wh3";
   const isAncillariesTab = currentTab == "ancillaries" && currentGame === "wh3";
   const isMapTab = currentTab == "map" && currentGame === "wh3";
+  const isLoadOrderRulesTab = currentTab == "loadOrderRules";
   // Stateful tabs stay mounted once opened so switching tabs preserves their in-memory work.
   const isNodeEditorMounted = useKeepMountedOnceActive(isNodeEditorTab);
   const isUnitViewerMounted = useKeepMountedOnceActive(isUnitViewerTab);
@@ -113,7 +115,9 @@ const Main = (props: MainProps) => {
       )}
 
       {!isKeptMountedTab &&
-        ((currentTab == "presets" && <PresetsTab />) || (currentTab == "categories" && <Categories></Categories>) || (
+        ((currentTab == "presets" && <PresetsTab />) ||
+          (isLoadOrderRulesTab && <LoadOrderRulesTab />) ||
+          (currentTab == "categories" && <Categories></Categories>) || (
           <div className="grid grid-cols-12 text-white max-w-[100rem] mx-auto">
             <div className="col-span-10">
               <ModRows scrollElement={props.scrollElement} />

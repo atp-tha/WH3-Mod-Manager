@@ -197,7 +197,7 @@ export const getPackFileInventory = (
 
 export interface PackTabTreeState {
   packPath: string;
-  openTabs: ReadonlyArray<{ id: string; kind: "db" | "flow" | "file" }>;
+  openTabs: ReadonlyArray<{ id: string; kind: "db" | "flow" | "file" | "loadOrderRules" }>;
   activeTabId: string | null;
 }
 
@@ -213,9 +213,12 @@ export const getPreferredTreeTab = (
     ? getPackFileInventory(packData, unsavedPacksDataByPath[packTab.packPath] ?? [])
     : undefined;
 
-  return activeTab?.kind === "flow" || activeTab?.kind === "file" || (!inventory?.hasDBTables && inventory?.hasFiles)
-    ? "files"
-    : "db";
+  // The rules file sits under whmm\, so like a flow or any other packed file it belongs to the
+  // Files side of the tree rather than DB Tables.
+  const isNonDBTab =
+    activeTab?.kind === "flow" || activeTab?.kind === "file" || activeTab?.kind === "loadOrderRules";
+
+  return isNonDBTab || (!inventory?.hasDBTables && inventory?.hasFiles) ? "files" : "db";
 };
 
 /** True when switching to this table can be satisfied entirely from renderer memory. */

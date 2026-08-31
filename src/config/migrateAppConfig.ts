@@ -45,6 +45,9 @@ export const emptyGameConfig = (): GameConfig => ({
   currentPreset: { name: "", mods: [], version: 2 },
   presets: [],
   modUserData: {},
+  loadOrderRules: [],
+  disabledModLoadOrderRules: [],
+  loadOrderRuleDisabledPacks: [],
 });
 
 const emptyGames = () =>
@@ -106,6 +109,10 @@ const migrateGame = (legacy: LegacyAppConfig, game: SupportedGames): GameConfig 
       .filter((preset) => preset && preset.name != null)
       .map((preset) => legacyPresetToSavedPreset(preset, isSnapshotPreset(preset.name))),
     modUserData,
+    // Rules did not exist before this version, so there is nothing to carry across.
+    loadOrderRules: [],
+    disabledModLoadOrderRules: [],
+    loadOrderRuleDisabledPacks: [],
   };
 };
 

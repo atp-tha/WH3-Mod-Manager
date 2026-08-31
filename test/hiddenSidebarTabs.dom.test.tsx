@@ -14,6 +14,7 @@ const localizedStrings = {
   enabledModsCapitalized: "Enabled Mods",
   categories: "Categories",
   presetsTab: "Presets",
+  loadOrderRulesTab: "Load Order Rules",
   skillsViewer: "Skill Trees",
   techTreesTab: "Tech Trees",
   unitViewerTab: "Unit Viewer",
@@ -72,7 +73,9 @@ describe("hidden sidebar tabs", () => {
     fireEvent.keyDown(document, { key: "1", ctrlKey: true });
     fireEvent.keyDown(document, { key: "0", ctrlKey: true });
 
-    expect(store.getState().app.currentTab).toBe("map");
+    // Tenth in the sidebar order with every tab shown. The number is positional, so inserting a tab
+    // above this one moves which tab Ctrl+10 reaches.
+    expect(store.getState().app.currentTab).toBe("ancillaries");
   });
 
   it("never hides All Mods", () => {
