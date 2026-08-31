@@ -106,11 +106,13 @@ const LoadOrderRulesTab = () => {
 
   const addRule = (otherPackName: string, isBefore: boolean) => {
     if (!selectedMod) return;
+    // The mod whose panel this rule was added from is the one the rule positions.
+    const subjectPackName = selectedMod.name;
     dispatch(
       addLoadOrderRule(
         isBefore
-          ? { before: selectedMod.name, after: otherPackName }
-          : { before: otherPackName, after: selectedMod.name },
+          ? { before: selectedMod.name, after: otherPackName, subjectPackName }
+          : { before: otherPackName, after: selectedMod.name, subjectPackName },
       ),
     );
   };
@@ -119,6 +121,11 @@ const LoadOrderRulesTab = () => {
     const key = loadOrderRuleKey(view.rule);
     const isPinOverridden = view.status === "active" && pinOverriddenKeys.has(key);
     const statusLabel = statusLabels[view.status];
+    // Which mod gives way is now what a rule decides, and two rules that read alike can behave
+    // differently, so a rule that moves the other mod says so rather than leaving it invisible.
+    const movesOtherMod =
+      selectedMod != undefined &&
+      loadOrderPackNameKey(view.rule.subjectPackName) !== loadOrderPackNameKey(selectedMod.name);
 
     return (
       <div
@@ -163,6 +170,17 @@ const LoadOrderRulesTab = () => {
         )}
 
         {statusLabel !== "" && <span className="shrink-0 text-xs text-amber-400">{statusLabel}</span>}
+        {movesOtherMod && (
+          <span
+            className="shrink-0 text-xs text-gray-400"
+            title={
+              localized.loadOrderRulesMovesHint ||
+              "This rule belongs to that mod, so it is the one that moves. Add the rule from this mod's side to move this one instead."
+            }
+          >
+            {(localized.loadOrderRulesMoves || "moves {{pack}}").replace("{{pack}}", view.rule.subjectPackName)}
+          </span>
+        )}
         {isPinOverridden && (
           <span
             className="shrink-0 text-xs text-amber-400"

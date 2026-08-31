@@ -69,9 +69,10 @@ describe("loadOrderRuleRowsToRules", () => {
       { relation: "AFTER", packName: "earlier.pack" },
     ];
 
+    // A pack's file only ever positions that pack, whichever way round the row reads.
     expect(loadOrderRuleRowsToRules(rows, "mine.pack")).toEqual([
-      { before: "mine.pack", after: "later.pack", sourcePackName: "mine.pack" },
-      { before: "earlier.pack", after: "mine.pack", sourcePackName: "mine.pack" },
+      { before: "mine.pack", after: "later.pack", sourcePackName: "mine.pack", subjectPackName: "mine.pack" },
+      { before: "earlier.pack", after: "mine.pack", sourcePackName: "mine.pack", subjectPackName: "mine.pack" },
     ]);
   });
 
@@ -96,7 +97,7 @@ describe("round trip", () => {
     const text = serializeLoadOrderRuleRows(rows);
 
     expect(parseLoadOrderRulesFile(text, "mine.pack").rules).toEqual([
-      { before: "other.pack", after: "mine.pack", sourcePackName: "mine.pack" },
+      { before: "other.pack", after: "mine.pack", sourcePackName: "mine.pack", subjectPackName: "mine.pack" },
     ]);
   });
 

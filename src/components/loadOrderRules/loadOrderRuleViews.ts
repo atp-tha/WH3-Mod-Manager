@@ -35,7 +35,11 @@ export const collectAllLoadOrderRules = (
   userRules: LoadOrderRule[],
   modRules: Record<string, LoadOrderRule[]>,
 ): LoadOrderRule[] => [
-  ...userRules.map((rule) => ({ before: rule.before, after: rule.after })),
+  ...userRules.map((rule) => ({
+    before: rule.before,
+    after: rule.after,
+    subjectPackName: rule.subjectPackName,
+  })),
   ...Object.entries(modRules).flatMap(([sourcePackName, rules]) => rules.map((rule) => ({ ...rule, sourcePackName }))),
 ];
 

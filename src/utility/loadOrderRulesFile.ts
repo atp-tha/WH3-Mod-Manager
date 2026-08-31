@@ -85,9 +85,20 @@ export function loadOrderRuleRowsToRules(rows: LoadOrderRuleRow[], ownPackName: 
   return rows
     .filter((row) => row.packName.toLowerCase() !== normalizedOwnPackName.toLowerCase())
     .map((row) =>
+      // A pack's file only ever positions that pack, which is exactly why two columns is enough.
       row.relation === "BEFORE"
-        ? { before: normalizedOwnPackName, after: row.packName, sourcePackName: normalizedOwnPackName }
-        : { before: row.packName, after: normalizedOwnPackName, sourcePackName: normalizedOwnPackName },
+        ? {
+            before: normalizedOwnPackName,
+            after: row.packName,
+            sourcePackName: normalizedOwnPackName,
+            subjectPackName: normalizedOwnPackName,
+          }
+        : {
+            before: row.packName,
+            after: normalizedOwnPackName,
+            sourcePackName: normalizedOwnPackName,
+            subjectPackName: normalizedOwnPackName,
+          },
     );
 }
 

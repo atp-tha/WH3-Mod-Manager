@@ -93,7 +93,9 @@ describe("load order rules in the mod list", () => {
     expect(visibleModNames(container)).toEqual(["alpha.pack", "beta.pack", "gamma.pack"]);
 
     act(() => {
-      testStore.dispatch(addLoadOrderRule({ before: "gamma.pack", after: "alpha.pack" }));
+      testStore.dispatch(
+        addLoadOrderRule({ before: "gamma.pack", after: "alpha.pack", subjectPackName: "gamma.pack" }),
+      );
     });
 
     // gamma steps in front of alpha; beta is named by no rule and keeps its place after alpha.
@@ -108,7 +110,14 @@ describe("load order rules in the mod list", () => {
     act(() => {
       testStore.dispatch(
         setModLoadOrderRules({
-          "gamma.pack": [{ before: "gamma.pack", after: "alpha.pack", sourcePackName: "gamma.pack" }],
+          "gamma.pack": [
+            {
+              before: "gamma.pack",
+              after: "alpha.pack",
+              sourcePackName: "gamma.pack",
+              subjectPackName: "gamma.pack",
+            },
+          ],
         }),
       );
     });
@@ -123,7 +132,9 @@ describe("load order rules in the mod list", () => {
 
     act(() => {
       // Names a pack that is not installed, so it can never take effect.
-      testStore.dispatch(addLoadOrderRule({ before: "nowhere.pack", after: "alpha.pack" }));
+      testStore.dispatch(
+        addLoadOrderRule({ before: "nowhere.pack", after: "alpha.pack", subjectPackName: "nowhere.pack" }),
+      );
     });
 
     await waitFor(() => expect(visibleModNames(container)).toEqual(["alpha.pack", "beta.pack"]));

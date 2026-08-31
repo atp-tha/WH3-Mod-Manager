@@ -1970,5 +1970,7 @@
   "viewerLoadOrderRulesPack": "Pack name",
   "viewerLoadOrderRulesAddRow": "Add rule",
   "viewerLoadOrderRulesEmpty": "No rules yet. Add one to tell WHMM where this pack should load.",
-  "viewerLoadOrderRulesExists": "This pack already has a load order rules file."
+  "viewerLoadOrderRulesExists": "This pack already has a load order rules file.",
+  "loadOrderRulesMoves": "moves {{pack}}",
+  "loadOrderRulesMovesHint": "This rule belongs to that mod, so it is the one that moves. Add the rule from this mod's side to move this one instead."
 }

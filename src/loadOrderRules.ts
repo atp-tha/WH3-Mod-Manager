@@ -13,11 +13,24 @@ export interface LoadOrderRule {
   after: string;
   /** Absent = a rule the user made. Set = the pack whose whmm\load_order.whmm supplied it. */
   sourcePackName?: string;
+  /**
+   * The mod this rule is about, and so the only one the sort will move to satisfy it.
+   *
+   * Always one of `before` or `after`. Without it the sort only sees a pair and reorders
+   * whichever mods happen to produce a valid order - which is how a rule on one mod ended up
+   * dragging its targets, and even uninvolved mods, around it.
+   *
+   * Distinct from `sourcePackName`: that is who *wrote* the rule, this is who it *positions*.
+   * They match for a pack-shipped rule and differ for most rules the user makes.
+   */
+  subjectPackName: string;
 }
 
 /** Accepted rules in the shape the sort wants: earlier pack -> packs that must follow it. */
 export interface LoadOrderEdges {
   successorsByPackName: Map<string, Set<string>>;
+  /** The packs some rule is about. Everything else is an anchor the sort will not move. */
+  subjectPackNames: Set<string>;
   edgeCount: number;
 }
 
@@ -63,6 +76,7 @@ export interface ResolvedLoadOrderRules {
 
 export const EMPTY_LOAD_ORDER_EDGES: LoadOrderEdges = {
   successorsByPackName: new Map(),
+  subjectPackNames: new Set(),
   edgeCount: 0,
 };
 
@@ -80,7 +94,7 @@ export const loadOrderPackNameKey = (packName: string): string => normalizeLoadO
  * Identifies one mod-supplied rule across restarts and across the pack being updated, which is what
  * lets "the user switched this rule off" outlive a re-read of someone else's pack.
  */
-export const loadOrderRuleKey = (rule: LoadOrderRule): string =>
+export const loadOrderRuleKey = (rule: Pick<LoadOrderRule, "before" | "after" | "sourcePackName">): string =>
   [
     rule.sourcePackName ? loadOrderPackNameKey(rule.sourcePackName) : "",
     loadOrderPackNameKey(rule.before),
@@ -93,6 +107,7 @@ const packPairKey = (rule: LoadOrderRule): string =>
 
 export const buildLoadOrderEdges = (rules: LoadOrderRule[]): LoadOrderEdges => {
   const successorsByPackName = new Map<string, Set<string>>();
+  const subjectPackNames = new Set<string>();
   let edgeCount = 0;
 
   for (const rule of rules) {
@@ -109,9 +124,18 @@ export const buildLoadOrderEdges = (rules: LoadOrderRule[]): LoadOrderEdges => {
       successors.add(afterKey);
       edgeCount++;
     }
+
+    const subjectKey = loadOrderPackNameKey(rule.subjectPackName);
+    // A subject naming neither end would make the rule unsatisfiable by moving it, so such a rule
+    // falls back to both ends being movable rather than silently doing nothing.
+    if (subjectKey === beforeKey || subjectKey === afterKey) subjectPackNames.add(subjectKey);
+    else {
+      subjectPackNames.add(beforeKey);
+      subjectPackNames.add(afterKey);
+    }
   }
 
-  return { successorsByPackName, edgeCount };
+  return { successorsByPackName, subjectPackNames, edgeCount };
 };
 
 /** Whether `toKey` can already be reached from `fromKey`, i.e. whether adding fromKey->toKey loops. */
@@ -224,31 +248,37 @@ export function resolveLoadOrderRules(input: ResolveLoadOrderRulesInput): Resolv
     return compareRulesForDeterminism(first, second);
   });
 
-  const edges: LoadOrderEdges = { successorsByPackName: new Map(), edgeCount: 0 };
+  // Built up one edge at a time only so each candidate can be tested against what has been accepted
+  // so far; the returned edge set is rebuilt from the surviving rules in one place below.
+  const acceptedEdges: LoadOrderEdges = {
+    successorsByPackName: new Map(),
+    subjectPackNames: new Set(),
+    edgeCount: 0,
+  };
   const rules: LoadOrderRule[] = [];
 
   for (const rule of candidates) {
     const beforeKey = loadOrderPackNameKey(rule.before);
     const afterKey = loadOrderPackNameKey(rule.after);
 
-    if (canReach(edges, afterKey, beforeKey)) {
+    if (canReach(acceptedEdges, afterKey, beforeKey)) {
       conflicts.push({ kind: "cycle", rule });
       continue;
     }
 
-    let successors = edges.successorsByPackName.get(beforeKey);
+    let successors = acceptedEdges.successorsByPackName.get(beforeKey);
     if (!successors) {
       successors = new Set();
-      edges.successorsByPackName.set(beforeKey, successors);
+      acceptedEdges.successorsByPackName.set(beforeKey, successors);
     }
     if (!successors.has(afterKey)) {
       successors.add(afterKey);
-      edges.edgeCount++;
+      acceptedEdges.edgeCount++;
     }
     rules.push(rule);
   }
 
-  return { rules, edges, conflicts, disabledRules, supersededRules };
+  return { rules, edges: buildLoadOrderEdges(rules), conflicts, disabledRules, supersededRules };
 }
 
 /**
@@ -280,13 +310,81 @@ const buildTransitiveSuccessors = (edges: LoadOrderEdges): Map<string, Set<strin
   return transitiveSuccessors;
 };
 
+/** Where one mover can legally sit among the packs already placed. */
+const getAllowedRange = <T extends { name: string }>(
+  placed: T[],
+  mustFollow: Set<string> | undefined,
+  mustPrecede: Set<string> | undefined,
+) => {
+  let earliest = 0;
+  let latest = placed.length;
+
+  for (let index = 0; index < placed.length; index++) {
+    const placedKey = loadOrderPackNameKey(placed[index].name);
+    if (mustFollow?.has(placedKey)) earliest = Math.max(earliest, index + 1);
+    if (mustPrecede?.has(placedKey)) latest = Math.min(latest, index);
+  }
+
+  return { earliest, latest };
+};
+
+/** One placement pass: the movers are lifted out and reinserted, everything else holds its place. */
+function placeMovers<T extends { name: string }>(
+  sortedItems: T[],
+  moverKeys: Set<string>,
+  transitiveSuccessors: Map<string, Set<string>>,
+  transitivePredecessors: Map<string, Set<string>>,
+): T[] {
+  const result = sortedItems.filter((item) => !moverKeys.has(loadOrderPackNameKey(item.name)));
+
+  sortedItems.forEach((item, basePosition) => {
+    const key = loadOrderPackNameKey(item.name);
+    if (!moverKeys.has(key)) return;
+
+    const { earliest, latest } = getAllowedRange(
+      result,
+      transitivePredecessors.get(key),
+      transitiveSuccessors.get(key),
+    );
+
+    // Aim for where the mod already sat and give way only as far as the rules demand, so a mod that
+    // must precede something far down the list lands just above it rather than at the very top.
+    const preferred = Math.min(basePosition, result.length);
+    result.splice(Math.max(earliest, Math.min(latest, preferred)), 0, item);
+  });
+
+  return result;
+}
+
+/** The rules this order breaks, as before/after key pairs. */
+const findViolatedEdges = <T extends { name: string }>(order: T[], edges: LoadOrderEdges) => {
+  const positionByKey = new Map<string, number>();
+  order.forEach((item, index) => {
+    const key = loadOrderPackNameKey(item.name);
+    if (!positionByKey.has(key)) positionByKey.set(key, index);
+  });
+
+  const violated: { beforeKey: string; afterKey: string }[] = [];
+  for (const [beforeKey, afterKeys] of edges.successorsByPackName) {
+    const beforePosition = positionByKey.get(beforeKey);
+    if (beforePosition == undefined) continue;
+
+    for (const afterKey of afterKeys) {
+      const afterPosition = positionByKey.get(afterKey);
+      if (afterPosition != undefined && beforePosition > afterPosition) violated.push({ beforeKey, afterKey });
+    }
+  }
+
+  return violated;
+};
+
 /**
  * Reorders an already-sorted list so it also satisfies the rules, moving as little as possible.
  *
- * Each pack is placed as late as the rules allow rather than as early as possible. That is the whole
- * difference between this and a textbook topological sort, and it is what stops a rule between two
- * packs from disturbing a third: a pack no rule mentions keeps its place, and one that is merely
- * waiting for another pack does not get overtaken by everything that happens to be unblocked.
+ * Only the packs a rule is *about* are moved. Every other pack keeps its place, which is what stops
+ * a rule on one mod from dragging its targets - or a bystander named by nothing at all - around it.
+ * A textbook topological sort has no notion of which mod a rule belongs to and reorders whatever
+ * produces a valid order, which is not what someone editing one mod's rules is asking for.
  */
 export function applyLoadOrderEdges<T extends { name: string }>(sortedItems: T[], edges: LoadOrderEdges): T[] {
   if (edges.edgeCount === 0 || sortedItems.length < 2) return sortedItems;
@@ -301,30 +399,31 @@ export function applyLoadOrderEdges<T extends { name: string }>(sortedItems: T[]
     }
   }
 
-  const result: T[] = [];
+  const moverKeys = new Set(edges.subjectPackNames);
+  let result = placeMovers(sortedItems, moverKeys, transitiveSuccessors, transitivePredecessors);
 
-  for (const item of sortedItems) {
-    const key = loadOrderPackNameKey(item.name);
-    const mustPrecede = transitiveSuccessors.get(key);
-    const mustFollow = transitivePredecessors.get(key);
+  /*
+   * Moving only the subjects is not always enough. A mod's own rules can imply an order between two
+   * *other* mods - "A after m2" plus "A before x1" means m2 must precede x1 - and if neither of those
+   * is a subject, nothing is allowed to move them. So anything still broken has its two ends promoted
+   * to movers and the pass runs again.
+   *
+   * This converges on every constrained pack being movable, which always satisfies an acyclic rule
+   * set, and resolveLoadOrderRules has already removed the cycles. In practice it runs at most once.
+   */
+  for (;;) {
+    const violated = findViolatedEdges(result, edges);
+    if (violated.length === 0) break;
 
-    // The overwhelming majority of packs are named by no rule at all and simply keep their place.
-    if ((!mustPrecede || mustPrecede.size === 0) && (!mustFollow || mustFollow.size === 0)) {
-      result.push(item);
-      continue;
+    const moverCountBefore = moverKeys.size;
+    for (const { beforeKey, afterKey } of violated) {
+      moverKeys.add(beforeKey);
+      moverKeys.add(afterKey);
     }
+    // No new movers means the rules contradict each other; keep the best order rather than loop.
+    if (moverKeys.size === moverCountBefore) break;
 
-    let earliest = 0;
-    let latest = result.length;
-    for (let index = 0; index < result.length; index++) {
-      const placedKey = loadOrderPackNameKey(result[index].name);
-      if (mustFollow?.has(placedKey)) earliest = Math.max(earliest, index + 1);
-      if (mustPrecede?.has(placedKey)) latest = Math.min(latest, index);
-    }
-
-    // earliest can only exceed latest for edges that contradict each other, which resolveLoadOrderRules
-    // has already removed. Clamping keeps a hand-built set from losing the item entirely.
-    result.splice(Math.max(earliest, Math.min(latest, result.length)), 0, item);
+    result = placeMovers(sortedItems, moverKeys, transitiveSuccessors, transitivePredecessors);
   }
 
   return result;

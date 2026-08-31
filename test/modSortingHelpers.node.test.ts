@@ -210,7 +210,9 @@ describe("sorting by the author", () => {
 });
 
 describe("sortByNameAndLoadOrder with rules", () => {
-  const buildEdges = (rules: { before: string; after: string }[]) => buildLoadOrderEdges(rules);
+  /** Every rule here positions its `before` pack; that pack is the only one the sort may move. */
+  const buildEdges = (rules: { before: string; after: string }[]) =>
+    buildLoadOrderEdges(rules.map((rule) => ({ ...rule, subjectPackName: rule.before })));
   const namesOf = (mods: Mod[]) => mods.map((mod) => mod.name);
 
   afterEach(() => {

@@ -1244,7 +1244,11 @@ const appSlice = createSlice({
 
       // Rules are stored per game, so a game switch arrives here as a wholesale replacement. Missing
       // this would leave the previous game's rules quietly reordering the new game's list.
-      state.loadOrderRules = fromConfigAppState.loadOrderRules ?? [];
+      //
+      // A rule with no subject predates the field and cannot be repaired - which of the two mods it
+      // was about is simply not recorded - so it is dropped rather than silently behaving unlike
+      // every other rule. The feature was never released, so this only affects local test data.
+      state.loadOrderRules = (fromConfigAppState.loadOrderRules ?? []).filter((rule) => rule && rule.subjectPackName);
       state.disabledModLoadOrderRules = fromConfigAppState.disabledModLoadOrderRules ?? [];
       state.loadOrderRuleDisabledPacks = fromConfigAppState.loadOrderRuleDisabledPacks ?? [];
 
@@ -1374,14 +1378,20 @@ const appSlice = createSlice({
       const after = normalizeLoadOrderPackName(action.payload.after);
       if (before === "" || after === "" || loadOrderPackNameKey(before) === loadOrderPackNameKey(after)) return;
 
+      // The subject decides which of the two mods moves, so it has to be one of them.
+      const subjectPackName = normalizeLoadOrderPackName(action.payload.subjectPackName);
+      const subjectKey = loadOrderPackNameKey(subjectPackName);
+      if (subjectKey !== loadOrderPackNameKey(before) && subjectKey !== loadOrderPackNameKey(after)) return;
+
       const pairKey = [loadOrderPackNameKey(before), loadOrderPackNameKey(after)].sort().join("\t");
       state.loadOrderRules = state.loadOrderRules.filter(
         (rule) => [loadOrderPackNameKey(rule.before), loadOrderPackNameKey(rule.after)].sort().join("\t") !== pairKey,
       );
-      state.loadOrderRules.push({ before, after });
+      // Re-stating a pair replaces it, so the most recent edit also decides which mod moves.
+      state.loadOrderRules.push({ before, after, subjectPackName });
       refreshLoadOrderRules(state);
     },
-    removeLoadOrderRule: (state: AppState, action: PayloadAction<LoadOrderRule>) => {
+    removeLoadOrderRule: (state: AppState, action: PayloadAction<Pick<LoadOrderRule, "before" | "after">>) => {
       const targetKey = loadOrderRuleKey({ before: action.payload.before, after: action.payload.after });
       state.loadOrderRules = state.loadOrderRules.filter(
         (rule) => loadOrderRuleKey({ before: rule.before, after: rule.after }) !== targetKey,
@@ -1394,7 +1404,7 @@ const appSlice = createSlice({
      */
     setModLoadOrderRuleDisabled: (
       state: AppState,
-      action: PayloadAction<{ rule: LoadOrderRule; isDisabled: boolean }>,
+      action: PayloadAction<{ rule: Pick<LoadOrderRule, "before" | "after" | "sourcePackName">; isDisabled: boolean }>,
     ) => {
       const { rule, isDisabled } = action.payload;
       if (!rule.sourcePackName) return;
