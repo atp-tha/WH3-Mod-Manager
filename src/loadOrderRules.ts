@@ -101,6 +101,22 @@ export const loadOrderRuleKey = (rule: Pick<LoadOrderRule, "before" | "after" | 
     loadOrderPackNameKey(rule.after),
   ].join("\t");
 
+/** Replaces one pack's shipped rules while retaining the rules from every other pack. */
+export function replaceModLoadOrderRules(
+  modRules: Record<string, LoadOrderRule[]>,
+  sourcePackName: string,
+  rules: LoadOrderRule[],
+): Record<string, LoadOrderRule[]> {
+  const sourcePackKey = loadOrderPackNameKey(sourcePackName);
+  if (sourcePackKey === "") return modRules;
+
+  const nextModRules = Object.fromEntries(
+    Object.entries(modRules).filter(([packName]) => loadOrderPackNameKey(packName) !== sourcePackKey),
+  );
+  if (rules.length > 0) nextModRules[sourcePackName] = rules;
+  return nextModRules;
+}
+
 /** Both directions of a pair share one key, so a rule and its reverse collide deliberately. */
 const packPairKey = (rule: LoadOrderRule): string =>
   [loadOrderPackNameKey(rule.before), loadOrderPackNameKey(rule.after)].sort().join("\t");

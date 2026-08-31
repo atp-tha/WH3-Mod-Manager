@@ -327,6 +327,7 @@ import getPackTableData from "./utility/frontend/packDataHandling";
 import { findLatestScriptLog } from "./utility/logPaths";
 import { decodePackedTextBuffer, getPackedFileMimeType, getPackedFileViewerKind } from "./utility/packFileViewing";
 import { refreshMainLoadOrderRules } from "./mainLoadOrderRules";
+import { replaceModLoadOrderRules } from "./loadOrderRules";
 import {
   isLoadOrderRulesPackedFilePath,
   LOAD_ORDER_RULES_PACKED_FILE_PATH,
@@ -1397,6 +1398,40 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
     const remainingPaths = deletedFilePaths.filter((deletedPath) => normalizePackFilePathKey(deletedPath) !== fileKey);
     if (remainingPaths.length > 0) appData.deletedPackFilePaths[packPath] = remainingPaths;
     else delete appData.deletedPackFilePaths[packPath];
+  };
+  const getPackNameForLoadOrderRules = (packPath: string, fallbackPackName?: string) => {
+    const mod = appData.allMods.find((candidate) => packPathKey(candidate.path) === packPathKey(packPath));
+    return mod?.name ?? findPackByPath(packPath)?.name ?? fallbackPackName;
+  };
+  const publishModLoadOrderRules = () => {
+    refreshMainLoadOrderRules();
+    mainWindow?.webContents.send("setModLoadOrderRules", appData.modLoadOrderRules);
+  };
+  const updateSavedPackLoadOrderRules = (
+    packPath: string,
+    unsavedFiles: PackedFile[],
+    deletedFilePaths: string[],
+    fallbackPackName?: string,
+  ) => {
+    const savedRulesFile = unsavedFiles.find((file) => isLoadOrderRulesPackedFilePath(file.name));
+    const deletedRulesFile = deletedFilePaths.some((filePath) => isLoadOrderRulesPackedFilePath(filePath));
+    if (!savedRulesFile && !deletedRulesFile) return;
+
+    const packName = getPackNameForLoadOrderRules(packPath, fallbackPackName);
+    if (!packName) return;
+
+    let rules: LoadOrderRule[] = [];
+    if (savedRulesFile && !deletedRulesFile) {
+      const text = savedRulesFile.text ?? (savedRulesFile.buffer ? decodePackedTextBuffer(savedRulesFile.buffer) : "");
+      const parsed = parseLoadOrderRulesFile(text, packName);
+      if (parsed.errors.length > 0) {
+        console.log(`saved load order rules in ${packName} have ${parsed.errors.length} bad line(s):`, parsed.errors);
+      }
+      rules = parsed.rules;
+    }
+
+    appData.modLoadOrderRules = replaceModLoadOrderRules(appData.modLoadOrderRules, packName, rules);
+    publishModLoadOrderRules();
   };
   const materializePackedFileForStaging = async (
     sourcePackPath: string,
@@ -6890,6 +6925,7 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
       }
       if (replacedOriginal) {
         await invalidateCachedPackData(savePath);
+        updateSavedPackLoadOrderRules(savePath, unsavedFiles, deletedPaths, pack.name);
         broadcastSavedPackData(packPath, unsavedFiles, deletedPaths);
       }
       // Clear unsaved files for this pack
@@ -6983,6 +7019,7 @@ export const registerIpcMainListeners = (mainWindow: Electron.CrossProcessExport
         console.log(`Pack saved to: ${savePath}`);
         // Whatever was read from the pack we just wrote over describes the old file now.
         if (overwriteExisting) await invalidateCachedPackData(savePath);
+        updateSavedPackLoadOrderRules(savePath, unsavedFiles, deletedPaths);
         // Clear unsaved files for this pack
         delete appData.unsavedPacksData[packPath];
         delete appData.deletedPackFilePaths[packPath];

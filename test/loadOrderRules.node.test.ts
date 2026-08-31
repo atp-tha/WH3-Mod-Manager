@@ -7,6 +7,7 @@ import {
   loadOrderPackNameKey,
   loadOrderRuleKey,
   normalizeLoadOrderPackName,
+  replaceModLoadOrderRules,
   resolveLoadOrderRules,
   type LoadOrderRule,
 } from "../src/loadOrderRules";
@@ -73,6 +74,24 @@ describe("loadOrderRuleKey", () => {
     expect(loadOrderRuleKey({ before: "a.pack", after: "b.pack" })).not.toBe(
       loadOrderRuleKey({ before: "a.pack", after: "b.pack", sourcePackName: "c.pack" }),
     );
+  });
+});
+
+describe("replaceModLoadOrderRules", () => {
+  it("replaces only the saved pack's rules and removes it when the file is empty", () => {
+    const previous = {
+      "one.pack": [{ before: "one.pack", after: "two.pack", subjectPackName: "one.pack" }],
+      "three.pack": [{ before: "three.pack", after: "four.pack", subjectPackName: "three.pack" }],
+    };
+    const next = replaceModLoadOrderRules(previous, "ONE.PACK", [
+      { before: "one.pack", after: "four.pack", subjectPackName: "one.pack" },
+    ]);
+
+    expect(next).toEqual({
+      "ONE.PACK": [{ before: "one.pack", after: "four.pack", subjectPackName: "one.pack" }],
+      "three.pack": previous["three.pack"],
+    });
+    expect(replaceModLoadOrderRules(next, "one.pack", [])).toEqual({ "three.pack": previous["three.pack"] });
   });
 });
 
