@@ -113,7 +113,7 @@ export function parseLoadOrderRulesFile(
 const RULES_FILE_HEADER = [
   "# WHMM load order rules for this pack.",
   "# One rule per line: BEFORE or AFTER, a tab, then the other pack's name.",
-  "# BEFORE means this pack loads earlier than that one (and so that one overrides this one).",
+  "# BEFORE means this pack appears higher in the load order (with a lower order number), so it overrides that one.",
 ].join("\n");
 
 export function serializeLoadOrderRuleRows(rows: LoadOrderRuleRow[]): string {

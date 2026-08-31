@@ -78,7 +78,8 @@ const LoadOrderRulesTab = () => {
   }, [mods, filter, isEnabledOnly, allRules, modRules, mutedPacks]);
 
   const withRules = summaries.filter((summary) => summary.ruleCount > 0);
-  const withoutRules = summaries.filter((summary) => summary.ruleCount === 0);
+  const enabledWithoutRules = summaries.filter((summary) => summary.ruleCount === 0 && summary.mod.isEnabled);
+  const disabledWithoutRules = summaries.filter((summary) => summary.ruleCount === 0 && !summary.mod.isEnabled);
 
   const selectedMod = useMemo(
     () =>
@@ -333,7 +334,14 @@ const LoadOrderRulesTab = () => {
           ) : (
             <>
               {renderModGroup(localized.loadOrderRulesWithRules || "With rules", withRules)}
-              {renderModGroup(localized.loadOrderRulesWithoutRules || "Without rules", withoutRules)}
+              {renderModGroup(
+                localized.loadOrderRulesEnabledWithoutRules || "Enabled without rules",
+                enabledWithoutRules,
+              )}
+              {renderModGroup(
+                localized.loadOrderRulesDisabledWithoutRules || "Disabled without rules",
+                disabledWithoutRules,
+              )}
             </>
           )}
         </aside>
@@ -353,13 +361,15 @@ const LoadOrderRulesTab = () => {
               <div className="flex min-h-0 flex-1 gap-4">
                 {renderRuleColumn(
                   localized.loadOrderRulesLoadsBefore || "Loads before these mods",
-                  localized.loadOrderRulesLoadsBeforeHint || "Higher in the list, so those mods override this one.",
+                  localized.loadOrderRulesLoadsBeforeHint ||
+                    "This mod appears higher in the visible mod list (with a lower load-order number), so it overrides those mods.",
                   ruleViews.before,
                   true,
                 )}
                 {renderRuleColumn(
                   localized.loadOrderRulesLoadsAfter || "Loads after these mods",
-                  localized.loadOrderRulesLoadsAfterHint || "Lower in the list, so this one overrides those mods.",
+                  localized.loadOrderRulesLoadsAfterHint ||
+                    "Those mods appear higher in the visible mod list (with lower load-order numbers), so they override this mod.",
                   ruleViews.after,
                   false,
                 )}

@@ -178,7 +178,7 @@ const LoadOrderRulesView = memo(({ packPath, filePath, showDialog }: LoadOrderRu
         <div className="text-xs text-gray-400">
           {(
             localized.viewerLoadOrderRulesHint ||
-            "Each rule is about {{pack}}. BEFORE means it loads earlier than the named pack, so that pack overrides it."
+            "Each rule is about {{pack}}. BEFORE means this pack appears higher in the visible mod list (with a lower load-order number) than the named pack, so it overrides the named pack when both contain the same file."
           ).replace("{{pack}}", packName)}
         </div>
       </div>

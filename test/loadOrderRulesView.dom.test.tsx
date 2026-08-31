@@ -82,6 +82,16 @@ describe("load order rules viewer", () => {
     expect(saveTextPackedFileEdits).not.toHaveBeenCalled();
   });
 
+  it("explains that a BEFORE pack overrides the pack below it", async () => {
+    renderView();
+
+    expect(
+      await screen.findByText(
+        /BEFORE means this pack appears higher in the visible mod list \(with a lower load-order number\)/,
+      ),
+    ).toBeInTheDocument();
+  });
+
   it("offers pack names from the viewer catalog", async () => {
     const { input, user } = renderView();
 
