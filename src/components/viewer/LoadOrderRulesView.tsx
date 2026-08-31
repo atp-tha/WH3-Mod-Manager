@@ -178,7 +178,7 @@ const LoadOrderRulesView = memo(({ packPath, filePath, showDialog }: LoadOrderRu
               </tr>
             )}
             {rows.map((row, index) => (
-              <tr key={`${index}-${row.relation}-${row.packName}`} className="border-t border-gray-800">
+              <tr key={index} className="border-t border-gray-800">
                 <td className="px-3 py-1.5">
                   <select
                     value={row.relation}
