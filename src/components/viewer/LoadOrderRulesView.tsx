@@ -1,4 +1,5 @@
 import React, { memo, useContext, useEffect, useMemo, useRef, useState } from "react";
+import Creatable from "react-select/creatable";
 
 import { useAppSelector } from "@/src/hooks";
 import { makeSelectCurrentPackData, makeSelectCurrentPackUnsavedFiles } from "./viewerSelectors";
@@ -14,6 +15,16 @@ import {
   type LoadOrderRulesFileError,
 } from "@/src/utility/loadOrderRulesFile";
 import { normalizeLoadOrderPackName } from "@/src/loadOrderRules";
+import selectStyle from "@/src/styles/selectStyle";
+
+type PackNameOption = {
+  value: string;
+  label: string;
+};
+
+type ViewerPackCatalogEntry = {
+  name: string;
+};
 
 type LoadOrderRulesViewProps = {
   packPath: string;
@@ -35,12 +46,12 @@ const LoadOrderRulesView = memo(({ packPath, filePath, showDialog }: LoadOrderRu
   const packData = useAppSelector((state) => selectCurrentPackData(state, packPath));
   const unsavedFiles = useAppSelector((state) => selectCurrentPackUnsavedFiles(state, packPath));
   const isFeaturesForModdersEnabled = useAppSelector((state) => state.app.isFeaturesForModdersEnabled);
-  const knownMods = useAppSelector((state) => state.app.currentPreset.mods);
 
   const [rows, setRows] = useState<LoadOrderRuleRow[]>([]);
   const [parseErrors, setParseErrors] = useState<LoadOrderRulesFileError[]>([]);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [error, setError] = useState("");
+  const [packCatalog, setPackCatalog] = useState<ViewerPackCatalogEntry[]>([]);
   const hydratedKeyRef = useRef<string | null>(null);
 
   const packName = getPackNameFromPath(packPath) ?? packPath;
@@ -52,6 +63,25 @@ const LoadOrderRulesView = memo(({ packPath, filePath, showDialog }: LoadOrderRu
     if (unsavedMatch) return unsavedMatch;
     return packData?.packedFiles?.[filePath];
   }, [filePath, packData, unsavedFiles]);
+
+  useEffect(() => {
+    let isCancelled = false;
+
+    const loadPackCatalog = async () => {
+      try {
+        const result = await window.api?.getViewerPackCatalog();
+        if (isCancelled || !result?.success) return;
+        setPackCatalog(result.packs ?? []);
+      } catch (catalogError) {
+        console.error("Load order rules: could not load the pack catalog:", catalogError);
+      }
+    };
+
+    void loadPackCatalog();
+    return () => {
+      isCancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let isCancelled = false;
@@ -108,16 +138,28 @@ const LoadOrderRulesView = memo(({ packPath, filePath, showDialog }: LoadOrderRu
     }
   };
 
-  const updateRow = (index: number, changes: Partial<LoadOrderRuleRow>) =>
-    persist(rows.map((row, rowIndex) => (rowIndex === index ? { ...row, ...changes } : row)));
+  const updateRow = (index: number, changes: Partial<LoadOrderRuleRow>) => {
+    const currentRow = rows[index];
+    if (!currentRow) return;
+
+    const nextRow = { ...currentRow, ...changes };
+    if (nextRow.relation === currentRow.relation && nextRow.packName === currentRow.packName) return;
+
+    void persist(rows.map((row, rowIndex) => (rowIndex === index ? nextRow : row)));
+  };
 
   const knownPackNames = useMemo(
     () =>
-      knownMods
-        .map((mod) => mod.name)
-        .filter((name) => name.toLowerCase() !== packName.toLowerCase())
-        .sort((first, second) => first.localeCompare(second)),
-    [knownMods, packName],
+      [
+        ...new Set(
+          packCatalog.map((pack) => pack.name).filter((name) => name && name.toLowerCase() !== packName.toLowerCase()),
+        ),
+      ].sort((first, second) => first.localeCompare(second)),
+    [packCatalog, packName],
+  );
+  const knownPackOptions = useMemo<PackNameOption[]>(
+    () => knownPackNames.map((name) => ({ value: name, label: name })),
+    [knownPackNames],
   );
 
   if (status === "loading") {
@@ -150,12 +192,6 @@ const LoadOrderRulesView = memo(({ packPath, filePath, showDialog }: LoadOrderRu
           ))}
         </div>
       )}
-
-      <datalist id="load-order-rules-pack-names">
-        {knownPackNames.map((name) => (
-          <option key={name} value={name} />
-        ))}
-      </datalist>
 
       <div className="min-h-0 flex-1 overflow-y-auto rounded border border-gray-700">
         <table className="w-full text-sm">
@@ -193,16 +229,26 @@ const LoadOrderRulesView = memo(({ packPath, filePath, showDialog }: LoadOrderRu
                   </select>
                 </td>
                 <td className="px-3 py-1.5">
-                  <input
-                    type="text"
-                    list="load-order-rules-pack-names"
-                    value={row.packName}
-                    disabled={!canEdit}
-                    onChange={(event) =>
-                      setRows(rows.map((r, i) => (i === index ? { ...r, packName: event.target.value } : r)))
+                  <Creatable<PackNameOption>
+                    inputId={`load-order-rules-pack-name-${index}`}
+                    options={knownPackOptions}
+                    value={row.packName ? { value: row.packName, label: row.packName } : null}
+                    isDisabled={!canEdit}
+                    isClearable
+                    styles={selectStyle}
+                    onChange={(selectedOption) =>
+                      updateRow(index, { packName: normalizeLoadOrderPackName(selectedOption?.value ?? "") })
                     }
-                    onBlur={(event) => updateRow(index, { packName: normalizeLoadOrderPackName(event.target.value) })}
-                    className="w-full rounded bg-gray-700 px-2 py-1 text-white disabled:opacity-50"
+                    onCreateOption={(inputValue) =>
+                      updateRow(index, { packName: normalizeLoadOrderPackName(inputValue) })
+                    }
+                    onBlur={(event) => {
+                      // react-select clears its search input after a selection. The selection/create handlers
+                      // already persist those changes; only commit a non-empty free-form value here.
+                      if (event.currentTarget.value !== "") {
+                        updateRow(index, { packName: normalizeLoadOrderPackName(event.currentTarget.value) });
+                      }
+                    }}
                   />
                 </td>
                 <td className="px-2 py-1.5">

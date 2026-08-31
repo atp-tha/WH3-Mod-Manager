@@ -11,12 +11,23 @@ import LocalizationContext from "../src/localizationContext";
 import LoadOrderRulesView from "../src/components/viewer/LoadOrderRulesView";
 
 describe("load order rules viewer", () => {
-  it("keeps the pack name input focused while typing", async () => {
+  const renderView = () => {
     const user = userEvent.setup();
     const packPath = "C:\\mods\\rules.pack";
     const filePath = "whmm\\load_order.whmm";
     const saveTextPackedFileEdits = vi.fn().mockResolvedValue({ success: true });
-    window.api = { saveTextPackedFileEdits } as unknown as NonNullable<Window["api"]>;
+    const getViewerPackCatalog = vi.fn().mockResolvedValue({
+      success: true,
+      packs: [
+        {
+          path: "C:\\mods\\available.pack",
+          name: "available.pack",
+          isEnabled: false,
+          isInData: false,
+        },
+      ],
+    });
+    window.api = { saveTextPackedFileEdits, getViewerPackCatalog } as unknown as NonNullable<Window["api"]>;
 
     const store = configureStore({
       reducer: { app: appReducer },
@@ -55,10 +66,36 @@ describe("load order rules viewer", () => {
       </Provider>,
     );
 
-    const input = await screen.findByDisplayValue("other.pack");
+    return {
+      input: document.getElementById("load-order-rules-pack-name-0") as HTMLInputElement,
+      saveTextPackedFileEdits,
+      user,
+    };
+  };
+
+  it("does not save when the pack name selection is unchanged", async () => {
+    const { input, saveTextPackedFileEdits, user } = renderView();
+
+    await user.click(input);
+    await user.click(screen.getByText("Load Order Rules"));
+
+    expect(saveTextPackedFileEdits).not.toHaveBeenCalled();
+  });
+
+  it("offers pack names from the viewer catalog", async () => {
+    const { input, user } = renderView();
+
+    await user.click(input);
+
+    expect(await screen.findByText("available.pack")).toBeInTheDocument();
+  });
+
+  it("keeps the editable pack name selection focused while typing", async () => {
+    const { input, user } = renderView();
+
     await user.type(input, "x");
 
-    expect(input).toHaveValue("other.packx");
+    expect(input).toHaveValue("x");
     expect(input).toHaveFocus();
   });
 });
