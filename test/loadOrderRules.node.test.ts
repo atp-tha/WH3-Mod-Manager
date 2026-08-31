@@ -234,7 +234,45 @@ describe("applyLoadOrderEdges", () => {
     const edges = buildLoadOrderEdges([{ before: "c.pack", after: "a.pack" }]);
     const sorted = applyLoadOrderEdges(named(["a.pack", "b.pack", "c.pack", "d.pack"]), edges);
 
-    expect(namesOf(sorted)).toEqual(["b.pack", "c.pack", "a.pack", "d.pack"]);
+    // c steps in front of a; b and d are named by no rule and must not be dragged along with them.
+    expect(namesOf(sorted)).toEqual(["c.pack", "a.pack", "b.pack", "d.pack"]);
+  });
+
+  /**
+   * The case that exposed this: a textbook topological sort emits whatever is unblocked first, so a
+   * rule between two packs sent an unrelated third pack to the top of the list.
+   */
+  it("does not send an unrelated pack to the front when a rule blocks the first one", () => {
+    const edges = buildLoadOrderEdges([{ before: "ovn_araby.pack", after: "!b_mixer.pack" }]);
+    const sorted = applyLoadOrderEdges(named(["!b_mixer.pack", "groovy_mct.pack", "ovn_araby.pack"]), edges);
+
+    expect(namesOf(sorted)).toEqual(["ovn_araby.pack", "!b_mixer.pack", "groovy_mct.pack"]);
+  });
+
+  it("keeps an unrelated pack in place no matter where it sits in the list", () => {
+    const edges = buildLoadOrderEdges([{ before: "z.pack", after: "a.pack" }]);
+
+    expect(namesOf(applyLoadOrderEdges(named(["a.pack", "m.pack", "z.pack"]), edges))).toEqual([
+      "z.pack",
+      "a.pack",
+      "m.pack",
+    ]);
+    expect(namesOf(applyLoadOrderEdges(named(["a.pack", "z.pack", "m.pack"]), edges))).toEqual([
+      "z.pack",
+      "a.pack",
+      "m.pack",
+    ]);
+  });
+
+  it("honours a rule that is only implied by two others", () => {
+    // p before u and u before s means p must also precede s, even though no rule says so directly.
+    const edges = buildLoadOrderEdges([
+      { before: "p.pack", after: "u.pack" },
+      { before: "u.pack", after: "s.pack" },
+    ]);
+    const sorted = applyLoadOrderEdges(named(["s.pack", "p.pack", "u.pack"]), edges);
+
+    expect(namesOf(sorted)).toEqual(["p.pack", "u.pack", "s.pack"]);
   });
 
   it("keeps unconstrained packs in their original order", () => {

@@ -251,110 +251,80 @@ export function resolveLoadOrderRules(input: ResolveLoadOrderRulesInput): Resolv
   return { rules, edges, conflicts, disabledRules, supersededRules };
 }
 
-/** Indices, smallest first. Kept tiny and local; the alternative is sorting the ready set every pop. */
-class MinIndexHeap {
-  private readonly values: number[] = [];
+/**
+ * Everything each pack must precede, following the rules through as many hops as they chain.
+ *
+ * The closure matters because a rule can be implied rather than stated: with "p before u" and
+ * "u before s", p must also precede s, and a placement that only knew the stated pairs could put p
+ * after s and then have nowhere legal left to put u.
+ */
+const buildTransitiveSuccessors = (edges: LoadOrderEdges): Map<string, Set<string>> => {
+  const transitiveSuccessors = new Map<string, Set<string>>();
 
-  get size(): number {
-    return this.values.length;
-  }
+  for (const startKey of edges.successorsByPackName.keys()) {
+    const reached = new Set<string>();
+    const stack = [...(edges.successorsByPackName.get(startKey) ?? [])];
 
-  push(value: number): void {
-    const values = this.values;
-    values.push(value);
-    let index = values.length - 1;
-    while (index > 0) {
-      const parent = (index - 1) >> 1;
-      if (values[parent] <= values[index]) break;
-      [values[parent], values[index]] = [values[index], values[parent]];
-      index = parent;
+    while (stack.length > 0) {
+      const key = stack.pop() as string;
+      // Also the guard that keeps a hand-built cyclic edge set from looping forever.
+      if (reached.has(key)) continue;
+      reached.add(key);
+      for (const next of edges.successorsByPackName.get(key) ?? []) stack.push(next);
     }
+
+    reached.delete(startKey);
+    transitiveSuccessors.set(startKey, reached);
   }
 
-  pop(): number {
-    const values = this.values;
-    const top = values[0];
-    const last = values.pop() as number;
-    if (values.length > 0) {
-      values[0] = last;
-      let index = 0;
-      for (;;) {
-        const left = index * 2 + 1;
-        const right = left + 1;
-        let smallest = index;
-        if (left < values.length && values[left] < values[smallest]) smallest = left;
-        if (right < values.length && values[right] < values[smallest]) smallest = right;
-        if (smallest === index) break;
-        [values[smallest], values[index]] = [values[index], values[smallest]];
-        index = smallest;
-      }
-    }
-    return top;
-  }
-}
+  return transitiveSuccessors;
+};
 
 /**
- * Reorders an already-sorted list so it also satisfies the rules.
+ * Reorders an already-sorted list so it also satisfies the rules, moving as little as possible.
  *
- * The tie-break is the item's position in the input, so anything the rules do not constrain keeps
- * exactly the order it arrived in - which is how "rules refine the name sort" stays true rather than
- * the rules imposing an order of their own.
+ * Each pack is placed as late as the rules allow rather than as early as possible. That is the whole
+ * difference between this and a textbook topological sort, and it is what stops a rule between two
+ * packs from disturbing a third: a pack no rule mentions keeps its place, and one that is merely
+ * waiting for another pack does not get overtaken by everything that happens to be unblocked.
  */
 export function applyLoadOrderEdges<T extends { name: string }>(sortedItems: T[], edges: LoadOrderEdges): T[] {
   if (edges.edgeCount === 0 || sortedItems.length < 2) return sortedItems;
 
-  const indicesByKey = new Map<string, number[]>();
-  sortedItems.forEach((item, index) => {
-    const key = loadOrderPackNameKey(item.name);
-    const indices = indicesByKey.get(key);
-    if (indices) indices.push(index);
-    else indicesByKey.set(key, [index]);
-  });
-
-  const successorIndices: number[][] = sortedItems.map(() => []);
-  const incomingCount = new Int32Array(sortedItems.length);
-  let usedEdgeCount = 0;
-
-  for (const [beforeKey, afterKeys] of edges.successorsByPackName) {
-    const beforeIndices = indicesByKey.get(beforeKey);
-    if (!beforeIndices) continue;
-
+  const transitiveSuccessors = buildTransitiveSuccessors(edges);
+  const transitivePredecessors = new Map<string, Set<string>>();
+  for (const [beforeKey, afterKeys] of transitiveSuccessors) {
     for (const afterKey of afterKeys) {
-      const afterIndices = indicesByKey.get(afterKey);
-      if (!afterIndices) continue;
-
-      for (const beforeIndex of beforeIndices) {
-        for (const afterIndex of afterIndices) {
-          successorIndices[beforeIndex].push(afterIndex);
-          incomingCount[afterIndex]++;
-          usedEdgeCount++;
-        }
-      }
+      const predecessors = transitivePredecessors.get(afterKey);
+      if (predecessors) predecessors.add(beforeKey);
+      else transitivePredecessors.set(afterKey, new Set([beforeKey]));
     }
-  }
-
-  if (usedEdgeCount === 0) return sortedItems;
-
-  const ready = new MinIndexHeap();
-  for (let index = 0; index < sortedItems.length; index++) {
-    if (incomingCount[index] === 0) ready.push(index);
   }
 
   const result: T[] = [];
-  while (ready.size > 0) {
-    const index = ready.pop();
-    result.push(sortedItems[index]);
-    for (const successor of successorIndices[index]) {
-      if (--incomingCount[successor] === 0) ready.push(successor);
-    }
-  }
 
-  // resolveLoadOrderRules already removed every cycle, so this only guards against a caller that
-  // built edges by hand. Anything still held back keeps its original position rather than vanishing.
-  if (result.length !== sortedItems.length) {
-    sortedItems.forEach((item, index) => {
-      if (incomingCount[index] > 0) result.push(item);
-    });
+  for (const item of sortedItems) {
+    const key = loadOrderPackNameKey(item.name);
+    const mustPrecede = transitiveSuccessors.get(key);
+    const mustFollow = transitivePredecessors.get(key);
+
+    // The overwhelming majority of packs are named by no rule at all and simply keep their place.
+    if ((!mustPrecede || mustPrecede.size === 0) && (!mustFollow || mustFollow.size === 0)) {
+      result.push(item);
+      continue;
+    }
+
+    let earliest = 0;
+    let latest = result.length;
+    for (let index = 0; index < result.length; index++) {
+      const placedKey = loadOrderPackNameKey(result[index].name);
+      if (mustFollow?.has(placedKey)) earliest = Math.max(earliest, index + 1);
+      if (mustPrecede?.has(placedKey)) latest = Math.min(latest, index);
+    }
+
+    // earliest can only exceed latest for edges that contradict each other, which resolveLoadOrderRules
+    // has already removed. Clamping keeps a hand-built set from losing the item entirely.
+    result.splice(Math.max(earliest, Math.min(latest, result.length)), 0, item);
   }
 
   return result;

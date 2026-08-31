@@ -42,9 +42,9 @@ describe("load order rule reducers", () => {
     expect(next.loadOrderRules).toEqual([{ before: "c.pack", after: "a.pack" }]);
     expect(next.loadOrderRulesResolution.rules).toHaveLength(1);
     expect(sortByNameAndLoadOrder(next.currentPreset.mods).map((mod) => mod.name)).toEqual([
-      "b.pack",
       "c.pack",
       "a.pack",
+      "b.pack",
     ]);
   });
 
@@ -94,7 +94,11 @@ describe("load order rule reducers", () => {
     it("applies them without the user doing anything", () => {
       const next = withModRules();
       expect(next.loadOrderRulesResolution.rules).toHaveLength(1);
-      expect(sortByNameAndLoadOrder(next.currentPreset.mods)[0].name).toBe("b.pack");
+      expect(sortByNameAndLoadOrder(next.currentPreset.mods).map((mod) => mod.name)).toEqual([
+        "c.pack",
+        "a.pack",
+        "b.pack",
+      ]);
     });
 
     it("switches one off and keeps it listed so it can come back", () => {

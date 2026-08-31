@@ -226,7 +226,7 @@ describe("sortByNameAndLoadOrder with rules", () => {
     const mods = [createMod({ name: "a.pack" }), createMod({ name: "b.pack" }), createMod({ name: "c.pack" })];
     const edges = buildEdges([{ before: "c.pack", after: "a.pack" }]);
 
-    expect(namesOf(sortByNameAndLoadOrder(mods, edges))).toEqual(["b.pack", "c.pack", "a.pack"]);
+    expect(namesOf(sortByNameAndLoadOrder(mods, edges))).toEqual(["c.pack", "a.pack", "b.pack"]);
   });
 
   it("keeps a manually pinned mod at its position even when a rule wants it elsewhere", () => {

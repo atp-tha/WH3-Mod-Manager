@@ -96,7 +96,8 @@ describe("load order rules in the mod list", () => {
       testStore.dispatch(addLoadOrderRule({ before: "gamma.pack", after: "alpha.pack" }));
     });
 
-    await waitFor(() => expect(visibleModNames(container)).toEqual(["beta.pack", "gamma.pack", "alpha.pack"]));
+    // gamma steps in front of alpha; beta is named by no rule and keeps its place after alpha.
+    await waitFor(() => expect(visibleModNames(container)).toEqual(["gamma.pack", "alpha.pack", "beta.pack"]));
   });
 
   it("re-sorts when a mod's own rules arrive from the pack scan", async () => {
@@ -112,7 +113,7 @@ describe("load order rules in the mod list", () => {
       );
     });
 
-    await waitFor(() => expect(visibleModNames(container)[2]).toBe("alpha.pack"));
+    await waitFor(() => expect(visibleModNames(container)).toEqual(["gamma.pack", "alpha.pack", "beta.pack"]));
   });
 
   it("leaves the order alone when the rules resolve to nothing", async () => {
