@@ -1865,7 +1865,11 @@ async function executeReverseReferenceLookupNode(
   }
 
   // Parse selected reverse table and includeBaseGame from textValue
-  const parsed = getNodeConfig<{ selectedReverseTable?: string; includeBaseGame?: boolean }>(config, textValue);
+  const parsed = getNodeConfig<{
+    selectedReverseTable?: string;
+    includeBaseGame?: boolean;
+    connectedTableName?: string;
+  }>(config, textValue);
   if (!parsed) {
     return { success: false, error: "Invalid node configuration" };
   }
@@ -1896,10 +1900,13 @@ async function executeReverseReferenceLookupNode(
     }
   }
 
-  // Get the input table name to find reverse references
-  let inputTableName = "";
+  // A lookup/filter node can emit a generated table name while retaining the schema identity of
+  // the table it was derived from. Use that identity for reference matching; generated names are
+  // not present in DB field metadata.
+  let inputTableName = parsed.connectedTableName?.trim() || "";
+  inputTableName = inputTableName.replace(/^db\\/, "").replace(/\\.*$/, "");
   if (inputData.tables.length > 0) {
-    inputTableName = inputData.tables[0].name.replace(/^db\\/, "").replace(/\\.*$/, "");
+    inputTableName ||= inputData.tables[0].name.replace(/^db\\/, "").replace(/\\.*$/, "");
   }
 
   // If no reverse table is selected, try to auto-select if there's only one option

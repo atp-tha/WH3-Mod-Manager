@@ -75,6 +75,7 @@ export const serializeNodeConfigForExecution = (node: SerializedNode): string =>
     return JSON.stringify({
       selectedReverseTable: (node.data as any).selectedReverseTable || "",
       includeBaseGame: (node.data as any).includeBaseGame !== false,
+      connectedTableName: (node.data as any).connectedTableName || "",
     });
   }
   if (node.type === "groupedcolumnstotext") {

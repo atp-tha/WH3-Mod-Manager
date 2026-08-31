@@ -1222,6 +1222,7 @@ export const prepareNodeConfig = (node: SerializedNodeGraph["nodes"][number]): u
       return {
         selectedReverseTable: (node.data as any).selectedReverseTable || "",
         includeBaseGame: (node.data as any).includeBaseGame !== false,
+        connectedTableName: (node.data as any).connectedTableName || "",
       };
     case "groupedcolumnstotext":
       return {
